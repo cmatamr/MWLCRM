@@ -1,0 +1,328 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+/// Generate client: `npm run prisma:generate`
+/// Refresh this schema from Supabase when the DB changes: `npm run prisma:pull`
+///
+/// Note:
+/// - Some database-level partial unique indexes from PostgreSQL are preserved in Supabase,
+///   but Prisma cannot express every partial index directly in the schema.
+/// - This schema keeps the real table names and legacy columns through `@map` / `@@map`.
+
+enum ChannelType {
+  wa
+  ig
+  fb
+
+  @@map("channel_type")
+}
+
+enum LeadStageType {
+  new
+  qualified
+  quote
+  won
+  lost
+
+  @@map("lead_stage_type")
+}
+
+enum OrderStatusEnum {
+  draft
+  quoted
+  pending_payment
+  payment_review
+  confirmed
+  in_design
+  in_production
+  ready
+  shipped
+  completed
+  cancelled
+
+  @@map("order_status_enum")
+}
+
+enum ProviderType {
+  ycloud
+  chatwoot
+
+  @@map("provider_type")
+}
+
+enum SenderType {
+  customer
+  human
+  agent
+  system
+
+  @@map("sender_type")
+}
+
+model Contact {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  primaryChannel   ChannelType  @map("primary_channel")
+  externalId       String       @map("external_id")
+  displayName      String?      @map("display_name")
+  tags             Json         @default("{}")
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+  totalOrders      Int?         @default(0) @map("total_orders")
+  totalSpentCrc    Decimal?     @default(0) @map("total_spent_crc") @db.Decimal(12, 2)
+  lastOrderAt      DateTime?    @map("last_order_at") @db.Timestamptz(6)
+  customerStatus   String?      @map("customer_status")
+  leadThreads      LeadThread[]
+  orders           Order[]
+
+  @@unique([primaryChannel, externalId], map: "contacts_channel_external_unique")
+  @@index([externalId], map: "contacts_external_id_idx")
+  @@map("contacts")
+}
+
+model LeadThread {
+  id                     String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadThreadKey          String                  @unique(map: "lead_threads_lead_thread_key_key") @map("lead_thread_key")
+  channel                ChannelType
+  mode                   String                  @default("ai")
+  owner                  String                  @default("karol")
+  aiLockUntil            DateTime?               @map("ai_lock_until") @db.Timestamptz(6)
+  lastCustomerTs         DateTime?               @map("last_customer_ts") @db.Timestamptz(6)
+  lastHumanTs            DateTime?               @map("last_human_ts") @db.Timestamptz(6)
+  lastAiTs               DateTime?               @map("last_ai_ts") @db.Timestamptz(6)
+  leadStage              LeadStageType           @default(new) @map("lead_stage")
+  leadScore              Int                     @default(0) @map("lead_score")
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
+  contactId              String?                 @map("contact_id") @db.Uuid
+  contact                Contact?                @relation(fields: [contactId], references: [id], onDelete: SetNull, map: "conversations_contact_id_fkey")
+  campaignAttributions   CampaignAttribution[]
+  conversationObjections ConversationObjection[]
+  funnelStageHistory     FunnelStageHistory[]
+  messages               Message[]
+  orders                 Order[]
+
+  @@index([channel], map: "lead_threads_channel_idx")
+  @@index([contactId], map: "lead_threads_contact_idx")
+  @@index([leadStage], map: "lead_threads_lead_stage_idx")
+  @@index([updatedAt(sort: Desc)], map: "lead_threads_updated_at_idx")
+  @@map("lead_threads")
+}
+
+model Message {
+  id                     String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadThreadId           String                  @map("lead_thread_id") @db.Uuid
+  senderType             SenderType              @map("sender_type")
+  text                   String?
+  attachments            Json                    @default("[]")
+  provider               ProviderType
+  externalMessageId      String?                 @map("external_message_id")
+  cwMessageId            String?                 @unique(map: "messages_cw_message_unique") @map("cw_message_id")
+  providerTs             DateTime?               @map("provider_ts") @db.Timestamptz(6)
+  receivedTs             DateTime                @default(now()) @map("received_ts") @db.Timestamptz(6)
+  hashDedupe             String?                 @map("hash_dedupe")
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  leadThread             LeadThread              @relation(fields: [leadThreadId], references: [id], onDelete: Cascade, map: "messages_lead_thread_id_fkey")
+  conversationObjections ConversationObjection[]
+  paymentReceipts        PaymentReceipt[]
+
+  @@unique([provider, externalMessageId], map: "messages_provider_external_msg_unique")
+  @@index([leadThreadId, createdAt(sort: Desc)], map: "messages_conversation_id_ts_idx")
+  @@index([hashDedupe], map: "messages_hash_dedupe_idx")
+  @@index([provider, providerTs(sort: Desc)], map: "messages_provider_ts_idx")
+  @@map("messages")
+}
+
+model Order {
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadThreadId    String            @map("lead_thread_id") @db.Uuid
+  statusLegacy    String            @map("status_legacy")
+  paymentStatus   String            @default("pending_validation") @map("payment_status")
+  currency        String            @default("CRC")
+  subtotalCrc     Int               @default(0) @map("subtotal_crc")
+  totalCrc        Int               @default(0) @map("total_crc")
+  source          String            @default("nova")
+  notes           String?
+  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime          @default(now()) @map("updated_at") @db.Timestamptz(6)
+  contactId       String?           @map("contact_id") @db.Uuid
+  status          OrderStatusEnum   @default(draft)
+  contact         Contact?          @relation(fields: [contactId], references: [id], map: "orders_contact_id_fkey")
+  leadThread      LeadThread        @relation(fields: [leadThreadId], references: [id], map: "orders_lead_thread_id_fkey")
+  items           OrderItem[]
+  paymentReceipts PaymentReceipt[]
+
+  @@index([leadThreadId], map: "idx_orders_conversation_id")
+  @@index([status, paymentStatus], map: "idx_orders_status")
+  @@map("orders")
+}
+
+model OrderItem {
+  id                  BigInt      @id @default(autoincrement())
+  orderId             String      @map("order_id") @db.Uuid
+  productId           String?     @map("product_id")
+  quantity            Int         @default(1)
+  unitPriceCrc        Int?        @map("unit_price_crc")
+  totalPriceCrc       Int?        @map("total_price_crc")
+  productNameSnapshot String?     @map("product_name_snapshot")
+  skuSnapshot         String?     @map("sku_snapshot")
+  theme               String?
+  eventDate           DateTime?   @map("event_date") @db.Date
+  createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  itemNotes           String?     @map("item_notes")
+  order               Order       @relation(fields: [orderId], references: [id], onDelete: Cascade, map: "order_items_order_id_fkey")
+  product             MwlProduct? @relation(fields: [productId], references: [id], onDelete: SetNull, map: "order_items_product_id_fkey")
+
+  @@unique([orderId, productId], map: "uq_order_items_order_product")
+  @@index([orderId], map: "idx_order_items_order_id")
+  @@map("order_items")
+}
+
+model PaymentReceipt {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId          String    @map("order_id") @db.Uuid
+  messageId        String?   @map("message_id") @db.Uuid
+  receiptKey       String    @unique(map: "payment_receipts_receipt_key_unique") @map("receipt_key")
+  status           String    @default("pending_validation")
+  bank             String?
+  transferType     String?   @map("transfer_type")
+  amountText       String?   @map("amount_text")
+  currency         String?
+  reference        String?
+  senderName       String?   @map("sender_name")
+  recipientName    String?   @map("recipient_name")
+  destinationPhone String?   @map("destination_phone")
+  receiptDate      DateTime? @map("receipt_date") @db.Date
+  receiptTime      String?   @map("receipt_time")
+  rawPayload       Json      @default("{}") @map("raw_payload")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  message          Message?  @relation(fields: [messageId], references: [id], onDelete: SetNull, map: "payment_receipts_message_id_fkey")
+  order            Order     @relation(fields: [orderId], references: [id], onDelete: Cascade, map: "payment_receipts_order_id_fkey")
+
+  @@index([messageId], map: "idx_payment_receipts_message_id")
+  @@index([orderId], map: "idx_payment_receipts_order_id")
+  @@map("payment_receipts")
+}
+
+model Campaign {
+  id             String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String
+  platform       String?
+  objective      String?
+  startDate      DateTime?            @map("start_date") @db.Date
+  endDate        DateTime?            @map("end_date") @db.Date
+  createdAt      DateTime?            @default(now()) @map("created_at") @db.Timestamptz(6)
+  campaignSpends CampaignSpend[]
+
+  @@map("campaigns")
+}
+
+model CampaignSpend {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaignId String?   @map("campaign_id") @db.Uuid
+  date       DateTime  @db.Date
+  amountCrc  Decimal   @map("amount_crc") @db.Decimal(12, 2)
+  createdAt  DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade, map: "campaign_spend_campaign_id_fkey")
+
+  @@map("campaign_spend")
+}
+
+model CampaignAttribution {
+  id              String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadThreadId    String     @map("lead_thread_id") @db.Uuid
+  source          String
+  campaignId      String?    @map("campaign_id")
+  adsetId         String?    @map("adset_id")
+  creativeId      String?    @map("creative_id")
+  referralPayload Json       @default("{}") @map("referral_payload")
+  firstTouchAt    DateTime   @default(now()) @map("first_touch_at") @db.Timestamptz(6)
+  campaignUuid    String?    @map("campaign_uuid") @db.Uuid
+  leadThread      LeadThread @relation(fields: [leadThreadId], references: [id], onDelete: Cascade, map: "campaign_attribution_lead_thread_id_fkey")
+
+  @@index([leadThreadId, firstTouchAt(sort: Desc)], map: "campaign_attr_conversation_idx")
+  @@index([source, firstTouchAt(sort: Desc)], map: "campaign_attr_source_idx")
+  @@map("campaign_attribution")
+}
+
+model FunnelStageHistory {
+  id              String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadThreadId    String?     @map("lead_thread_id") @db.Uuid
+  stage           String
+  enteredAt       DateTime    @default(now()) @map("entered_at") @db.Timestamptz(6)
+  exitedAt        DateTime?   @map("exited_at") @db.Timestamptz(6)
+  durationSeconds Int?        @map("duration_seconds")
+  reason          String?
+  createdAt       DateTime?   @default(now()) @map("created_at") @db.Timestamptz(6)
+  leadThread      LeadThread? @relation(fields: [leadThreadId], references: [id], onDelete: Cascade, map: "funnel_stage_history_lead_thread_id_fkey")
+
+  @@map("funnel_stage_history")
+}
+
+model ConversationObjection {
+  id               String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  leadThreadId     String?     @map("lead_thread_id") @db.Uuid
+  messageId        String?     @map("message_id") @db.Uuid
+  objectionType    String      @map("objection_type")
+  objectionSubtype String?     @map("objection_subtype")
+  detectedFrom     String?     @map("detected_from")
+  confidence       Decimal?    @db.Decimal(3, 2)
+  createdAt        DateTime?   @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt       DateTime?   @map("resolved_at") @db.Timestamptz(6)
+  leadThread       LeadThread? @relation(fields: [leadThreadId], references: [id], onDelete: Cascade, map: "conversation_objections_lead_thread_id_fkey")
+  message          Message?    @relation(fields: [messageId], references: [id], map: "conversation_objections_message_id_fkey")
+
+  @@map("conversation_objections")
+}
+
+model MwlProduct {
+  id                             String      @id
+  sku                            String      @unique(map: "mwl_products_sku_key")
+  family                         String
+  name                           String
+  category                       String
+  variantLabel                   String?     @map("variant_label")
+  sizeLabel                      String?     @map("size_label")
+  widthCm                        Decimal?    @map("width_cm") @db.Decimal(10, 2)
+  heightCm                       Decimal?    @map("height_cm") @db.Decimal(10, 2)
+  depthCm                        Decimal?    @map("depth_cm") @db.Decimal(10, 2)
+  material                       String?
+  baseColor                      String?     @map("base_color")
+  printType                      String?     @map("print_type")
+  personalizationArea            String?     @map("personalization_area")
+  priceCrc                       Int?        @map("price_crc")
+  priceFromCrc                   Int?        @map("price_from_crc")
+  minQty                         Int?        @map("min_qty")
+  allowsName                     Boolean     @default(false) @map("allows_name")
+  includesDesignAdjustmentCount  Int         @default(0) @map("includes_design_adjustment_count")
+  extraAdjustmentHasCost         Boolean     @default(false) @map("extra_adjustment_has_cost")
+  requiresDesignApproval         Boolean     @default(true) @map("requires_design_approval")
+  isFullColor                    Boolean     @default(false) @map("is_full_color")
+  isPremium                      Boolean     @default(false) @map("is_premium")
+  isDiscountable                 Boolean     @default(false) @map("is_discountable")
+  discountVisibility             String      @default("only_if_customer_requests") @map("discount_visibility")
+  pricingMode                    String      @default("fixed") @map("pricing_mode")
+  summary                        String?
+  details                        String?
+  notes                          String?
+  sourceType                     String      @default("manual") @map("source_type")
+  sourceRef                      String?     @map("source_ref")
+  isActive                       Boolean     @default(true) @map("is_active")
+  isAgentVisible                 Boolean     @default(true) @map("is_agent_visible")
+  sortOrder                      Int         @default(0) @map("sort_order")
+  updatedAt                      DateTime    @default(now()) @map("updated_at") @db.Timestamp(6)
+  searchBoost                    Int         @default(0) @map("search_boost")
+  orderItems                     OrderItem[]
+
+  @@index([isAgentVisible, isActive], map: "idx_mwl_products_agent_visible")
+  @@index([category], map: "idx_mwl_products_category")
+  @@index([family], map: "idx_mwl_products_family")
+  @@map("mwl_products")
+}

@@ -1,0 +1,14 @@
+import { listCampaignsParamsSchema, parseQueryParams } from "@/domain/crm/schemas";
+import { handleRouteError, ok } from "@/server/api/http";
+import { listCampaigns } from "@/server/services/campaigns";
+
+export async function GET(request: Request) {
+  try {
+    const campaigns = await listCampaigns(
+      parseQueryParams(listCampaignsParamsSchema, new URL(request.url).searchParams),
+    );
+    return ok(campaigns);
+  } catch (error) {
+    return handleRouteError(error);
+  }
+}

@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 35 43% 97%;
+    --foreground: 224 39% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 39% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 39% 15%;
+    --primary: 193 88% 29%;
+    --primary-foreground: 35 43% 97%;
+    --secondary: 28 74% 92%;
+    --secondary-foreground: 24 42% 26%;
+    --muted: 42 28% 92%;
+    --muted-foreground: 215 16% 39%;
+    --accent: 18 83% 57%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 32 28% 84%;
+    --input: 32 28% 84%;
+    --ring: 193 88% 29%;
+    --chart-1: 193 88% 29%;
+    --chart-2: 18 83% 57%;
+    --chart-3: 152 41% 35%;
+    --chart-4: 42 84% 62%;
+    --chart-5: 224 39% 15%;
+    --radius: 1rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply min-h-screen bg-background text-foreground antialiased;
+    background-image:
+      radial-gradient(circle at top left, rgba(255, 255, 255, 0.95), transparent 30%),
+      linear-gradient(180deg, rgba(14, 116, 144, 0.08), transparent 28%);
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
