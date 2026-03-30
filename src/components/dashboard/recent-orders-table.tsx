@@ -1,14 +1,23 @@
+import Link from "next/link";
+
 import type { DashboardRecentOrder } from "@/server/services/dashboard/types";
 import { StatusBadgeFromViewModel } from "@/components/ui/status-badge";
 import { TableEmptyStateRow } from "@/components/ui/state-display";
 import { formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
+import { formatCustomerDisplayName, formatOrderShortId } from "@/domain/crm/formatters";
 import { getOrderStatusBadge, getPaymentStatusBadge } from "@/components/orders/order-presenters";
+import { cn } from "@/lib/utils";
 
 type RecentOrdersTableProps = {
   orders: DashboardRecentOrder[];
 };
 
 export function RecentOrdersTable({ orders }: RecentOrdersTableProps) {
+  const interactiveLinkClassName = cn(
+    "inline-flex items-center rounded-md font-medium text-slate-950 underline decoration-transparent decoration-2 underline-offset-4 transition-colors duration-150",
+    "hover:text-primary hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white",
+  );
+
   return (
     <section className="rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
       <div className="flex items-end justify-between gap-4">
@@ -52,9 +61,29 @@ export function RecentOrdersTable({ orders }: RecentOrdersTableProps) {
                   return (
                   <tr key={order.id} className="text-sm text-slate-700">
                     <td className="px-4 py-4 font-medium text-slate-950">
-                      #{order.id.slice(0, 8)}
+                      <Link
+                        href={`/orders/${order.id}`}
+                        className={interactiveLinkClassName}
+                        aria-label={`Abrir detalle de la orden ${formatOrderShortId(order.id)}`}
+                      >
+                        {formatOrderShortId(order.id)}
+                      </Link>
                     </td>
-                    <td className="px-4 py-4">{order.customer.name ?? "Cliente sin nombre"}</td>
+                    <td className="px-4 py-4">
+                      {order.customer.id ? (
+                        <Link
+                          href={`/customers/${order.customer.id}`}
+                          className={interactiveLinkClassName}
+                          aria-label={`Abrir detalle del cliente ${formatCustomerDisplayName(order.customer.name)}`}
+                        >
+                          {formatCustomerDisplayName(order.customer.name)}
+                        </Link>
+                      ) : (
+                        <span className="font-medium text-slate-700">
+                          {formatCustomerDisplayName(order.customer.name)}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-4 font-medium text-slate-950">
                       {formatCurrencyCRC(order.totalCrc)}
                     </td>

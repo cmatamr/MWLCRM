@@ -1,5 +1,6 @@
-import { Bell, Search, Sparkles } from "lucide-react";
+import { Bell } from "lucide-react";
 
+import { GlobalSearchForm } from "@/components/layout/global-search-form";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import { Button } from "@/components/ui/button";
 
@@ -17,17 +18,8 @@ export function AppTopbar() {
             </h1>
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="flex items-center gap-3 rounded-full border border-border bg-white px-4 py-3 shadow-sm sm:min-w-80 xl:min-w-[360px]">
-              <Search className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">
-                Buscar clientes, órdenes o campañas
-              </span>
-            </div>
-            <Button variant="secondary" className="justify-start sm:justify-center">
-              <Sparkles className="h-4 w-4" />
-              Nuevo flujo
-            </Button>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:justify-end">
+            <GlobalSearchForm />
             <Button variant="outline" size="icon" aria-label="Notificaciones">
               <Bell className="h-4 w-4" />
             </Button>
