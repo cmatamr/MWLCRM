@@ -4,6 +4,7 @@ import { CampaignOverviewCard } from "@/components/dashboard/campaign-overview-c
 import { DashboardEmptyState } from "@/components/dashboard/dashboard-empty-state";
 import { DashboardLoading } from "@/components/dashboard/dashboard-loading";
 import { DashboardStatCard } from "@/components/dashboard/dashboard-stat-card";
+import { DashboardWidgetPlaceholder } from "@/components/dashboard/dashboard-widget-placeholder";
 import { FunnelOverviewCard } from "@/components/dashboard/funnel-overview-card";
 import { RecentOrdersTable } from "@/components/dashboard/recent-orders-table";
 import { RevenueChart } from "@/components/dashboard/revenue-chart";
@@ -49,17 +50,31 @@ export function DashboardPageClient() {
             ))}
           </section>
 
-          <section className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)]">
+          <FunnelOverviewCard overview={data.funnelOverview} />
+
+          <section className="grid gap-6 xl:grid-cols-3">
+            <div className="xl:col-span-2">
+              <CampaignOverviewCard overview={data.campaignOverview} />
+            </div>
+
+            <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-1">
+              <DashboardWidgetPlaceholder
+                title="Espacio para widget"
+                description="Contenedor reservado para un próximo resumen del dashboard."
+              />
+              <DashboardWidgetPlaceholder
+                title="Espacio para widget"
+                description="Área preparada para incorporar otro módulo sin alterar la grilla principal."
+              />
+            </div>
+          </section>
+
+          <section>
             <RevenueChart
               title="Ventas diarias"
               description="Ingreso diario de los últimos 14 días usando únicamente órdenes cerradas o listas para entrega."
               data={data.revenueSeries}
             />
-
-            <div className="space-y-6">
-              <CampaignOverviewCard overview={data.campaignOverview} />
-              <FunnelOverviewCard overview={data.funnelOverview} />
-            </div>
           </section>
 
           <RecentOrdersTable orders={data.recentOrders} />

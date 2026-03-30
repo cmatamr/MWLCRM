@@ -15,13 +15,17 @@ export function DashboardLoading() {
         ))}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)]">
-        <Skeleton className="h-[520px] rounded-[32px]" />
-        <div className="space-y-6">
-          <Skeleton className="h-[250px] rounded-[32px]" />
-          <Skeleton className="h-[250px] rounded-[32px]" />
+      <Skeleton className="h-[420px] rounded-[32px]" />
+
+      <div className="grid gap-6 xl:grid-cols-3">
+        <Skeleton className="h-[360px] rounded-[32px] xl:col-span-2" />
+        <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-1">
+          <Skeleton className="h-[220px] rounded-[32px]" />
+          <Skeleton className="h-[220px] rounded-[32px]" />
         </div>
       </div>
+
+      <Skeleton className="h-[520px] rounded-[32px]" />
 
       <Skeleton className="h-[420px] rounded-[32px]" />
     </div>
