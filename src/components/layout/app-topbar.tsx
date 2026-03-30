@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Bell } from "lucide-react";
 
 import { GlobalSearchForm } from "@/components/layout/global-search-form";
@@ -19,7 +20,9 @@ export function AppTopbar() {
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:justify-end">
-            <GlobalSearchForm />
+            <Suspense fallback={<div className="h-14 w-full sm:min-w-80 xl:min-w-[360px]" />}>
+              <GlobalSearchForm />
+            </Suspense>
             <Button variant="outline" size="icon" aria-label="Notificaciones">
               <Bell className="h-4 w-4" />
             </Button>
