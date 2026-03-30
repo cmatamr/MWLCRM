@@ -87,8 +87,8 @@ export function CustomersTable({ customers }: CustomersTableProps) {
               ) : (
                 <TableEmptyStateRow
                   colSpan={6}
-                  title="No encontramos clientes"
-                  description="Prueba con otro nombre, external ID, canal o estado para recuperar resultados."
+                  title="No hay datos disponibles"
+                  description="No encontramos clientes para los filtros actuales. Prueba con otro nombre, external ID, canal o estado."
                 />
               )}
             </tbody>

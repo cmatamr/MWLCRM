@@ -1,4 +1,3 @@
-import type { ApiResponse, ApiErrorBody } from "@/types/api";
 import type { DashboardSummary } from "@/server/services/dashboard/types";
 import type {
   CustomerDetail,
@@ -6,108 +5,31 @@ import type {
   ListCustomersParams,
 } from "@/server/services/customers/types";
 import type { CampaignKpis, CampaignsListResponse, ListCampaignsParams } from "@/server/services/campaigns/types";
-import type { ConversationsListResponse, ListConversationsParams } from "@/server/services/conversations/types";
+import type {
+  ConversationDetail,
+  ConversationsListResponse,
+  ListConversationsParams,
+} from "@/server/services/conversations/types";
 import type { FunnelSummary } from "@/server/services/funnel/types";
 import type { ListOrdersParams, OrderDetail, OrdersListResponse } from "@/server/services/orders/types";
+import { buildApiUrl, fetcher, FetcherError, type QueryParams } from "@/lib/fetcher";
 
-type QueryPrimitive = string | number | boolean | null | undefined;
-type QueryParams = Record<string, QueryPrimitive>;
 type QueryInput = object;
 
-export class ApiClientError extends Error {
-  status: number;
-  code: string;
-  details?: unknown;
-
-  constructor(input: {
-    status: number;
-    code: string;
-    message: string;
-    details?: unknown;
-  }) {
-    super(input.message);
-    this.name = "ApiClientError";
-    this.status = input.status;
-    this.code = input.code;
-    this.details = input.details;
-  }
-}
-
-function buildUrl(path: string, query?: QueryInput, baseUrl = "") {
-  const url = new URL(path, baseUrl || "http://localhost");
-
-  if (query) {
-    for (const [key, value] of Object.entries(query as QueryParams)) {
-      if (value == null || value === "") {
-        continue;
-      }
-
-      url.searchParams.set(key, String(value));
-    }
-  }
-
-  if (!baseUrl) {
-    return `${url.pathname}${url.search}`;
-  }
-
-  return url.toString();
-}
-
-async function parseApiResponse<T>(response: Response): Promise<ApiResponse<T>> {
-  try {
-    return (await response.json()) as ApiResponse<T>;
-  } catch {
-    throw new ApiClientError({
-      status: response.status,
-      code: "INVALID_JSON_RESPONSE",
-      message: "The API returned an invalid JSON response.",
-    });
-  }
-}
-
-function toApiClientError(status: number, error: ApiErrorBody) {
-  return new ApiClientError({
-    status,
-    code: error.code,
-    message: error.message,
-    details: error.details,
-  });
-}
+export { FetcherError as ApiClientError };
+type ApiFetcher = <T>(input: string, init?: RequestInit) => Promise<T>;
 
 export interface CrmApiClientOptions {
   baseUrl?: string;
-  fetcher?: typeof fetch;
+  fetcher?: ApiFetcher;
 }
 
 export function createCrmApiClient(options: CrmApiClientOptions = {}) {
-  const fetcher = options.fetcher ?? fetch;
+  const apiFetcher = options.fetcher ?? fetcher;
   const baseUrl = options.baseUrl ?? "";
 
   async function get<T>(path: string, query?: QueryInput, init?: RequestInit): Promise<T> {
-    const response = await fetcher(buildUrl(path, query, baseUrl), {
-      method: "GET",
-      ...init,
-      headers: {
-        Accept: "application/json",
-        ...init?.headers,
-      },
-      cache: init?.cache ?? "no-store",
-    });
-
-    const payload = await parseApiResponse<T>(response);
-
-    if (!response.ok || !payload.success) {
-      const error = payload.success
-        ? {
-            code: "HTTP_ERROR",
-            message: `Request failed with status ${response.status}.`,
-          }
-        : payload.error;
-
-      throw toApiClientError(response.status, error);
-    }
-
-    return payload.data;
+    return apiFetcher<T>(buildApiUrl(path, query as QueryParams | undefined, baseUrl), init);
   }
 
   return {
@@ -137,6 +59,9 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     },
     listConversations(params?: ListConversationsParams, init?: RequestInit) {
       return get<ConversationsListResponse>("/api/conversations", params, init);
+    },
+    getConversation(id: string, init?: RequestInit) {
+      return get<ConversationDetail>(`/api/conversations/${id}`, undefined, init);
     },
   };
 }

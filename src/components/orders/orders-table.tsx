@@ -84,8 +84,8 @@ export function OrdersTable({ orders }: OrdersTableProps) {
               ) : (
                 <TableEmptyStateRow
                   colSpan={6}
-                  title="No encontramos órdenes"
-                  description="Prueba ajustando los filtros o espera nuevas órdenes sincronizadas en el CRM."
+                  title="No hay datos disponibles"
+                  description="No encontramos órdenes para los filtros actuales. Prueba ajustarlos o espera una nueva sincronización."
                 />
               )}
             </tbody>

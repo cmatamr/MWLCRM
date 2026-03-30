@@ -73,8 +73,8 @@ export function CampaignsTable({ campaigns }: CampaignsTableProps) {
               ) : (
                 <TableEmptyStateRow
                   colSpan={7}
-                  title="No encontramos campañas"
-                  description="Ajusta la búsqueda o espera a que nuevas campañas queden visibles en la atribución."
+                  title="No hay datos disponibles"
+                  description="No encontramos campanas para la busqueda actual. Ajusta los filtros o espera una nueva sincronizacion."
                 />
               )}
             </tbody>
