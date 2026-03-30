@@ -12,8 +12,13 @@ import {
 } from "./mappers";
 import type {
   DashboardCampaignItem,
+  DashboardDailySalesRangeDays,
   DashboardFunnelStage,
   DashboardSummary,
+} from "./types";
+import {
+  DEFAULT_DASHBOARD_DAILY_SALES_DAYS,
+  SUPPORTED_DASHBOARD_DAILY_SALES_DAYS,
 } from "./types";
 
 const ACTIVE_LEAD_STAGES: LeadStageType[] = [
@@ -29,7 +34,7 @@ const SUCCESSFUL_ORDER_STATUSES: OrderStatusEnum[] = [
   OrderStatusEnum.completed,
 ];
 
-const DASHBOARD_REVENUE_WINDOW_DAYS = 14;
+const LEGACY_DASHBOARD_REVENUE_WINDOW_DAYS = 14;
 const RECENT_ORDERS_LIMIT = 6;
 const TOP_CAMPAIGNS_LIMIT = 3;
 
@@ -77,10 +82,30 @@ function buildCampaignLeadCountMap(input: {
   );
 }
 
-export async function getDashboardSummary(options?: ServiceOptions): Promise<DashboardSummary> {
+export interface DashboardSummaryOptions extends ServiceOptions {
+  revenueWindowDays?: DashboardDailySalesRangeDays | number;
+}
+
+function resolveRevenueWindowDays(days?: DashboardSummaryOptions["revenueWindowDays"]) {
+  if (
+    days &&
+    SUPPORTED_DASHBOARD_DAILY_SALES_DAYS.includes(days as DashboardDailySalesRangeDays)
+  ) {
+    return days;
+  }
+
+  return days == null
+    ? LEGACY_DASHBOARD_REVENUE_WINDOW_DAYS
+    : DEFAULT_DASHBOARD_DAILY_SALES_DAYS;
+}
+
+export async function getDashboardSummary(
+  options?: DashboardSummaryOptions,
+): Promise<DashboardSummary> {
   const db = resolveDb(options);
   const now = new Date();
-  const revenueWindowStart = getRevenueWindowStart(DASHBOARD_REVENUE_WINDOW_DAYS);
+  const revenueWindowDays = resolveRevenueWindowDays(options?.revenueWindowDays);
+  const revenueWindowStart = getRevenueWindowStart(revenueWindowDays);
 
   const [
     totalOrders,
@@ -210,6 +235,7 @@ export async function getDashboardSummary(options?: ServiceOptions): Promise<Das
 
   return mapDashboardSummary({
     generatedAt: now,
+    revenueWindowDays,
     metrics: [
       mapDashboardMetric({
         key: "revenueTotal",
@@ -238,7 +264,7 @@ export async function getDashboardSummary(options?: ServiceOptions): Promise<Das
     ],
     revenueSeries: mapDashboardRevenueSeries({
       startDate: revenueWindowStart,
-      days: DASHBOARD_REVENUE_WINDOW_DAYS,
+      days: revenueWindowDays,
       orders: revenueOrders,
       successfulStatuses: SUCCESSFUL_ORDER_STATUSES,
     }),

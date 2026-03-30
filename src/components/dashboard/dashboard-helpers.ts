@@ -24,13 +24,25 @@ export function getRevenueChartBounds(points: DashboardDailyRevenuePoint[]) {
   const values = points.map((point) => point.revenueCrc);
   const max = Math.max(...values, 0);
   const safeMax = max === 0 ? 1 : max;
+  const totalRevenue = values.reduce((sum, value) => sum + value, 0);
+  const totalOrders = points.reduce((sum, point) => sum + point.orders, 0);
 
   return {
     max,
     safeMax,
-    totalRevenue: values.reduce((sum, value) => sum + value, 0),
-    totalOrders: points.reduce((sum, point) => sum + point.orders, 0),
+    totalRevenue,
+    totalOrders,
   };
+}
+
+export function getAverageDailyRevenue(points: DashboardDailyRevenuePoint[], days: number) {
+  const totalRevenue = points.reduce((sum, point) => sum + point.revenueCrc, 0);
+
+  if (days <= 0 || totalRevenue === 0) {
+    return 0;
+  }
+
+  return totalRevenue / days;
 }
 
 export function getRevenueChartPath(points: DashboardDailyRevenuePoint[], safeMax: number) {

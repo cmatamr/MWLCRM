@@ -2,6 +2,12 @@ import type { LeadStageType, OrderStatusEnum } from "@prisma/client";
 
 import type { CustomerReference } from "./common";
 
+export const SUPPORTED_DASHBOARD_DAILY_SALES_DAYS = [7, 15, 30] as const;
+export const DEFAULT_DASHBOARD_DAILY_SALES_DAYS = 15;
+
+export type DashboardDailySalesRangeDays =
+  (typeof SUPPORTED_DASHBOARD_DAILY_SALES_DAYS)[number];
+
 export type DashboardMetricKey =
   | "revenueTotal"
   | "totalOrders"
@@ -70,6 +76,7 @@ export interface DashboardFunnelOverview {
 export interface DashboardSummary {
   generatedAt: string;
   hasData: boolean;
+  revenueWindowDays: number;
   metrics: DashboardMetric[];
   revenueSeries: DashboardDailyRevenuePoint[];
   recentOrders: DashboardRecentOrder[];

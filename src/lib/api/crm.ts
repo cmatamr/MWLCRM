@@ -1,4 +1,5 @@
 import type { DashboardSummary } from "@/server/services/dashboard/types";
+import type { DashboardDailySalesRangeDays } from "@/server/services/dashboard/types";
 import type {
   CustomerDetail,
   CustomersListResponse,
@@ -33,8 +34,11 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
   }
 
   return {
-    getDashboardSummary(init?: RequestInit) {
-      return get<DashboardSummary>("/api/dashboard/summary", undefined, init);
+    getDashboardSummary(
+      params?: { days?: DashboardDailySalesRangeDays },
+      init?: RequestInit,
+    ) {
+      return get<DashboardSummary>("/api/dashboard/summary", params, init);
     },
     listCustomers(params?: ListCustomersParams, init?: RequestInit) {
       return get<CustomersListResponse>("/api/customers", params, init);

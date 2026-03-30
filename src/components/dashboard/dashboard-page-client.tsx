@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import { CampaignOverviewCard } from "@/components/dashboard/campaign-overview-card";
 import { DashboardEmptyState } from "@/components/dashboard/dashboard-empty-state";
 import { DashboardLoading } from "@/components/dashboard/dashboard-loading";
@@ -12,9 +14,29 @@ import { formatLastUpdated } from "@/components/dashboard/dashboard-helpers";
 import { PageHeader } from "@/components/layout/page-header";
 import { StateDisplay } from "@/components/ui/state-display";
 import { useDashboardSummary } from "@/hooks/use-dashboard-summary";
+import {
+  DEFAULT_DASHBOARD_DAILY_SALES_DAYS,
+  type DashboardDailySalesRangeDays,
+} from "@/server/services/dashboard/types";
+
+const DAILY_SALES_RANGE_OPTIONS: Array<{
+  label: string;
+  days: DashboardDailySalesRangeDays;
+}> = [
+  { label: "Última semana", days: 7 },
+  { label: "Últimos 15 días", days: 15 },
+  { label: "Último mes", days: 30 },
+];
+
+function getRevenueDescription(days: number) {
+  return `Ingreso diario de los últimos ${days} días usando únicamente órdenes cerradas o listas para entrega.`;
+}
 
 export function DashboardPageClient() {
-  const { data, isLoading, isError, error } = useDashboardSummary();
+  const [selectedDays, setSelectedDays] = useState<DashboardDailySalesRangeDays>(
+    DEFAULT_DASHBOARD_DAILY_SALES_DAYS,
+  );
+  const { data, isLoading, isFetching, isError, error } = useDashboardSummary(selectedDays);
 
   if (isLoading && !data) {
     return <DashboardLoading />;
@@ -72,7 +94,12 @@ export function DashboardPageClient() {
           <section>
             <RevenueChart
               title="Ventas diarias"
-              description="Ingreso diario de los últimos 14 días usando únicamente órdenes cerradas o listas para entrega."
+              description={getRevenueDescription(data.revenueWindowDays)}
+              selectedDays={selectedDays}
+              windowDays={data.revenueWindowDays}
+              rangeOptions={DAILY_SALES_RANGE_OPTIONS}
+              onRangeChange={setSelectedDays}
+              isRefreshing={isFetching}
               data={data.revenueSeries}
             />
           </section>

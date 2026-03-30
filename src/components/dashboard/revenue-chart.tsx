@@ -1,17 +1,48 @@
-import type { DashboardDailyRevenuePoint } from "@/server/services/dashboard/types";
+import type {
+  DashboardDailyRevenuePoint,
+  DashboardDailySalesRangeDays,
+} from "@/server/services/dashboard/types";
 import { formatCurrencyCRC } from "@/lib/formatters";
 
-import { getRevenueChartBounds, getRevenueChartPath } from "./dashboard-helpers";
+import {
+  getAverageDailyRevenue,
+  getRevenueChartBounds,
+  getRevenueChartPath,
+} from "./dashboard-helpers";
+
+type RevenueRangeOption = {
+  label: string;
+  days: DashboardDailySalesRangeDays;
+};
 
 type RevenueChartProps = {
   title: string;
   description: string;
+  selectedDays: DashboardDailySalesRangeDays;
+  windowDays: number;
+  rangeOptions: RevenueRangeOption[];
+  onRangeChange: (days: DashboardDailySalesRangeDays) => void;
+  isRefreshing?: boolean;
   data: DashboardDailyRevenuePoint[];
 };
 
-export function RevenueChart({ title, description, data }: RevenueChartProps) {
-  const { max, safeMax, totalRevenue, totalOrders } = getRevenueChartBounds(data);
+export function RevenueChart({
+  title,
+  description,
+  selectedDays,
+  windowDays,
+  rangeOptions,
+  onRangeChange,
+  isRefreshing = false,
+  data,
+}: RevenueChartProps) {
+  const { safeMax, totalRevenue, totalOrders } = getRevenueChartBounds(data);
   const { line, area } = getRevenueChartPath(data, safeMax);
+  const averageDailyRevenue = getAverageDailyRevenue(data, windowDays);
+  const reading =
+    totalRevenue > 0
+      ? "La curva muestra cuánto negocio se está convirtiendo a ingreso día a día."
+      : "Todavía no hay ventas cerradas en esta ventana para dibujar tendencia.";
 
   return (
     <section className="rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
@@ -27,20 +58,31 @@ export function RevenueChart({ title, description, data }: RevenueChartProps) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl bg-slate-950 px-4 py-3 text-white">
-              <p className="text-xs uppercase tracking-[0.18em] text-slate-300">Revenue</p>
-              <p className="mt-2 text-lg font-semibold">{formatCurrencyCRC(totalRevenue)}</p>
-            </div>
-            <div className="rounded-2xl bg-secondary px-4 py-3 text-secondary-foreground">
-              <p className="text-xs uppercase tracking-[0.18em]">Orders</p>
-              <p className="mt-2 text-lg font-semibold">{totalOrders.toLocaleString("es-CR")}</p>
-            </div>
+          <div className="inline-flex flex-wrap gap-2 rounded-2xl border border-border/70 bg-muted/40 p-1">
+            {rangeOptions.map((option) => {
+              const isActive = option.days === selectedDays;
+
+              return (
+                <button
+                  key={option.days}
+                  type="button"
+                  onClick={() => onRangeChange(option.days)}
+                  disabled={isRefreshing && isActive}
+                  className={`rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
+                    isActive
+                      ? "bg-slate-950 text-white shadow-sm"
+                      : "text-slate-600 hover:bg-white hover:text-slate-950"
+                  } ${isRefreshing && isActive ? "cursor-wait opacity-80" : ""}`}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
           </div>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_140px]">
-          <div className="rounded-[28px] bg-[linear-gradient(180deg,rgba(14,116,144,0.10),rgba(255,255,255,0.7))] p-4">
+          <div className="space-y-3 rounded-[28px] bg-[linear-gradient(180deg,rgba(14,116,144,0.10),rgba(255,255,255,0.7))] p-4">
             <div className="h-72">
               <svg viewBox="0 0 100 100" className="h-full w-full overflow-visible" preserveAspectRatio="none">
                 <defs>
@@ -80,7 +122,7 @@ export function RevenueChart({ title, description, data }: RevenueChartProps) {
               </svg>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-muted-foreground md:grid-cols-7">
+            <div className="grid grid-cols-2 gap-3 text-xs text-muted-foreground md:grid-cols-7 lg:grid-cols-5 xl:grid-cols-7">
               {data.map((point) => (
                 <div key={point.date} className="space-y-1">
                   <p className="font-medium text-slate-700">{point.label}</p>
@@ -88,23 +130,25 @@ export function RevenueChart({ title, description, data }: RevenueChartProps) {
                 </div>
               ))}
             </div>
+
+            <p className="text-sm leading-6 text-slate-700">{reading}</p>
           </div>
 
           <div className="flex flex-col gap-3">
-            <div className="rounded-2xl border border-border/70 bg-muted/40 px-4 py-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Pico diario</p>
-              <p className="mt-2 text-xl font-semibold text-slate-950">{formatCurrencyCRC(max)}</p>
+            <div className="rounded-2xl bg-slate-950 px-4 py-4 text-white">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-300">Revenue</p>
+              <p className="mt-2 text-xl font-semibold">{formatCurrencyCRC(totalRevenue)}</p>
+            </div>
+            <div className="rounded-2xl bg-secondary px-4 py-4 text-secondary-foreground">
+              <p className="text-xs uppercase tracking-[0.18em]">Orders</p>
+              <p className="mt-2 text-xl font-semibold">{totalOrders.toLocaleString("es-CR")}</p>
             </div>
             <div className="rounded-2xl border border-border/70 bg-muted/40 px-4 py-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Ventana</p>
-              <p className="mt-2 text-xl font-semibold text-slate-950">{data.length} días</p>
-            </div>
-            <div className="rounded-2xl border border-border/70 bg-muted/40 px-4 py-4">
-              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Lectura</p>
-              <p className="mt-2 text-sm leading-6 text-slate-700">
-                {totalRevenue > 0
-                  ? "La curva muestra cuánto negocio se está convirtiendo a ingreso día a día."
-                  : "Todavía no hay ventas cerradas en esta ventana para dibujar tendencia."}
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                Promedio diario
+              </p>
+              <p className="mt-2 text-xl font-semibold text-slate-950">
+                {formatCurrencyCRC(averageDailyRevenue)}
               </p>
             </div>
           </div>

@@ -1,6 +1,7 @@
 import type { ListCampaignsParams } from "@/server/services/campaigns/types";
 import type { ListConversationsParams } from "@/server/services/conversations/types";
 import type { ListCustomersParams } from "@/server/services/customers/types";
+import type { DashboardDailySalesRangeDays } from "@/server/services/dashboard/types";
 import type { ListOrdersParams } from "@/server/services/orders/types";
 
 function normalizeQueryKeyParams<TParams extends object | undefined>(params?: TParams) {
@@ -30,7 +31,8 @@ export const queryRefetchIntervals = {
 } as const;
 
 export const queryKeys = {
-  dashboardSummary: () => ["dashboard", "summary"] as const,
+  dashboardSummary: (params?: { days?: DashboardDailySalesRangeDays }) =>
+    ["dashboard", "summary", normalizeQueryKeyParams(params)] as const,
   orders: (params?: ListOrdersParams) => ["orders", normalizeQueryKeyParams(params)] as const,
   customers: (params?: ListCustomersParams) => ["customers", normalizeQueryKeyParams(params)] as const,
   campaigns: (params?: ListCampaignsParams) => ["campaigns", normalizeQueryKeyParams(params)] as const,

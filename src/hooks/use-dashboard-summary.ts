@@ -5,12 +5,16 @@ import { useQuery } from "@tanstack/react-query";
 import { crmApiClient } from "@/lib/api/crm";
 import type { FetcherError } from "@/lib/fetcher";
 import { queryKeys, queryRefetchIntervals } from "@/lib/query-config";
-import type { DashboardSummary } from "@/server/services/dashboard/types";
+import type {
+  DashboardDailySalesRangeDays,
+  DashboardSummary,
+} from "@/server/services/dashboard/types";
 
-export function useDashboardSummary() {
+export function useDashboardSummary(days: DashboardDailySalesRangeDays) {
   const query = useQuery<DashboardSummary, FetcherError>({
-    queryKey: queryKeys.dashboardSummary(),
-    queryFn: () => crmApiClient.getDashboardSummary(),
+    queryKey: queryKeys.dashboardSummary({ days }),
+    queryFn: () => crmApiClient.getDashboardSummary({ days }),
+    placeholderData: (previousData) => previousData,
     refetchInterval: queryRefetchIntervals.dashboard,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
@@ -19,6 +23,7 @@ export function useDashboardSummary() {
   return {
     data: query.data,
     isLoading: query.isLoading,
+    isFetching: query.isFetching,
     isError: query.isError,
     error: query.error,
   };

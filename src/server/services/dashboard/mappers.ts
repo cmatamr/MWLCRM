@@ -139,6 +139,7 @@ export function mapDashboardFunnelOverview(input: {
 
 export function mapDashboardSummary(input: {
   generatedAt: Date;
+  revenueWindowDays: number;
   metrics: DashboardMetric[];
   revenueSeries: DashboardDailyRevenuePoint[];
   recentOrders: OrderWithContact[];
@@ -156,6 +157,7 @@ export function mapDashboardSummary(input: {
   return {
     generatedAt: input.generatedAt.toISOString(),
     hasData,
+    revenueWindowDays: input.revenueWindowDays,
     metrics: input.metrics,
     revenueSeries: input.revenueSeries,
     recentOrders: mappedRecentOrders,
