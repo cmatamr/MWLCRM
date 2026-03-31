@@ -1,3 +1,5 @@
+import { OrderStatusEnum } from "@prisma/client";
+
 import { ok, handleRouteError } from "@/server/api/http";
 import {
   getDashboardSummary,
@@ -24,10 +26,24 @@ function parseRevenueWindowDays(request: Request): DashboardDailySalesRangeDays 
   return days as DashboardDailySalesRangeDays;
 }
 
+function parseRecentOrdersStatus(request: Request): OrderStatusEnum | undefined {
+  const { searchParams } = new URL(request.url);
+  const rawStatus = searchParams.get("status")?.trim();
+
+  if (!rawStatus) {
+    return undefined;
+  }
+
+  return Object.values(OrderStatusEnum).includes(rawStatus as OrderStatusEnum)
+    ? (rawStatus as OrderStatusEnum)
+    : undefined;
+}
+
 export async function GET(request: Request) {
   try {
     const summary = await getDashboardSummary({
       revenueWindowDays: parseRevenueWindowDays(request),
+      recentOrdersStatus: parseRecentOrdersStatus(request),
     });
     return ok(summary);
   } catch (error) {

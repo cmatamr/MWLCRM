@@ -16,12 +16,15 @@ export function useConfirmOrderPayment() {
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: ["dashboard", "summary"],
+          refetchType: "active",
         }),
         queryClient.invalidateQueries({
           queryKey: ["orders"],
+          refetchType: "active",
         }),
         queryClient.invalidateQueries({
           queryKey: queryKeys.orderDetail(orderId),
+          refetchType: "active",
         }),
       ]);
     },

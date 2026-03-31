@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { OrderStatusEnum } from "@prisma/client";
 
 import { CampaignOverviewCard } from "@/components/dashboard/campaign-overview-card";
 import { DashboardEmptyState } from "@/components/dashboard/dashboard-empty-state";
@@ -13,7 +14,7 @@ import { RevenueChart } from "@/components/dashboard/revenue-chart";
 import { formatLastUpdated } from "@/components/dashboard/dashboard-helpers";
 import { PageHeader } from "@/components/layout/page-header";
 import { StateDisplay } from "@/components/ui/state-display";
-import { useDashboardSummary } from "@/hooks/use-dashboard-summary";
+import { useDashboardSummaryWithStatus } from "@/hooks/use-dashboard-summary";
 import {
   DEFAULT_DASHBOARD_DAILY_SALES_DAYS,
   type DashboardDailySalesRangeDays,
@@ -36,7 +37,11 @@ export function DashboardPageClient() {
   const [selectedDays, setSelectedDays] = useState<DashboardDailySalesRangeDays>(
     DEFAULT_DASHBOARD_DAILY_SALES_DAYS,
   );
-  const { data, isLoading, isFetching, isError, error } = useDashboardSummary(selectedDays);
+  const [statusFilter, setStatusFilter] = useState<OrderStatusEnum | undefined>(undefined);
+  const { data, isLoading, isFetching, isError, error } = useDashboardSummaryWithStatus(
+    selectedDays,
+    statusFilter,
+  );
 
   if (isLoading && !data) {
     return <DashboardLoading />;
@@ -104,7 +109,12 @@ export function DashboardPageClient() {
             />
           </section>
 
-          <RecentOrdersTable orders={data.recentOrders} />
+          <RecentOrdersTable
+            orders={data.recentOrders}
+            statusFilter={statusFilter}
+            onStatusFilterChange={setStatusFilter}
+            isApplyingFilter={isFetching}
+          />
         </>
       ) : (
         <DashboardEmptyState />

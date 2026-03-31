@@ -1,3 +1,5 @@
+import type { OrderStatusEnum } from "@prisma/client";
+
 import type { ListCampaignsParams } from "@/server/services/campaigns/types";
 import type { ListConversationsParams } from "@/server/services/conversations/types";
 import type { ListCustomersParams } from "@/server/services/customers/types";
@@ -31,7 +33,7 @@ export const queryRefetchIntervals = {
 } as const;
 
 export const queryKeys = {
-  dashboardSummary: (params?: { days?: DashboardDailySalesRangeDays }) =>
+  dashboardSummary: (params?: { days?: DashboardDailySalesRangeDays; status?: OrderStatusEnum }) =>
     ["dashboard", "summary", normalizeQueryKeyParams(params)] as const,
   orderDetail: (id: string | null) => ["orders", "detail", id] as const,
   orders: (params?: ListOrdersParams) => ["orders", normalizeQueryKeyParams(params)] as const,

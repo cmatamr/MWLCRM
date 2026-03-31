@@ -84,6 +84,7 @@ function buildCampaignLeadCountMap(input: {
 
 export interface DashboardSummaryOptions extends ServiceOptions {
   revenueWindowDays?: DashboardDailySalesRangeDays | number;
+  recentOrdersStatus?: OrderStatusEnum;
 }
 
 function resolveRevenueWindowDays(days?: DashboardSummaryOptions["revenueWindowDays"]) {
@@ -143,6 +144,15 @@ export async function getDashboardSummary(
       },
     }),
     db.order.findMany({
+      where: options?.recentOrdersStatus
+        ? {
+            status: options.recentOrdersStatus,
+          }
+        : {
+            status: {
+              not: OrderStatusEnum.draft,
+            },
+          },
       orderBy: {
         createdAt: "desc",
       },

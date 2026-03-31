@@ -1,3 +1,5 @@
+import type { OrderStatusEnum } from "@prisma/client";
+
 import type { DashboardSummary } from "@/server/services/dashboard/types";
 import type { DashboardDailySalesRangeDays } from "@/server/services/dashboard/types";
 import type {
@@ -40,7 +42,7 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
 
   return {
     getDashboardSummary(
-      params?: { days?: DashboardDailySalesRangeDays },
+      params?: { days?: DashboardDailySalesRangeDays; status?: OrderStatusEnum },
       init?: RequestInit,
     ) {
       return get<DashboardSummary>("/api/dashboard/summary", params, init);
