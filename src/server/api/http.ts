@@ -65,6 +65,15 @@ export function notFound(message: string, details?: unknown) {
   });
 }
 
+export function conflict(message: string, details?: unknown) {
+  return new ApiRouteError({
+    status: 409,
+    code: "CONFLICT",
+    message,
+    details,
+  });
+}
+
 export function handleRouteError(error: unknown) {
   if (error instanceof ZodError) {
     return fail(

@@ -5,8 +5,9 @@ import { StatusBadgeFromViewModel } from "@/components/ui/status-badge";
 import { TableEmptyStateRow } from "@/components/ui/state-display";
 import { formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
 import { formatCustomerDisplayName, formatOrderShortId } from "@/domain/crm/formatters";
-import { getOrderStatusBadge, getPaymentStatusBadge } from "@/components/orders/order-presenters";
+import { getOrderStatusBadge } from "@/components/orders/order-presenters";
 import { cn } from "@/lib/utils";
+import { RecentOrderPaymentCell } from "@/components/dashboard/recent-order-payment-cell";
 
 type RecentOrdersTableProps = {
   orders: DashboardRecentOrder[];
@@ -56,7 +57,6 @@ export function RecentOrdersTable({ orders }: RecentOrdersTableProps) {
               {orders.length > 0 ? (
                 orders.map((order) => {
                   const orderBadge = getOrderStatusBadge(order.status);
-                  const paymentBadge = getPaymentStatusBadge(order.paymentStatus);
 
                   return (
                   <tr key={order.id} className="text-sm text-slate-700">
@@ -91,7 +91,11 @@ export function RecentOrdersTable({ orders }: RecentOrdersTableProps) {
                       <StatusBadgeFromViewModel badge={orderBadge} />
                     </td>
                     <td className="px-4 py-4">
-                      <StatusBadgeFromViewModel badge={paymentBadge} />
+                      <RecentOrderPaymentCell
+                        orderId={order.id}
+                        orderStatus={order.status}
+                        paymentStatus={order.paymentStatus}
+                      />
                     </td>
                     <td className="px-4 py-4">{formatDateTime(order.createdAt)}</td>
                   </tr>

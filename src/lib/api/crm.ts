@@ -12,7 +12,12 @@ import type {
   ListConversationsParams,
 } from "@/server/services/conversations/types";
 import type { FunnelSummary } from "@/server/services/funnel/types";
-import type { ListOrdersParams, OrderDetail, OrdersListResponse } from "@/server/services/orders/types";
+import type {
+  ListOrdersParams,
+  OrderDetail,
+  OrderPaymentConfirmationResult,
+  OrdersListResponse,
+} from "@/server/services/orders/types";
 import { buildApiUrl, fetcher, FetcherError, type QueryParams } from "@/lib/fetcher";
 
 type QueryInput = object;
@@ -51,6 +56,19 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     },
     getOrder(id: string, init?: RequestInit) {
       return get<OrderDetail>(`/api/orders/${id}`, undefined, init);
+    },
+    confirmOrderPayment(id: string, init?: RequestInit) {
+      return get<OrderPaymentConfirmationResult>(`/api/orders/${id}`, undefined, {
+        method: "PATCH",
+        body: JSON.stringify({
+          action: "confirm_payment",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
     },
     listCampaigns(params?: ListCampaignsParams, init?: RequestInit) {
       return get<CampaignsListResponse>("/api/campaigns", params, init);

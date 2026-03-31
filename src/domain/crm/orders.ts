@@ -36,6 +36,13 @@ export interface OrderFilterOptions {
   paymentStatuses: string[];
 }
 
+export interface OrderPaymentConfirmationResult {
+  id: string;
+  status: OrderStatusEnum;
+  paymentStatus: string;
+  updatedAt: string;
+}
+
 export interface OrderItemSummary {
   id: string;
   productId: string | null;

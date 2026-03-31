@@ -33,6 +33,7 @@ export const queryRefetchIntervals = {
 export const queryKeys = {
   dashboardSummary: (params?: { days?: DashboardDailySalesRangeDays }) =>
     ["dashboard", "summary", normalizeQueryKeyParams(params)] as const,
+  orderDetail: (id: string | null) => ["orders", "detail", id] as const,
   orders: (params?: ListOrdersParams) => ["orders", normalizeQueryKeyParams(params)] as const,
   customers: (params?: ListCustomersParams) => ["customers", normalizeQueryKeyParams(params)] as const,
   campaigns: (params?: ListCampaignsParams) => ["campaigns", normalizeQueryKeyParams(params)] as const,

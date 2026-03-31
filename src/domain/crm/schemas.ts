@@ -54,6 +54,12 @@ export const crmEntityIdParamsSchema = z
   })
   .strict();
 
+export const orderPaymentActionSchema = z
+  .object({
+    action: z.literal("confirm_payment"),
+  })
+  .strict();
+
 export const dashboardSummaryFiltersSchema = z
   .object({
     rangeDays: optionalPositiveInt,

@@ -2,6 +2,7 @@ export type {
   ListOrdersParams,
   OrderDetail,
   OrderFilterOptions,
+  OrderPaymentConfirmationResult,
   OrderItemSummary,
   OrderListItem,
   OrderReceiptSummary,

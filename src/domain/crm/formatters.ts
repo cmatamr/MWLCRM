@@ -48,6 +48,20 @@ const senderLabels: Record<SenderType, string> = {
   system: "Sistema",
 };
 
+const paymentStatusLabels: Record<string, string> = {
+  pending: "Pendiente",
+  pending_validation: "Pendiente validacion",
+  review: "En revision",
+  payment_review: "Revision de pago",
+  validated: "Verificado",
+  approved: "Aprobado",
+  paid: "Pagado",
+  completed: "Completado",
+  rejected: "Rechazado",
+  failed: "Fallido",
+  cancelled: "Cancelado",
+};
+
 const leadStageTones: Record<LeadStageType, BadgeTone> = {
   new: "info",
   qualified: "warning",
@@ -119,7 +133,8 @@ export function formatOrderStatusLabel(status: OrderStatusEnum) {
 }
 
 export function formatPaymentStatusLabel(status: string) {
-  return humanizeToken(status);
+  const normalizedStatus = status.trim().toLowerCase();
+  return paymentStatusLabels[normalizedStatus] ?? humanizeToken(status);
 }
 
 export function formatCustomerStatusLabel(status: string | null) {

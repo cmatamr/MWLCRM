@@ -257,7 +257,7 @@ export async function getDashboardSummary(
       }),
       mapDashboardMetric({
         key: "activeConversations",
-        label: "Conversations activas",
+        label: "Conversaciones activas",
         value: activeConversations,
         description: "Hilos en etapas activas del funnel comercial.",
       }),
