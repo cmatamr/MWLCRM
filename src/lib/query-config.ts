@@ -26,6 +26,7 @@ export const queryEndpoints = {
 export const queryRefetchIntervals = {
   dashboard: 30000,
   orders: 20000,
+  orderDetail: 20000,
   customers: 60000,
   campaigns: 60000,
   funnel: 20000,

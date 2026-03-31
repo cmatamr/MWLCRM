@@ -1,4 +1,5 @@
 export {
+  formatCalendarDate,
   formatCurrencyCRC,
   formatDate,
   formatDateTime,

@@ -33,11 +33,15 @@ export function PageLoading({
       ) : null}
 
       {detailSidebar ? (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.9fr)]">
-          <Skeleton className="h-[420px] rounded-[28px]" />
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,7fr)_minmax(320px,3fr)]">
           <div className="space-y-6">
-            <Skeleton className="h-[240px] rounded-[28px]" />
-            <Skeleton className="h-[240px] rounded-[28px]" />
+            <Skeleton className="h-[420px] rounded-[28px]" />
+            <Skeleton className="h-[220px] rounded-[28px]" />
+            <Skeleton className="h-[220px] rounded-[28px]" />
+          </div>
+          <div className="space-y-6">
+            <Skeleton className="h-[360px] rounded-[28px]" />
+            <Skeleton className="h-[280px] rounded-[28px]" />
           </div>
         </div>
       ) : null}

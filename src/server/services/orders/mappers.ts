@@ -95,7 +95,7 @@ export function mapOrderItemSummary(item: OrderDetailRecord["items"][number]): O
     unitPriceCrc: item.unitPriceCrc,
     totalPriceCrc: item.totalPriceCrc,
     theme: item.theme,
-    eventDate: toNullableIsoDate(item.eventDate),
+    eventDate: item.eventDate ? item.eventDate.toISOString().slice(0, 10) : null,
     notes: normalizeOptionalText(item.itemNotes),
   };
 }

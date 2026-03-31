@@ -22,6 +22,11 @@ const dateFormatter = new Intl.DateTimeFormat("es-CR", {
   dateStyle: "medium",
 });
 
+const dateOnlyFormatter = new Intl.DateTimeFormat("es-CR", {
+  dateStyle: "medium",
+  timeZone: "UTC",
+});
+
 const shortDateFormatter = new Intl.DateTimeFormat("es-CR", {
   month: "short",
   day: "numeric",
@@ -108,6 +113,19 @@ export function formatDateTime(value: Date | string | number) {
 
 export function formatDate(value: Date | string | number) {
   return dateFormatter.format(new Date(value));
+}
+
+export function formatCalendarDate(value: Date | string | number) {
+  if (typeof value === "string") {
+    const matchedDate = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+
+    if (matchedDate) {
+      const [, year, month, day] = matchedDate;
+      return dateOnlyFormatter.format(new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))));
+    }
+  }
+
+  return dateOnlyFormatter.format(new Date(value));
 }
 
 export function formatShortDate(value: Date | string | number) {

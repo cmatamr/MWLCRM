@@ -1,4 +1,4 @@
-import { formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
+import { formatCalendarDate, formatCurrencyCRC } from "@/lib/formatters";
 import type { OrderItemSummary } from "@/server/services/orders/types";
 import { TableEmptyStateRow } from "@/components/ui/state-display";
 
@@ -33,10 +33,11 @@ export function OrderItemsTable({ items }: OrderItemsTableProps) {
               <tr>
                 <th scope="col" className="px-4 py-3 font-medium">Producto</th>
                 <th scope="col" className="px-4 py-3 font-medium">SKU</th>
-                <th scope="col" className="px-4 py-3 font-medium">Cantidad</th>
-                <th scope="col" className="px-4 py-3 font-medium">Precio unitario</th>
-                <th scope="col" className="px-4 py-3 font-medium">Total</th>
-                <th scope="col" className="px-4 py-3 font-medium">Tema / fecha</th>
+                <th scope="col" className="px-4 py-3 font-medium text-right">Cantidad</th>
+                <th scope="col" className="px-4 py-3 font-medium text-right">Precio unitario</th>
+                <th scope="col" className="px-4 py-3 font-medium text-right">Total</th>
+                <th scope="col" className="px-4 py-3 font-medium">Tema</th>
+                <th scope="col" className="px-4 py-3 font-medium">Fecha Evento</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60 bg-white">
@@ -56,26 +57,22 @@ export function OrderItemsTable({ items }: OrderItemsTableProps) {
                       </div>
                     </td>
                     <td className="px-4 py-4">{item.sku ?? "Sin SKU"}</td>
-                    <td className="px-4 py-4 font-medium text-slate-950">{item.quantity}</td>
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-4 text-right font-medium text-slate-950">{item.quantity}</td>
+                    <td className="px-4 py-4 text-right">
                       {item.unitPriceCrc != null ? formatCurrencyCRC(item.unitPriceCrc) : "Pendiente"}
                     </td>
-                    <td className="px-4 py-4 font-medium text-slate-950">
+                    <td className="px-4 py-4 text-right font-medium text-slate-950">
                       {item.totalPriceCrc != null ? formatCurrencyCRC(item.totalPriceCrc) : "Pendiente"}
                     </td>
-                    <td className="px-4 py-4">
-                      <div className="space-y-1">
-                        <p>{item.theme ?? "Sin tema"}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {item.eventDate ? formatDateTime(item.eventDate) : "Sin fecha de evento"}
-                        </p>
-                      </div>
+                    <td className="px-4 py-4">{item.theme ?? "Sin tema"}</td>
+                    <td className="px-4 py-4 text-muted-foreground">
+                      {item.eventDate ? formatCalendarDate(item.eventDate) : ""}
                     </td>
                   </tr>
                 ))
               ) : (
                 <TableEmptyStateRow
-                  colSpan={6}
+                  colSpan={7}
                   title="Esta orden no tiene items todavía"
                   description="Cuando se registren productos, cantidades y precios aparecerán aquí para revisión operativa."
                 />

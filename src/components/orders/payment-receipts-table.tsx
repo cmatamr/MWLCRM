@@ -1,4 +1,4 @@
-import { formatDateTime } from "@/lib/formatters";
+import { formatCalendarDate, formatDateTime } from "@/lib/formatters";
 import type { OrderReceiptSummary } from "@/server/services/orders/types";
 import { TableEmptyStateRow } from "@/components/ui/state-display";
 import { StatusBadgeFromViewModel } from "@/components/ui/status-badge";
@@ -81,7 +81,7 @@ export function PaymentReceiptsTable({ receipts }: PaymentReceiptsTableProps) {
                       </td>
                       <td className="px-4 py-4">
                         <div className="space-y-1">
-                          <p>{receipt.receiptDate ? formatDateTime(receipt.receiptDate) : "Sin fecha"}</p>
+                          <p>{receipt.receiptDate ? formatCalendarDate(receipt.receiptDate) : "Sin fecha"}</p>
                           <p className="text-xs text-muted-foreground">
                             Registrado: {formatDateTime(receipt.createdAt)}
                           </p>

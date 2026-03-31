@@ -57,6 +57,9 @@ export function OrderSummaryCard({ order }: OrderSummaryCardProps) {
               <p className="text-sm text-slate-600">
                 Source: {order.source} · Legacy status: {order.statusLegacy}
               </p>
+              <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                Order ID: {order.id}
+              </p>
             </div>
 
             <div className="flex flex-wrap gap-2">
