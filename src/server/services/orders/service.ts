@@ -83,6 +83,20 @@ export class UpdateOrderItemEventDateError extends Error {
   }
 }
 
+export class DeleteOrderItemError extends Error {
+  code: "ORDER_NOT_FOUND" | "ITEM_NOT_FOUND" | "ITEM_NOT_IN_ORDER" | "LAST_ITEM_BLOCKED";
+
+  constructor(
+    code: DeleteOrderItemError["code"],
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "DeleteOrderItemError";
+    this.code = code;
+  }
+}
+
 function buildOrdersWhere(params: ListOrdersParams): Prisma.OrderWhereInput {
   const search = params.search?.trim();
   const searchFilters: Prisma.OrderWhereInput[] = [];
@@ -249,6 +263,38 @@ async function findOrderDetailRecord(db: OrdersDbClient, orderId: string) {
   });
 }
 
+async function recalculateOrderTotals(
+  tx: Prisma.TransactionClient,
+  input: {
+    orderId: string;
+    previousSubtotalCrc: number;
+    previousTotalCrc: number;
+  },
+) {
+  const orderItems = await tx.orderItem.findMany({
+    where: {
+      orderId: input.orderId,
+    },
+    select: {
+      totalPriceCrc: true,
+    },
+  });
+
+  const subtotalCrc = orderItems.reduce((sum, orderItem) => sum + (orderItem.totalPriceCrc ?? 0), 0);
+  const netAdjustment = input.previousSubtotalCrc - input.previousTotalCrc;
+  const totalCrc = Math.max(0, subtotalCrc - netAdjustment);
+
+  await tx.order.update({
+    where: {
+      id: input.orderId,
+    },
+    data: {
+      subtotalCrc,
+      totalCrc,
+    },
+  });
+}
+
 export async function updateOrderItemQuantity(
   input: {
     orderId: string;
@@ -320,32 +366,114 @@ export async function updateOrderItemQuantity(
       },
     });
 
-    const orderItems = await tx.orderItem.findMany({
-      where: {
-        orderId: input.orderId,
-      },
-      select: {
-        totalPriceCrc: true,
-      },
-    });
-
-    const subtotalCrc = orderItems.reduce((sum, orderItem) => sum + (orderItem.totalPriceCrc ?? 0), 0);
-    const totalCrc = Math.max(0, subtotalCrc - netAdjustment);
-
-    await tx.order.update({
-      where: {
-        id: input.orderId,
-      },
-      data: {
-        subtotalCrc,
-        totalCrc,
-      },
+    await recalculateOrderTotals(tx, {
+      orderId: input.orderId,
+      previousSubtotalCrc: order.subtotalCrc,
+      previousTotalCrc: order.totalCrc,
     });
 
     const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
 
     if (!updatedOrder) {
       throw new UpdateOrderItemQuantityError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    return mapOrderDetail(updatedOrder);
+  });
+}
+
+export async function deleteOrderItem(
+  input: {
+    orderId: string;
+    itemId: bigint;
+  },
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: {
+        id: input.orderId,
+      },
+      select: {
+        id: true,
+        subtotalCrc: true,
+        totalCrc: true,
+      },
+    });
+
+    if (!order) {
+      throw new DeleteOrderItemError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    const item = await tx.orderItem.findUnique({
+      where: {
+        id: input.itemId,
+      },
+      select: {
+        id: true,
+        orderId: true,
+      },
+    });
+
+    if (!item) {
+      throw new DeleteOrderItemError("ITEM_NOT_FOUND", "Order item not found.", {
+        orderId: input.orderId,
+        itemId: input.itemId.toString(),
+      });
+    }
+
+    if (item.orderId !== input.orderId) {
+      throw new DeleteOrderItemError(
+        "ITEM_NOT_IN_ORDER",
+        "Order item does not belong to the requested order.",
+        {
+          orderId: input.orderId,
+          itemId: input.itemId.toString(),
+          itemOrderId: item.orderId,
+        },
+      );
+    }
+
+    const itemCount = await tx.orderItem.count({
+      where: {
+        orderId: input.orderId,
+      },
+    });
+
+    if (itemCount <= 1) {
+      throw new DeleteOrderItemError(
+        "LAST_ITEM_BLOCKED",
+        "No se puede eliminar el ultimo item de la orden.",
+        {
+          orderId: input.orderId,
+          itemId: input.itemId.toString(),
+          itemCount,
+        },
+      );
+    }
+
+    await tx.orderItem.delete({
+      where: {
+        id: input.itemId,
+      },
+    });
+
+    await recalculateOrderTotals(tx, {
+      orderId: input.orderId,
+      previousSubtotalCrc: order.subtotalCrc,
+      previousTotalCrc: order.totalCrc,
+    });
+
+    const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
+
+    if (!updatedOrder) {
+      throw new DeleteOrderItemError("ORDER_NOT_FOUND", "Order not found.", {
         orderId: input.orderId,
       });
     }

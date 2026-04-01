@@ -1,6 +1,11 @@
 import { orderItemRouteParamsSchema, updateOrderItemQuantitySchema } from "@/domain/crm/schemas";
-import { badRequest, handleRouteError, notFound, ok, RouteContext } from "@/server/api/http";
-import { UpdateOrderItemQuantityError, updateOrderItemQuantity } from "@/server/services/orders";
+import { badRequest, conflict, handleRouteError, notFound, ok, RouteContext } from "@/server/api/http";
+import {
+  deleteOrderItem,
+  DeleteOrderItemError,
+  UpdateOrderItemQuantityError,
+  updateOrderItemQuantity,
+} from "@/server/services/orders";
 
 export async function PATCH(
   request: Request,
@@ -29,6 +34,38 @@ export async function PATCH(
         error.code === "ITEM_NOT_IN_ORDER"
       ) {
         return handleRouteError(notFound(error.message, error.details));
+      }
+    }
+
+    return handleRouteError(error);
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  context: RouteContext<{ id: string; itemId: string }>,
+) {
+  try {
+    const params = orderItemRouteParamsSchema.parse(await context.params);
+
+    const order = await deleteOrderItem({
+      orderId: params.id,
+      itemId: params.itemId,
+    });
+
+    return ok(order);
+  } catch (error) {
+    if (error instanceof DeleteOrderItemError) {
+      if (
+        error.code === "ORDER_NOT_FOUND" ||
+        error.code === "ITEM_NOT_FOUND" ||
+        error.code === "ITEM_NOT_IN_ORDER"
+      ) {
+        return handleRouteError(notFound(error.message, error.details));
+      }
+
+      if (error.code === "LAST_ITEM_BLOCKED") {
+        return handleRouteError(conflict(error.message, error.details));
       }
     }
 

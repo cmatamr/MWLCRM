@@ -72,6 +72,12 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
         ...init,
       });
     },
+    deleteOrderItem(orderId: string, itemId: string, init?: RequestInit) {
+      return get<OrderDetail>(`/api/orders/${orderId}/items/${itemId}`, undefined, {
+        method: "DELETE",
+        ...init,
+      });
+    },
     updateOrderItemEventDate(
       orderId: string,
       itemId: string,

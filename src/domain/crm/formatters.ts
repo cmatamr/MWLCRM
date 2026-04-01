@@ -7,17 +7,6 @@ import type {
 
 import type { BadgeTone, StatusBadgeViewModel } from "./common";
 
-const crcCurrencyFormatter = new Intl.NumberFormat("es-CR", {
-  style: "currency",
-  currency: "CRC",
-  maximumFractionDigits: 2,
-});
-
-const dateTimeFormatter = new Intl.DateTimeFormat("es-CR", {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
-
 const dateFormatter = new Intl.DateTimeFormat("es-CR", {
   dateStyle: "medium",
 });
@@ -103,12 +92,41 @@ function createBadge(label: string, tone: BadgeTone): StatusBadgeViewModel {
   };
 }
 
+const monthLabelsShort = [
+  "ene",
+  "feb",
+  "mar",
+  "abr",
+  "may",
+  "jun",
+  "jul",
+  "ago",
+  "sep",
+  "oct",
+  "nov",
+  "dic",
+] as const;
+
 export function formatCurrencyCRC(value: number) {
-  return crcCurrencyFormatter.format(value);
+  const sign = value < 0 ? "-" : "";
+  const absoluteValue = Math.abs(value);
+  const [integerPart = "0", decimalPart = "00"] = absoluteValue.toFixed(2).split(".");
+  const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+
+  return `${sign}₡${formattedInteger},${decimalPart}`;
 }
 
 export function formatDateTime(value: Date | string | number) {
-  return dateTimeFormatter.format(new Date(value));
+  const date = new Date(value);
+  const day = date.getDate();
+  const month = monthLabelsShort[date.getMonth()] ?? "";
+  const year = date.getFullYear();
+  const hours24 = date.getHours();
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  const period = hours24 >= 12 ? "p. m." : "a. m.";
+  const hours12 = hours24 % 12 || 12;
+
+  return `${day} ${month} ${year}, ${hours12}:${minutes} ${period}`;
 }
 
 export function formatDate(value: Date | string | number) {
