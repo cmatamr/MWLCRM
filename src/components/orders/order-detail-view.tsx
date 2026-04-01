@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 
-import { OrderDetailSidebar } from "@/components/orders/order-detail-sidebar";
+import {
+  OrderActionCenterCard,
+  OrderPaymentSummaryCard,
+} from "@/components/orders/order-detail-sidebar";
 import { OrderItemsTable } from "@/components/orders/order-items-table";
 import { OrderNotesCard } from "@/components/orders/order-notes-card";
 import { OrderSummaryCard } from "@/components/orders/order-summary-card";
@@ -59,7 +62,11 @@ export function OrderDetailView({ orderId, initialOrder }: OrderDetailViewProps)
           <OrderNotesCard notes={order.notes} />
           <PaymentReceiptsTable receipts={order.receipts} />
         </div>
-        <OrderDetailSidebar order={order} />
+
+        <div className="space-y-6">
+          <OrderActionCenterCard order={order} />
+          <OrderPaymentSummaryCard order={order} />
+        </div>
       </div>
     </div>
   );

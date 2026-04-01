@@ -3,6 +3,7 @@ export type {
   OrderDetail,
   OrderFilterOptions,
   OrderPaymentConfirmationResult,
+  OrderItemProductOption,
   OrderItemSummary,
   OrderListItem,
   OrderReceiptSummary,

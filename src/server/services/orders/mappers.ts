@@ -9,6 +9,7 @@ import { toNullableIsoDate } from "@/server/services/shared";
 
 import type {
   OrderDetail,
+  OrderItemProductOption,
   OrderItemSummary,
   OrderListItem,
   OrderReceiptSummary,
@@ -97,6 +98,25 @@ export function mapOrderItemSummary(item: OrderDetailRecord["items"][number]): O
     theme: item.theme,
     eventDate: item.eventDate ? item.eventDate.toISOString().slice(0, 10) : null,
     notes: normalizeOptionalText(item.itemNotes),
+  };
+}
+
+export function mapOrderItemProductOption(input: {
+  id: string;
+  name: string;
+  sku: string;
+  priceCrc: number | null;
+  priceFromCrc: number | null;
+  category: string;
+  family: string;
+}): OrderItemProductOption {
+  return {
+    id: input.id,
+    name: input.name,
+    sku: input.sku,
+    unitPriceCrc: input.priceCrc ?? input.priceFromCrc ?? null,
+    category: input.category,
+    family: input.family,
   };
 }
 

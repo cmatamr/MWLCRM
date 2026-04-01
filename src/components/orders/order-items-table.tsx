@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { TableEmptyStateRow } from "@/components/ui/state-display";
+import { useCreateOrderItem } from "@/hooks/use-create-order-item";
 import { useDeleteOrderItem } from "@/hooks/use-delete-order-item";
+import { useOrderItemProductOptions } from "@/hooks/use-order-item-product-options";
 import { useUpdateOrderItemEventDate } from "@/hooks/use-update-order-item-event-date";
 import { useUpdateOrderItemQuantity } from "@/hooks/use-update-order-item-quantity";
 import { formatCalendarDate, formatCurrencyCRC } from "@/lib/formatters";
-import type { OrderItemSummary } from "@/server/services/orders/types";
+import type { OrderItemProductOption, OrderItemSummary } from "@/server/services/orders/types";
 
 type OrderItemsTableProps = {
   orderId: string;
@@ -20,6 +22,12 @@ type OrderItemRowProps = {
   item: OrderItemSummary;
   orderId: string;
   itemCount: number;
+};
+
+type AddOrderItemModalProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  orderId: string;
 };
 
 function validateQuantity(value: string) {
@@ -74,6 +82,249 @@ function validateEventDate(value: string) {
   }
 
   return null;
+}
+
+function AddOrderItemModal({ isOpen, onClose, orderId }: AddOrderItemModalProps) {
+  const createMutation = useCreateOrderItem(orderId);
+  const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
+  const [selectedProduct, setSelectedProduct] = useState<OrderItemProductOption | null>(null);
+  const [draftQuantity, setDraftQuantity] = useState("1");
+  const [quantityTouched, setQuantityTouched] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const productsQuery = useOrderItemProductOptions(orderId, deferredSearch, isOpen);
+  const quantityValidationError = useMemo(() => validateQuantity(draftQuantity), [draftQuantity]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSearch("");
+      setSelectedProduct(null);
+      setDraftQuantity("1");
+      setQuantityTouched(false);
+      setFormError(null);
+    }
+  }, [isOpen]);
+
+  function handleClose() {
+    if (createMutation.isPending) {
+      return;
+    }
+
+    onClose();
+  }
+
+  async function handleSubmit() {
+    setFormError(null);
+    setQuantityTouched(true);
+
+    if (!selectedProduct) {
+      setFormError("Debes seleccionar un producto del catalogo.");
+      return;
+    }
+
+    if (quantityValidationError) {
+      return;
+    }
+
+    try {
+      await createMutation.mutateAsync({
+        productId: selectedProduct.id,
+        quantity: Number.parseInt(draftQuantity, 10),
+      });
+      onClose();
+    } catch (error) {
+      if (error instanceof Error) {
+        setFormError(error.message);
+        return;
+      }
+
+      setFormError("No se pudo agregar el item.");
+    }
+  }
+
+  if (!isOpen) {
+    return null;
+  }
+
+  const products = productsQuery.data ?? [];
+  const hasSearch = deferredSearch.trim().length > 0;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/25 px-4 backdrop-blur-[2px]"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="add-order-item-title"
+    >
+      <div className="w-full max-w-2xl rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary/70">
+              Order items
+            </p>
+            <div className="space-y-1">
+              <h3 id="add-order-item-title" className="text-2xl font-semibold tracking-tight text-slate-950">
+                Agregar item
+              </h3>
+              <p className="text-sm leading-6 text-muted-foreground">
+                Selecciona un producto real del catalogo para crear un nuevo item en esta orden.
+              </p>
+            </div>
+          </div>
+
+          <Button type="button" variant="outline" onClick={handleClose} disabled={createMutation.isPending}>
+            Cancelar
+          </Button>
+        </div>
+
+        <div className="mt-6 space-y-4">
+          <div className="space-y-2">
+            <label htmlFor="order-item-product-search" className="text-sm font-medium text-slate-950">
+              Producto
+            </label>
+            <input
+              id="order-item-product-search"
+              type="text"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setFormError(null);
+              }}
+              placeholder="Buscar por nombre o SKU"
+              className="h-11 w-full rounded-[18px] border border-border bg-white px-4 text-sm text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+            />
+            <p className="text-xs text-muted-foreground">
+              Se muestran productos que todavia no existen en esta orden.
+            </p>
+          </div>
+
+          <div className="rounded-[22px] border border-border/70 bg-slate-50/70">
+            <div className="max-h-72 overflow-y-auto p-2">
+              {productsQuery.isLoading ? (
+                <p className="px-3 py-8 text-center text-sm text-muted-foreground">Cargando productos...</p>
+              ) : null}
+
+              {productsQuery.isError ? (
+                <p className="px-3 py-8 text-center text-sm font-medium text-rose-700">
+                  {productsQuery.error.message}
+                </p>
+              ) : null}
+
+              {!productsQuery.isLoading && !productsQuery.isError && products.length === 0 ? (
+                <p className="px-3 py-8 text-center text-sm text-muted-foreground">
+                  {hasSearch
+                    ? "No encontramos productos que coincidan con esta busqueda."
+                    : "No hay mas productos disponibles para agregar a esta orden."}
+                </p>
+              ) : null}
+
+              {!productsQuery.isLoading && !productsQuery.isError
+                ? products.map((product) => {
+                    const isSelected = selectedProduct?.id === product.id;
+
+                    return (
+                      <button
+                        key={product.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedProduct(product);
+                          setFormError(null);
+                        }}
+                        className={`flex w-full flex-col gap-1 rounded-[18px] px-4 py-3 text-left transition ${
+                          isSelected
+                            ? "bg-primary text-primary-foreground shadow-sm"
+                            : "bg-white text-slate-950 hover:bg-slate-100"
+                        }`}
+                      >
+                        <span className="text-sm font-semibold">{product.name}</span>
+                        <span
+                          className={`text-xs ${
+                            isSelected ? "text-primary-foreground/85" : "text-muted-foreground"
+                          }`}
+                        >
+                          {product.sku} {product.unitPriceCrc != null ? `• ${formatCurrencyCRC(product.unitPriceCrc)}` : ""}
+                        </span>
+                      </button>
+                    );
+                  })
+                : null}
+            </div>
+          </div>
+
+          <div className="rounded-[22px] border border-border/70 bg-white px-4 py-4">
+            <p className="text-sm font-medium text-slate-950">Resumen del nuevo item</p>
+            {selectedProduct ? (
+              <div className="mt-3 grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Producto</p>
+                  <p className="mt-1 font-medium text-slate-950">{selectedProduct.name}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">SKU</p>
+                  <p className="mt-1 font-medium text-slate-950">{selectedProduct.sku}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Cantidad inicial</p>
+                  <div className="mt-1 space-y-2">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={1}
+                      step={1}
+                      value={draftQuantity}
+                      onChange={(event) => {
+                        setDraftQuantity(event.target.value);
+                        setQuantityTouched(true);
+                        setFormError(null);
+                      }}
+                      disabled={createMutation.isPending}
+                      aria-label="Cantidad inicial del nuevo item"
+                      aria-invalid={quantityTouched && quantityValidationError ? true : undefined}
+                      className="h-11 w-28 rounded-full border border-border bg-white px-4 text-center font-medium text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-muted"
+                    />
+                    {quantityTouched && quantityValidationError ? (
+                      <p className="text-xs font-medium text-rose-700">{quantityValidationError}</p>
+                    ) : null}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Precio unitario</p>
+                  <p className="mt-1 font-medium text-slate-950">
+                    {selectedProduct.unitPriceCrc != null
+                      ? formatCurrencyCRC(selectedProduct.unitPriceCrc)
+                      : "Pendiente"}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-muted-foreground">
+                Elige un producto para ver el detalle que se guardara en `order_items`.
+              </p>
+            )}
+          </div>
+
+          {formError ? (
+            <p className="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+              {formError}
+            </p>
+          ) : null}
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+            <Button type="button" variant="outline" onClick={handleClose} disabled={createMutation.isPending}>
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={() => void handleSubmit()}
+              disabled={createMutation.isPending || !selectedProduct}
+            >
+              {createMutation.isPending ? "Guardando..." : "Agregar item"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
@@ -316,7 +567,7 @@ function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
             ) : null}
           </div>
       </td>
-      <td className="px-4 py-4 align-middle">
+      <td className="px-4 py-4 align-middle text-center">
         <div className="flex flex-col items-center gap-2">
           <span
             className="inline-flex"
@@ -399,73 +650,89 @@ function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
 }
 
 export function OrderItemsTable({ orderId, items }: OrderItemsTableProps) {
-  return (
-    <section className="rounded-[28px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-      <div className="space-y-2">
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
-          Order items
-        </p>
-        <div className="space-y-1">
-          <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
-            Items de la orden
-          </h2>
-          <p className="text-sm leading-6 text-muted-foreground">
-            Desglose preparado para futura edición de cantidades, precios y atributos.
-          </p>
-        </div>
-      </div>
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
-      <div className="mt-6 overflow-hidden rounded-[24px] border border-border/70">
-        <div className="overflow-x-auto">
-          <table className="min-w-full table-fixed divide-y divide-border/70 text-left">
-            <caption className="sr-only">
-              Items registrados dentro de la orden, con cantidades, precios y contexto del evento.
-            </caption>
-            <colgroup>
-              <col className="w-[230px]" />
-              <col className="w-[500px]" />
-              <col className="w-[180px]" />
-              <col className="w-[170px]" />
-              <col className="w-[170px]" />
-              <col className="w-[145px]" />
-              <col className="w-[165px]" />
-              <col className="w-[75px]" />
-            </colgroup>
-            <thead className="bg-muted/40 text-xs uppercase tracking-[0.16em] text-muted-foreground">
-              <tr>
-                <th scope="col" className="px-4 py-3 align-middle font-medium">Producto</th>
-                <th scope="col" className="px-4 py-3 align-middle font-medium">SKU</th>
-                <th scope="col" className="px-4 py-3 align-middle font-medium text-center">Cantidad</th>
-                <th scope="col" className="px-4 py-3 align-middle font-medium text-right">Precio unitario</th>
-                <th scope="col" className="px-4 py-3 align-middle font-medium text-right">Total</th>
-                <th scope="col" className="px-4 py-3 align-middle font-medium">Tema</th>
-                <th scope="col" className="px-4 py-3 align-middle font-medium text-center">Fecha Evento</th>
-                <th scope="col" className="px-4 py-3 align-middle font-medium text-center">
-                  <span className="sr-only">Accion</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border/60 bg-white">
-              {items.length > 0 ? (
-                items.map((item) => (
-                  <OrderItemRow
-                    key={item.id}
-                    item={item}
-                    orderId={orderId}
-                    itemCount={items.length}
-                  />
-                ))
-              ) : (
-                <TableEmptyStateRow
-                  colSpan={8}
-                  title="Esta orden no tiene items todavía"
-                  description="Cuando se registren productos, cantidades y precios aparecerán aquí para revisión operativa."
-                />
-              )}
-            </tbody>
-          </table>
+  return (
+    <>
+      <section className="rounded-[28px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-2">
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
+              Order items
+            </p>
+            <div className="space-y-1">
+              <h2 className="text-2xl font-semibold tracking-tight text-slate-950">
+                Items de la orden
+              </h2>
+              <p className="text-sm leading-6 text-muted-foreground">
+                Desglose preparado para futura edición de cantidades, precios y atributos.
+              </p>
+            </div>
+          </div>
+
+          <Button type="button" onClick={() => setIsAddModalOpen(true)}>
+            Agregar item
+          </Button>
         </div>
-      </div>
-    </section>
+
+        <div className="mt-6 overflow-hidden rounded-[24px] border border-border/70">
+          <div className="overflow-x-auto">
+            <table className="min-w-full table-fixed divide-y divide-border/70 text-left">
+              <caption className="sr-only">
+                Items registrados dentro de la orden, con cantidades, precios y contexto del evento.
+              </caption>
+              <colgroup>
+              <col className="w-[260px]" />
+              <col className="w-[240px]" />
+              <col className="w-[160px]" />
+              <col className="w-[155px]" />
+              <col className="w-[155px]" />
+              <col className="w-[120px]" />
+              <col className="w-[170px]" />
+              <col className="w-[88px]" />
+              </colgroup>
+              <thead className="bg-muted/40 text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                <tr>
+                  <th scope="col" className="px-4 py-3 align-middle font-medium">Producto</th>
+                  <th scope="col" className="px-4 py-3 align-middle font-medium">SKU</th>
+                  <th scope="col" className="px-4 py-3 align-middle font-medium text-center">Cantidad</th>
+                  <th scope="col" className="px-4 py-3 align-middle font-medium text-right">Precio unitario</th>
+                  <th scope="col" className="px-4 py-3 align-middle font-medium text-right">Total</th>
+                  <th scope="col" className="px-4 py-3 align-middle font-medium">Tema</th>
+                  <th scope="col" className="px-4 py-3 align-middle font-medium text-center">Fecha Evento</th>
+                  <th scope="col" className="px-4 py-3 align-middle font-medium text-center">
+                    <span className="sr-only">Accion</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/60 bg-white">
+                {items.length > 0 ? (
+                  items.map((item) => (
+                    <OrderItemRow
+                      key={item.id}
+                      item={item}
+                      orderId={orderId}
+                      itemCount={items.length}
+                    />
+                  ))
+                ) : (
+                  <TableEmptyStateRow
+                    colSpan={8}
+                    title="Esta orden no tiene items todavía"
+                    description="Cuando se registren productos, cantidades y precios aparecerán aquí para revisión operativa."
+                  />
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <AddOrderItemModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        orderId={orderId}
+      />
+    </>
   );
 }

@@ -119,6 +119,13 @@ export const updateOrderItemEventDateSchema = z
   })
   .strict();
 
+export const createOrderItemSchema = z
+  .object({
+    productId: z.string().trim().min(1),
+    quantity: z.number().int().positive(),
+  })
+  .strict();
+
 export const dashboardSummaryFiltersSchema = z
   .object({
     rangeDays: optionalPositiveInt,

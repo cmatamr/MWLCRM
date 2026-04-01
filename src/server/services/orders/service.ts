@@ -8,11 +8,12 @@ import {
   ServiceOptions,
 } from "@/server/services/shared";
 
-import { mapOrderDetail, mapOrderListItem } from "./mappers";
+import { mapOrderDetail, mapOrderItemProductOption, mapOrderListItem } from "./mappers";
 import type {
   ListOrdersParams,
   OrderDetail,
   OrderFilterOptions,
+  OrderItemProductOption,
   OrderPaymentConfirmationResult,
   OrdersListResponse,
 } from "./types";
@@ -93,6 +94,23 @@ export class DeleteOrderItemError extends Error {
   ) {
     super(message);
     this.name = "DeleteOrderItemError";
+    this.code = code;
+  }
+}
+
+export class CreateOrderItemError extends Error {
+  code:
+    | "ORDER_NOT_FOUND"
+    | "PRODUCT_NOT_FOUND"
+    | "PRODUCT_ALREADY_IN_ORDER";
+
+  constructor(
+    code: CreateOrderItemError["code"],
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "CreateOrderItemError";
     this.code = code;
   }
 }
@@ -292,6 +310,184 @@ async function recalculateOrderTotals(
       subtotalCrc,
       totalCrc,
     },
+  });
+}
+
+export async function listOrderItemProductOptions(
+  input: {
+    orderId: string;
+    query?: string;
+  },
+  options?: ServiceOptions,
+): Promise<OrderItemProductOption[]> {
+  const db = resolveDb(options);
+  const normalizedQuery = input.query?.trim();
+
+  const order = await db.order.findUnique({
+    where: {
+      id: input.orderId,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!order) {
+    throw new CreateOrderItemError("ORDER_NOT_FOUND", "Order not found.", {
+      orderId: input.orderId,
+    });
+  }
+
+  const products = await db.mwlProduct.findMany({
+    where: {
+      isActive: true,
+      isAgentVisible: true,
+      ...(normalizedQuery
+        ? {
+            OR: [
+              {
+                name: {
+                  contains: normalizedQuery,
+                  mode: "insensitive",
+                },
+              },
+              {
+                sku: {
+                  contains: normalizedQuery,
+                  mode: "insensitive",
+                },
+              },
+            ],
+          }
+        : {}),
+      orderItems: {
+        none: {
+          orderId: input.orderId,
+        },
+      },
+    },
+    orderBy: [
+      {
+        sortOrder: "asc",
+      },
+      {
+        name: "asc",
+      },
+    ],
+    take: 25,
+    select: {
+      id: true,
+      name: true,
+      sku: true,
+      priceCrc: true,
+      priceFromCrc: true,
+      category: true,
+      family: true,
+    },
+  });
+
+  return products.map(mapOrderItemProductOption);
+}
+
+export async function createOrderItem(
+  input: {
+    orderId: string;
+    productId: string;
+    quantity: number;
+  },
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: {
+        id: input.orderId,
+      },
+      select: {
+        id: true,
+        subtotalCrc: true,
+        totalCrc: true,
+      },
+    });
+
+    if (!order) {
+      throw new CreateOrderItemError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    const product = await tx.mwlProduct.findUnique({
+      where: {
+        id: input.productId,
+      },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        priceCrc: true,
+        priceFromCrc: true,
+      },
+    });
+
+    if (!product) {
+      throw new CreateOrderItemError("PRODUCT_NOT_FOUND", "Producto no encontrado.", {
+        orderId: input.orderId,
+        productId: input.productId,
+      });
+    }
+
+    const existingItem = await tx.orderItem.findFirst({
+      where: {
+        orderId: input.orderId,
+        productId: input.productId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (existingItem) {
+      throw new CreateOrderItemError(
+        "PRODUCT_ALREADY_IN_ORDER",
+        "Este producto ya existe dentro de la orden.",
+        {
+          orderId: input.orderId,
+          productId: input.productId,
+          itemId: existingItem.id.toString(),
+        },
+      );
+    }
+
+    const unitPriceCrc = product.priceCrc ?? product.priceFromCrc ?? null;
+
+    await tx.orderItem.create({
+      data: {
+        orderId: input.orderId,
+        productId: product.id,
+        quantity: input.quantity,
+        unitPriceCrc,
+        totalPriceCrc: unitPriceCrc != null ? unitPriceCrc * input.quantity : null,
+        productNameSnapshot: product.name,
+        skuSnapshot: product.sku,
+      },
+    });
+
+    await recalculateOrderTotals(tx, {
+      orderId: input.orderId,
+      previousSubtotalCrc: order.subtotalCrc,
+      previousTotalCrc: order.totalCrc,
+    });
+
+    const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
+
+    if (!updatedOrder) {
+      throw new CreateOrderItemError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    return mapOrderDetail(updatedOrder);
   });
 }
 

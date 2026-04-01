@@ -17,6 +17,7 @@ import type { FunnelSummary } from "@/server/services/funnel/types";
 import type {
   ListOrdersParams,
   OrderDetail,
+  OrderItemProductOption,
   OrderPaymentConfirmationResult,
   OrdersListResponse,
 } from "@/server/services/orders/types";
@@ -58,6 +59,23 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     },
     getOrder(id: string, init?: RequestInit) {
       return get<OrderDetail>(`/api/orders/${id}`, undefined, init);
+    },
+    getOrderItemProductOptions(orderId: string, query?: string, init?: RequestInit) {
+      return get<OrderItemProductOption[]>(`/api/orders/${orderId}/items/products`, { query }, init);
+    },
+    createOrderItem(orderId: string, productId: string, quantity: number, init?: RequestInit) {
+      return get<OrderDetail>(`/api/orders/${orderId}/items`, undefined, {
+        method: "POST",
+        body: JSON.stringify({
+          productId,
+          quantity,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
     },
     updateOrderItemQuantity(orderId: string, itemId: string, quantity: number, init?: RequestInit) {
       return get<OrderDetail>(`/api/orders/${orderId}/items/${itemId}`, undefined, {

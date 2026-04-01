@@ -56,6 +56,15 @@ export interface OrderItemSummary {
   notes: string | null;
 }
 
+export interface OrderItemProductOption {
+  id: string;
+  name: string;
+  sku: string;
+  unitPriceCrc: number | null;
+  category: string;
+  family: string;
+}
+
 export interface OrderReceiptSummary {
   id: string;
   status: string;

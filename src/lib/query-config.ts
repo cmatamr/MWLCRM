@@ -37,6 +37,8 @@ export const queryKeys = {
   dashboardSummary: (params?: { days?: DashboardDailySalesRangeDays; status?: OrderStatusEnum }) =>
     ["dashboard", "summary", normalizeQueryKeyParams(params)] as const,
   orderDetail: (id: string | null) => ["orders", "detail", id] as const,
+  orderItemProductOptions: (orderId: string | null, query?: string) =>
+    ["orders", "detail", orderId, "item-product-options", normalizeQueryKeyParams({ query })] as const,
   orders: (params?: ListOrdersParams) => ["orders", normalizeQueryKeyParams(params)] as const,
   customers: (params?: ListCustomersParams) => ["customers", normalizeQueryKeyParams(params)] as const,
   campaigns: (params?: ListCampaignsParams) => ["campaigns", normalizeQueryKeyParams(params)] as const,
