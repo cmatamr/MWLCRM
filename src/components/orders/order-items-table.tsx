@@ -6,13 +6,13 @@ import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TableEmptyStateRow } from "@/components/ui/state-display";
 import { useCreateOrderItem } from "@/hooks/use-create-order-item";
-import { useUpdateOrderItemEventDate } from "@/hooks/use-update-order-item-event-date";
+import { useUpdateOrderItemDeliveryDate } from "@/hooks/use-update-order-item-event-date";
 import { useUpdateOrderItemQuantity } from "@/hooks/use-update-order-item-quantity";
 import { useDeleteOrderItem } from "@/hooks/use-delete-order-item";
 import { formatCalendarDate, formatCurrencyCRC } from "@/lib/formatters";
 import type { OrderItemSummary } from "@/server/services/orders/types";
 
-import { validateOrderItemEventDateInput, validateOrderItemQuantityInput } from "./order-item-form-utils";
+import { validateOrderItemDeliveryDateInput, validateOrderItemQuantityInput } from "./order-item-form-utils";
 import { OrderItemPicker } from "./order-item-picker";
 
 type OrderItemsTableProps = {
@@ -120,12 +120,12 @@ function AddOrderItemModal({ isOpen, onClose, orderId }: AddOrderItemModalProps)
 
 function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
   const quantityMutation = useUpdateOrderItemQuantity(orderId);
-  const eventDateMutation = useUpdateOrderItemEventDate(orderId);
+  const deliveryDateMutation = useUpdateOrderItemDeliveryDate(orderId);
   const deleteMutation = useDeleteOrderItem(orderId);
   const [draftQuantity, setDraftQuantity] = useState(String(item.quantity));
   const [quantityTouched, setQuantityTouched] = useState(false);
-  const [draftEventDate, setDraftEventDate] = useState(item.eventDate ?? "");
-  const [eventDateTouched, setEventDateTouched] = useState(false);
+  const [draftDeliveryDate, setDraftDeliveryDate] = useState(item.deliveryDate ?? "");
+  const [deliveryDateTouched, setDeliveryDateTouched] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
 
@@ -135,19 +135,19 @@ function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
   }, [item.quantity]);
 
   useEffect(() => {
-    setDraftEventDate(item.eventDate ?? "");
-    setEventDateTouched(false);
-  }, [item.eventDate]);
+    setDraftDeliveryDate(item.deliveryDate ?? "");
+    setDeliveryDateTouched(false);
+  }, [item.deliveryDate]);
 
   const validationError = useMemo(() => validateOrderItemQuantityInput(draftQuantity), [draftQuantity]);
-  const eventDateValidationError = useMemo(
-    () => validateOrderItemEventDateInput(draftEventDate),
-    [draftEventDate],
+  const deliveryDateValidationError = useMemo(
+    () => validateOrderItemDeliveryDateInput(draftDeliveryDate),
+    [draftDeliveryDate],
   );
   const isDirty = draftQuantity.trim() !== String(item.quantity);
-  const isDateDirty = draftEventDate.trim() !== (item.eventDate ?? "");
+  const isDateDirty = draftDeliveryDate.trim() !== (item.deliveryDate ?? "");
   const isSaving = quantityMutation.isPending;
-  const isDateSaving = eventDateMutation.isPending;
+  const isDateSaving = deliveryDateMutation.isPending;
   const isDeleting = deleteMutation.isPending;
   const isLastItem = itemCount <= 1;
 
@@ -189,18 +189,18 @@ function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
     }
   }
 
-  async function handleEventDateSave() {
-    const error = validateOrderItemEventDateInput(draftEventDate);
+  async function handleDeliveryDateSave() {
+    const error = validateOrderItemDeliveryDateInput(draftDeliveryDate);
 
-    setEventDateTouched(true);
+    setDeliveryDateTouched(true);
 
     if (error || !isDateDirty || isDateSaving) {
       return;
     }
 
-    await eventDateMutation.mutateAsync({
+    await deliveryDateMutation.mutateAsync({
       itemId: item.id,
-      eventDate: draftEventDate.trim() || null,
+      deliveryDate: draftDeliveryDate.trim() || null,
     });
   }
 
@@ -243,31 +243,31 @@ function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
     setIsDeleteDialogOpen(false);
   }
 
-  async function handleEventDateBlur() {
-    setEventDateTouched(true);
+  async function handleDeliveryDateBlur() {
+    setDeliveryDateTouched(true);
 
-    if (!isDateDirty || eventDateValidationError || isDateSaving) {
+    if (!isDateDirty || deliveryDateValidationError || isDateSaving) {
       return;
     }
 
-    await handleEventDateSave();
+    await handleDeliveryDateSave();
   }
 
-  function handleEventDateKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+  function handleDeliveryDateKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Enter") {
       event.preventDefault();
-      void handleEventDateSave();
+      void handleDeliveryDateSave();
       return;
     }
 
     if (event.key === "Escape") {
-      setDraftEventDate(item.eventDate ?? "");
-      setEventDateTouched(false);
+      setDraftDeliveryDate(item.deliveryDate ?? "");
+      setDeliveryDateTouched(false);
     }
   }
 
   const showValidationError = quantityTouched && validationError;
-  const showEventDateValidationError = eventDateTouched && eventDateValidationError;
+  const showDeliveryDateValidationError = deliveryDateTouched && deliveryDateValidationError;
 
   return (
     <>
@@ -331,13 +331,13 @@ function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
           <div className="flex w-full flex-col items-end gap-2 overflow-hidden">
             <input
               type="date"
-              value={draftEventDate}
-              onChange={(event) => setDraftEventDate(event.target.value)}
-              onBlur={() => void handleEventDateBlur()}
-              onKeyDown={handleEventDateKeyDown}
+              value={draftDeliveryDate}
+              onChange={(event) => setDraftDeliveryDate(event.target.value)}
+              onBlur={() => void handleDeliveryDateBlur()}
+              onKeyDown={handleDeliveryDateKeyDown}
               disabled={isDateSaving}
-              aria-label={`Fecha de evento para ${item.productName ?? item.id}`}
-              aria-invalid={showEventDateValidationError ? true : undefined}
+              aria-label={`Fecha de entrega para ${item.productName ?? item.id}`}
+              aria-invalid={showDeliveryDateValidationError ? true : undefined}
               lang="en-GB"
               style={{
                 width: "140px",
@@ -350,14 +350,14 @@ function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
             {isDateSaving ? (
               <p className="text-center text-xs font-medium text-muted-foreground">Guardando...</p>
             ) : null}
-            {showEventDateValidationError ? (
-              <p className="text-center text-xs font-medium text-rose-700">{eventDateValidationError}</p>
+            {showDeliveryDateValidationError ? (
+              <p className="text-center text-xs font-medium text-rose-700">{deliveryDateValidationError}</p>
             ) : null}
-            {eventDateMutation.isError ? (
-              <p className="text-center text-xs font-medium text-rose-700">{eventDateMutation.error.message}</p>
+            {deliveryDateMutation.isError ? (
+              <p className="text-center text-xs font-medium text-rose-700">{deliveryDateMutation.error.message}</p>
             ) : null}
-            {!draftEventDate && item.eventDate ? (
-              <p className="text-center text-xs text-muted-foreground">{formatCalendarDate(item.eventDate)}</p>
+            {!draftDeliveryDate && item.deliveryDate ? (
+              <p className="text-center text-xs text-muted-foreground">{formatCalendarDate(item.deliveryDate)}</p>
             ) : null}
           </div>
       </td>

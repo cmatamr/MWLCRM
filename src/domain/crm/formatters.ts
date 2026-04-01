@@ -107,6 +107,12 @@ const monthLabelsShort = [
   "dic",
 ] as const;
 
+function toValidDate(value: Date | string | number) {
+  const date = new Date(value);
+
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
 export function formatCurrencyCRC(value: number) {
   const sign = value < 0 ? "-" : "";
   const absoluteValue = Math.abs(value);
@@ -117,7 +123,12 @@ export function formatCurrencyCRC(value: number) {
 }
 
 export function formatDateTime(value: Date | string | number) {
-  const date = new Date(value);
+  const date = toValidDate(value);
+
+  if (!date) {
+    return "Fecha invalida";
+  }
+
   const day = date.getDate();
   const month = monthLabelsShort[date.getMonth()] ?? "";
   const year = date.getFullYear();
@@ -130,7 +141,9 @@ export function formatDateTime(value: Date | string | number) {
 }
 
 export function formatDate(value: Date | string | number) {
-  return dateFormatter.format(new Date(value));
+  const date = toValidDate(value);
+
+  return date ? dateFormatter.format(date) : "Fecha invalida";
 }
 
 export function formatCalendarDate(value: Date | string | number) {
@@ -139,15 +152,20 @@ export function formatCalendarDate(value: Date | string | number) {
 
     if (matchedDate) {
       const [, year, month, day] = matchedDate;
-      return dateOnlyFormatter.format(new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))));
+      const date = toValidDate(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+      return date ? dateOnlyFormatter.format(date) : "Fecha invalida";
     }
   }
 
-  return dateOnlyFormatter.format(new Date(value));
+  const date = toValidDate(value);
+
+  return date ? dateOnlyFormatter.format(date) : "Fecha invalida";
 }
 
 export function formatShortDate(value: Date | string | number) {
-  return shortDateFormatter.format(new Date(value));
+  const date = toValidDate(value);
+
+  return date ? shortDateFormatter.format(date) : "Fecha invalida";
 }
 
 export function formatChannelLabel(channel: ChannelType) {
@@ -283,15 +301,15 @@ export function getCustomerStatusBadge(status: string | null): StatusBadgeViewMo
 export function getStatusBadgeClassName(tone: BadgeTone) {
   switch (tone) {
     case "success":
-      return "inline-flex items-center rounded-full border border-emerald-200/80 bg-emerald-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-800";
+      return "inline-flex items-center justify-center rounded-full border border-emerald-200/80 bg-emerald-100 px-3 py-1 text-center text-xs font-semibold uppercase leading-none tracking-[0.12em] text-emerald-800";
     case "warning":
-      return "inline-flex items-center rounded-full border border-amber-200/80 bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-amber-800";
+      return "inline-flex items-center justify-center rounded-full border border-amber-200/80 bg-amber-100 px-3 py-1 text-center text-xs font-semibold uppercase leading-none tracking-[0.12em] text-amber-800";
     case "danger":
-      return "inline-flex items-center rounded-full border border-rose-200/80 bg-rose-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-rose-700";
+      return "inline-flex items-center justify-center rounded-full border border-rose-200/80 bg-rose-100 px-3 py-1 text-center text-xs font-semibold uppercase leading-none tracking-[0.12em] text-rose-700";
     case "info":
-      return "inline-flex items-center rounded-full border border-primary/10 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-primary";
+      return "inline-flex items-center justify-center rounded-full border border-primary/10 bg-primary/10 px-3 py-1 text-center text-xs font-semibold uppercase leading-none tracking-[0.12em] text-primary";
     case "neutral":
     default:
-      return "inline-flex items-center rounded-full border border-border/80 bg-white/85 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-700";
+      return "inline-flex items-center justify-center rounded-full border border-border/80 bg-white/85 px-3 py-1 text-center text-xs font-semibold uppercase leading-none tracking-[0.12em] text-slate-700";
   }
 }

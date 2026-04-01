@@ -251,6 +251,25 @@ $$;
 ALTER FUNCTION "public"."mwl_refresh_product_search_index"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."order_items_apply_default_delivery_date"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  IF NEW.delivery_date IS NULL THEN
+    SELECT o.delivery_date
+    INTO NEW.delivery_date
+    FROM public.orders o
+    WHERE o.id = NEW.order_id;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."order_items_apply_default_delivery_date"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."rls_auto_enable"() RETURNS "event_trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'pg_catalog'
@@ -439,14 +458,15 @@ CREATE TABLE IF NOT EXISTS "public"."orders" (
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "contact_id" "uuid",
-    "status" "public"."order_status_enum" DEFAULT 'draft'::"public"."order_status_enum" NOT NULL
+    "status" "public"."order_status_enum" DEFAULT 'draft'::"public"."order_status_enum" NOT NULL,
+    "delivery_date" "date"
 );
 
 
 ALTER TABLE "public"."orders" OWNER TO "postgres";
 
 
-CREATE OR REPLACE VIEW "public"."campaign_kpi" AS
+CREATE OR REPLACE VIEW "public"."campaign_kpi" WITH ("security_invoker"='on') AS
  WITH "spend" AS (
          SELECT "campaign_spend"."campaign_id",
             "sum"("campaign_spend"."amount_crc") AS "total_spend"
@@ -566,7 +586,7 @@ CREATE TABLE IF NOT EXISTS "public"."messages" (
 ALTER TABLE "public"."messages" OWNER TO "postgres";
 
 
-CREATE OR REPLACE VIEW "public"."conversation_summary" AS
+CREATE OR REPLACE VIEW "public"."conversation_summary" WITH ("security_invoker"='on') AS
  WITH "msg" AS (
          SELECT "messages"."lead_thread_id",
             "count"(*) AS "total_messages",
@@ -1065,7 +1085,7 @@ CREATE TABLE IF NOT EXISTS "public"."order_items" (
     "product_name_snapshot" "text",
     "sku_snapshot" "text",
     "theme" "text",
-    "event_date" "date",
+    "delivery_date" "date",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "item_notes" "text"
 );
@@ -1076,6 +1096,21 @@ ALTER TABLE "public"."order_items" OWNER TO "postgres";
 
 COMMENT ON COLUMN "public"."order_items"."item_notes" IS 'Detalles especificos del item que no tienen campo estructurado propio; no usar para contexto global de la orden ni duplicar quantity, theme o unit_price_crc.';
 
+
+
+CREATE OR REPLACE VIEW "public"."order_items_delivery_exceptions" AS
+ SELECT "oi"."id",
+    "oi"."order_id",
+    "oi"."product_id",
+    "oi"."product_name_snapshot",
+    "oi"."delivery_date" AS "item_delivery_date",
+    "o"."delivery_date" AS "order_delivery_date"
+   FROM ("public"."order_items" "oi"
+     JOIN "public"."orders" "o" ON (("o"."id" = "oi"."order_id")))
+  WHERE (("oi"."delivery_date" IS NOT NULL) AND ("o"."delivery_date" IS NOT NULL) AND ("oi"."delivery_date" IS DISTINCT FROM "o"."delivery_date"));
+
+
+ALTER VIEW "public"."order_items_delivery_exceptions" OWNER TO "postgres";
 
 
 CREATE SEQUENCE IF NOT EXISTS "public"."order_items_id_seq"
@@ -1109,7 +1144,6 @@ CREATE TABLE IF NOT EXISTS "public"."payment_receipts" (
     "destination_phone" "text",
     "receipt_date" "date",
     "receipt_time" "text",
-    "raw_payload" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
     "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
 );
@@ -1589,6 +1623,10 @@ CREATE OR REPLACE TRIGGER "trg_cw_mapping_updated_at" BEFORE UPDATE ON "public".
 
 
 CREATE OR REPLACE TRIGGER "trg_followups_updated_at" BEFORE UPDATE ON "public"."followups" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "trg_order_items_apply_default_delivery_date" BEFORE INSERT OR UPDATE OF "order_id", "delivery_date" ON "public"."order_items" FOR EACH ROW WHEN (("new"."delivery_date" IS NULL)) EXECUTE FUNCTION "public"."order_items_apply_default_delivery_date"();
 
 
 
@@ -2073,6 +2111,12 @@ GRANT ALL ON FUNCTION "public"."mwl_refresh_product_search_index"() TO "service_
 
 
 
+GRANT ALL ON FUNCTION "public"."order_items_apply_default_delivery_date"() TO "anon";
+GRANT ALL ON FUNCTION "public"."order_items_apply_default_delivery_date"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."order_items_apply_default_delivery_date"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "anon";
 GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."rls_auto_enable"() TO "service_role";
@@ -2437,6 +2481,12 @@ GRANT ALL ON SEQUENCE "public"."n8n_chat_histories_id_seq" TO "service_role";
 GRANT ALL ON TABLE "public"."order_items" TO "anon";
 GRANT ALL ON TABLE "public"."order_items" TO "authenticated";
 GRANT ALL ON TABLE "public"."order_items" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."order_items_delivery_exceptions" TO "anon";
+GRANT ALL ON TABLE "public"."order_items_delivery_exceptions" TO "authenticated";
+GRANT ALL ON TABLE "public"."order_items_delivery_exceptions" TO "service_role";
 
 
 

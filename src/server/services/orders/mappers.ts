@@ -17,7 +17,15 @@ import type {
 
 type OrderListRecord = Pick<
   Order,
-  "id" | "status" | "paymentStatus" | "totalCrc" | "subtotalCrc" | "currency" | "createdAt" | "updatedAt"
+  | "id"
+  | "status"
+  | "paymentStatus"
+  | "totalCrc"
+  | "subtotalCrc"
+  | "currency"
+  | "createdAt"
+  | "updatedAt"
+  | "deliveryDate"
 > & {
   contact: Pick<Contact, "id" | "displayName"> | null;
 };
@@ -35,7 +43,7 @@ type OrderDetailRecord = Order & {
     | "unitPriceCrc"
     | "totalPriceCrc"
     | "theme"
-    | "eventDate"
+    | "deliveryDate"
     | "itemNotes"
   >[];
   paymentReceipts: Pick<
@@ -79,6 +87,7 @@ export function mapOrderListItem(order: OrderListRecord): OrderListItem {
     currency: order.currency,
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
+    deliveryDate: toNullableIsoDate(order.deliveryDate),
     customer: mapCustomerReference({
       id: order.contact?.id,
       name: order.contact?.displayName,
@@ -96,7 +105,7 @@ export function mapOrderItemSummary(item: OrderDetailRecord["items"][number]): O
     unitPriceCrc: item.unitPriceCrc,
     totalPriceCrc: item.totalPriceCrc,
     theme: item.theme,
-    eventDate: item.eventDate ? item.eventDate.toISOString().slice(0, 10) : null,
+    deliveryDate: item.deliveryDate ? item.deliveryDate.toISOString().slice(0, 10) : null,
     notes: normalizeOptionalText(item.itemNotes),
   };
 }
@@ -152,6 +161,7 @@ export function mapOrderDetail(order: OrderDetailRecord): OrderDetail {
     notes: normalizeOptionalText(order.notes),
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
+    deliveryDate: toNullableIsoDate(order.deliveryDate),
     customer: mapCustomerReferenceWithExternalId({
       id: order.contact?.id,
       name: order.contact?.displayName,

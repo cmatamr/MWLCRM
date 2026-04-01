@@ -153,6 +153,7 @@ model Order {
   updatedAt       DateTime          @default(now()) @map("updated_at") @db.Timestamptz(6)
   contactId       String?           @map("contact_id") @db.Uuid
   status          OrderStatusEnum   @default(draft)
+  deliveryDate    DateTime?         @map("delivery_date") @db.Date
   contact         Contact?          @relation(fields: [contactId], references: [id], map: "orders_contact_id_fkey")
   leadThread      LeadThread        @relation(fields: [leadThreadId], references: [id], map: "orders_lead_thread_id_fkey")
   items           OrderItem[]
@@ -173,7 +174,7 @@ model OrderItem {
   productNameSnapshot String?     @map("product_name_snapshot")
   skuSnapshot         String?     @map("sku_snapshot")
   theme               String?
-  eventDate           DateTime?   @map("event_date") @db.Date
+  deliveryDate        DateTime?   @map("delivery_date") @db.Date
   createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   itemNotes           String?     @map("item_notes")
   order               Order       @relation(fields: [orderId], references: [id], onDelete: Cascade, map: "order_items_order_id_fkey")

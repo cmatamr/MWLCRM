@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { formatLeadStageLabel } from "@/domain/crm/formatters";
-import { formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
+import { formatCalendarDate, formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
 import type { OrderDetail } from "@/server/services/orders/types";
 import { StatusBadge, StatusBadgeFromViewModel } from "@/components/ui/status-badge";
 
@@ -39,6 +39,11 @@ export function OrderSummaryCard({ order }: OrderSummaryCardProps) {
       label: "Actualizada",
       value: formatDateTime(order.updatedAt),
       hint: "Último cambio persistido",
+    },
+    {
+      label: "Entrega",
+      value: order.deliveryDate ? formatCalendarDate(order.deliveryDate) : "Sin fecha",
+      hint: "Fecha general de entrega de la orden",
     },
   ];
 

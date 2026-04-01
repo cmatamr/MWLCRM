@@ -18,7 +18,7 @@ export function validateOrderItemQuantityInput(value: string) {
   return null;
 }
 
-export function validateOrderItemEventDateInput(value: string) {
+export function validateOrderItemDeliveryDateInput(value: string) {
   const normalized = value.trim();
 
   if (!normalized) {
@@ -32,7 +32,7 @@ export function validateOrderItemEventDateInput(value: string) {
   const parts = normalized.split("-").map((part) => Number(part));
 
   if (parts.length !== 3) {
-    return "La fecha de evento no es valida.";
+    return "La fecha de entrega no es valida.";
   }
 
   const year = parts[0] ?? Number.NaN;
@@ -46,7 +46,7 @@ export function validateOrderItemEventDateInput(value: string) {
     candidate.getUTCMonth() !== month - 1 ||
     candidate.getUTCDate() !== day
   ) {
-    return "La fecha de evento no es valida.";
+    return "La fecha de entrega no es valida.";
   }
 
   return null;

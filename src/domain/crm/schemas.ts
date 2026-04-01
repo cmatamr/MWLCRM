@@ -110,11 +110,20 @@ export const updateOrderItemQuantitySchema = z
   })
   .strict();
 
-export const updateOrderItemEventDateSchema = z
+export const updateOrderItemDeliveryDateSchema = z
   .object({
-    eventDate: z.preprocess(
+    deliveryDate: z.preprocess(
       normalizeNullableDateString,
-      z.union([z.string().refine(isValidIsoDateOnly, "Invalid event date."), z.null()]),
+      z.union([z.string().refine(isValidIsoDateOnly, "Invalid delivery date."), z.null()]),
+    ),
+  })
+  .strict();
+
+export const updateOrderDeliveryDateSchema = z
+  .object({
+    deliveryDate: z.preprocess(
+      normalizeNullableDateString,
+      z.union([z.string().refine(isValidIsoDateOnly, "Invalid delivery date."), z.null()]),
     ),
   })
   .strict();

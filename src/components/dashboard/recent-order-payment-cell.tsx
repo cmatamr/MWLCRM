@@ -38,12 +38,14 @@ type RecentOrderPaymentCellProps = {
   orderId: string;
   orderStatus: OrderStatusEnum;
   paymentStatus: string;
+  iconOnly?: boolean;
 };
 
 export function RecentOrderPaymentCell({
   orderId,
   orderStatus,
   paymentStatus,
+  iconOnly = false,
 }: RecentOrderPaymentCellProps) {
   const mutation = useConfirmOrderPayment();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -183,10 +185,9 @@ export function RecentOrderPaymentCell({
 
   return (
     <>
-      <div ref={containerRef} className="space-y-2">
-        <div className="flex items-start justify-between gap-2">
-          <StatusBadgeFromViewModel badge={paymentBadge} />
-          {isConfirmable ? (
+      <div ref={containerRef} className={iconOnly ? undefined : "space-y-2"}>
+        {iconOnly ? (
+          isConfirmable ? (
             <div className="relative shrink-0">
               <Button
                 type="button"
@@ -203,18 +204,42 @@ export function RecentOrderPaymentCell({
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </div>
-          ) : null}
-        </div>
+          ) : null
+        ) : (
+          <>
+            <div className="flex items-start justify-between gap-2">
+              <StatusBadgeFromViewModel badge={paymentBadge} />
+              {isConfirmable ? (
+                <div className="relative shrink-0">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    ref={triggerRef}
+                    className="h-8 w-8 rounded-full border border-border/70 bg-white/80 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                    aria-haspopup="menu"
+                    aria-expanded={isMenuOpen}
+                    aria-label="Abrir acciones de pago"
+                    onClick={() => setIsMenuOpen((current) => !current)}
+                    disabled={mutation.isPending}
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </div>
+              ) : null}
+            </div>
 
-        {mutation.isError ? (
-          <p className="text-xs font-medium text-rose-700">{mutation.error.message}</p>
-        ) : null}
+            {mutation.isError ? (
+              <p className="text-xs font-medium text-rose-700">{mutation.error.message}</p>
+            ) : null}
 
-        {mutation.isSuccess ? (
-          <p className="text-xs font-medium text-emerald-700">
-            Pago verificado y orden enviada a produccion.
-          </p>
-        ) : null}
+            {mutation.isSuccess ? (
+              <p className="text-xs font-medium text-emerald-700">
+                Pago verificado y orden enviada a produccion.
+              </p>
+            ) : null}
+          </>
+        )}
       </div>
 
       {menuPortal}

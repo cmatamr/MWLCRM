@@ -27,6 +27,7 @@ export interface OrderListItem {
   currency: string;
   createdAt: string;
   updatedAt: string;
+  deliveryDate: string | null;
   customer: CustomerReference;
 }
 
@@ -43,6 +44,10 @@ export interface OrderPaymentConfirmationResult {
   updatedAt: string;
 }
 
+export interface DeleteOrderResult {
+  id: string;
+}
+
 export interface OrderItemSummary {
   id: string;
   productId: string | null;
@@ -52,7 +57,7 @@ export interface OrderItemSummary {
   unitPriceCrc: number | null;
   totalPriceCrc: number | null;
   theme: string | null;
-  eventDate: string | null;
+  deliveryDate: string | null;
   notes: string | null;
 }
 
@@ -102,6 +107,7 @@ export interface OrderDetail {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  deliveryDate: string | null;
   customer: CustomerReferenceWithExternalId;
   conversation: {
     id: string;

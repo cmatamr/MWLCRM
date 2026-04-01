@@ -103,16 +103,30 @@ export class UpdateOrderItemQuantityError extends Error {
   }
 }
 
-export class UpdateOrderItemEventDateError extends Error {
+export class UpdateOrderItemDeliveryDateError extends Error {
   code: "ORDER_NOT_FOUND" | "ITEM_NOT_FOUND" | "ITEM_NOT_IN_ORDER";
 
   constructor(
-    code: UpdateOrderItemEventDateError["code"],
+    code: UpdateOrderItemDeliveryDateError["code"],
     message: string,
     readonly details?: Record<string, unknown>,
   ) {
     super(message);
-    this.name = "UpdateOrderItemEventDateError";
+    this.name = "UpdateOrderItemDeliveryDateError";
+    this.code = code;
+  }
+}
+
+export class UpdateOrderDeliveryDateError extends Error {
+  code: "ORDER_NOT_FOUND";
+
+  constructor(
+    code: UpdateOrderDeliveryDateError["code"],
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "UpdateOrderDeliveryDateError";
     this.code = code;
   }
 }
@@ -144,6 +158,20 @@ export class CreateOrderItemError extends Error {
   ) {
     super(message);
     this.name = "CreateOrderItemError";
+    this.code = code;
+  }
+}
+
+export class DeleteOrderError extends Error {
+  code: "ORDER_NOT_FOUND";
+
+  constructor(
+    code: DeleteOrderError["code"],
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "DeleteOrderError";
     this.code = code;
   }
 }
@@ -287,7 +315,7 @@ async function findOrderDetailRecord(db: OrdersDbClient, orderId: string) {
           unitPriceCrc: true,
           totalPriceCrc: true,
           theme: true,
-          eventDate: true,
+          deliveryDate: true,
           itemNotes: true,
         },
       },
@@ -899,11 +927,11 @@ export async function deleteOrderItem(
   });
 }
 
-export async function updateOrderItemEventDate(
+export async function updateOrderItemDeliveryDate(
   input: {
     orderId: string;
     itemId: bigint;
-    eventDate: string | null;
+    deliveryDate: string | null;
   },
   options?: ServiceOptions,
 ): Promise<OrderDetail> {
@@ -920,7 +948,7 @@ export async function updateOrderItemEventDate(
     });
 
     if (!order) {
-      throw new UpdateOrderItemEventDateError("ORDER_NOT_FOUND", "Order not found.", {
+      throw new UpdateOrderItemDeliveryDateError("ORDER_NOT_FOUND", "Order not found.", {
         orderId: input.orderId,
       });
     }
@@ -936,14 +964,14 @@ export async function updateOrderItemEventDate(
     });
 
     if (!item) {
-      throw new UpdateOrderItemEventDateError("ITEM_NOT_FOUND", "Order item not found.", {
+      throw new UpdateOrderItemDeliveryDateError("ITEM_NOT_FOUND", "Order item not found.", {
         orderId: input.orderId,
         itemId: input.itemId.toString(),
       });
     }
 
     if (item.orderId !== input.orderId) {
-      throw new UpdateOrderItemEventDateError(
+      throw new UpdateOrderItemDeliveryDateError(
         "ITEM_NOT_IN_ORDER",
         "Order item does not belong to the requested order.",
         {
@@ -959,19 +987,99 @@ export async function updateOrderItemEventDate(
         id: item.id,
       },
       data: {
-        eventDate: input.eventDate ? new Date(`${input.eventDate}T00:00:00.000Z`) : null,
+        deliveryDate: input.deliveryDate ? new Date(`${input.deliveryDate}T00:00:00.000Z`) : null,
       },
     });
 
     const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
 
     if (!updatedOrder) {
-      throw new UpdateOrderItemEventDateError("ORDER_NOT_FOUND", "Order not found.", {
+      throw new UpdateOrderItemDeliveryDateError("ORDER_NOT_FOUND", "Order not found.", {
         orderId: input.orderId,
       });
     }
 
     return mapOrderDetail(updatedOrder);
+  });
+}
+
+export async function updateOrderDeliveryDate(
+  input: {
+    orderId: string;
+    deliveryDate: string | null;
+  },
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: {
+        id: input.orderId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!order) {
+      throw new UpdateOrderDeliveryDateError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    await tx.order.update({
+      where: {
+        id: input.orderId,
+      },
+      data: {
+        deliveryDate: input.deliveryDate ? new Date(`${input.deliveryDate}T00:00:00.000Z`) : null,
+      },
+    });
+
+    const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
+
+    if (!updatedOrder) {
+      throw new UpdateOrderDeliveryDateError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    return mapOrderDetail(updatedOrder);
+  });
+}
+
+export async function deleteOrder(
+  orderId: string,
+  options?: ServiceOptions,
+): Promise<{ id: string }> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: {
+        id: orderId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!order) {
+      throw new DeleteOrderError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId,
+      });
+    }
+
+    await tx.order.delete({
+      where: {
+        id: orderId,
+      },
+    });
+
+    return {
+      id: orderId,
+    };
   });
 }
 

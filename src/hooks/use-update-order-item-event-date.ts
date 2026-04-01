@@ -7,17 +7,17 @@ import type { FetcherError } from "@/lib/fetcher";
 import { queryKeys } from "@/lib/query-config";
 import type { OrderDetail } from "@/server/services/orders/types";
 
-type UpdateOrderItemEventDateInput = {
+type UpdateOrderItemDeliveryDateInput = {
   itemId: string;
-  eventDate: string | null;
+  deliveryDate: string | null;
 };
 
-export function useUpdateOrderItemEventDate(orderId: string) {
+export function useUpdateOrderItemDeliveryDate(orderId: string) {
   const queryClient = useQueryClient();
 
-  return useMutation<OrderDetail, FetcherError, UpdateOrderItemEventDateInput>({
-    mutationFn: ({ itemId, eventDate }) =>
-      crmApiClient.updateOrderItemEventDate(orderId, itemId, eventDate),
+  return useMutation<OrderDetail, FetcherError, UpdateOrderItemDeliveryDateInput>({
+    mutationFn: ({ itemId, deliveryDate }) =>
+      crmApiClient.updateOrderItemDeliveryDate(orderId, itemId, deliveryDate),
     onSuccess: async (order) => {
       queryClient.setQueryData(queryKeys.orderDetail(orderId), order);
 

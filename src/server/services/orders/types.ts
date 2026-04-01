@@ -1,6 +1,7 @@
 export type {
   CreateOrderInput,
   CreateOrderItemInput,
+  DeleteOrderResult,
   ListOrdersParams,
   OrderDetail,
   OrderFilterOptions,

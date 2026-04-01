@@ -16,6 +16,7 @@ import type {
 import type { FunnelSummary } from "@/server/services/funnel/types";
 import type {
   CreateOrderInput,
+  DeleteOrderResult,
   ListOrdersParams,
   OrderDetail,
   OrderItemProductOption,
@@ -60,6 +61,25 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     },
     getOrder(id: string, init?: RequestInit) {
       return get<OrderDetail>(`/api/orders/${id}`, undefined, init);
+    },
+    deleteOrder(id: string, init?: RequestInit) {
+      return get<DeleteOrderResult>(`/api/orders/${id}`, undefined, {
+        method: "DELETE",
+        ...init,
+      });
+    },
+    updateOrderDeliveryDate(id: string, deliveryDate: string | null, init?: RequestInit) {
+      return get<OrderDetail>(`/api/orders/${id}/delivery-date`, undefined, {
+        method: "PATCH",
+        body: JSON.stringify({
+          deliveryDate,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
     },
     getOrderItemProductOptions(orderId: string, query?: string, init?: RequestInit) {
       return get<OrderItemProductOption[]>(`/api/orders/${orderId}/items/products`, { query }, init);
@@ -111,16 +131,16 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
         ...init,
       });
     },
-    updateOrderItemEventDate(
+    updateOrderItemDeliveryDate(
       orderId: string,
       itemId: string,
-      eventDate: string | null,
+      deliveryDate: string | null,
       init?: RequestInit,
     ) {
-      return get<OrderDetail>(`/api/orders/${orderId}/items/${itemId}/event-date`, undefined, {
+      return get<OrderDetail>(`/api/orders/${orderId}/items/${itemId}/delivery-date`, undefined, {
         method: "PATCH",
         body: JSON.stringify({
-          eventDate,
+          deliveryDate,
         }),
         headers: {
           "Content-Type": "application/json",
