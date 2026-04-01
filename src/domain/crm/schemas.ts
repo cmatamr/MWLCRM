@@ -126,6 +126,13 @@ export const createOrderItemSchema = z
   })
   .strict();
 
+export const createOrderSchema = z
+  .object({
+    customerId: z.string().uuid(),
+    items: z.array(createOrderItemSchema).min(1),
+  })
+  .strict();
+
 export const dashboardSummaryFiltersSchema = z
   .object({
     rangeDays: optionalPositiveInt,

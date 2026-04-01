@@ -1,6 +1,10 @@
 import { OrderStatusEnum, Prisma } from "@prisma/client";
 
 import {
+  calculateOrderItemSubtotalCrc,
+  calculateOrderItemsSubtotalCrc,
+} from "@/domain/crm/orders";
+import {
   createPaginationMeta,
   isUuid,
   normalizePagination,
@@ -10,6 +14,7 @@ import {
 
 import { mapOrderDetail, mapOrderItemProductOption, mapOrderListItem } from "./mappers";
 import type {
+  CreateOrderInput,
   ListOrdersParams,
   OrderDetail,
   OrderFilterOptions,
@@ -35,12 +40,22 @@ const PAYMENT_PENDING_STATUSES = [
 ] as const;
 
 const PAYMENT_CONFIRMED_STATUS = "validated";
+const MANUAL_ORDER_SOURCE = "CRM";
+const MANUAL_ORDER_INITIAL_STATUS = OrderStatusEnum.pending_payment;
+const MANUAL_ORDER_INITIAL_PAYMENT_STATUS = "pending_validation";
 
 function isPendingPaymentStatus(status: string) {
   return PAYMENT_PENDING_STATUSES.some((candidate) => candidate === status);
 }
 
 type OrdersDbClient = Prisma.TransactionClient | ReturnType<typeof resolveDb>;
+type OrderItemCatalogProduct = {
+  id: string;
+  name: string;
+  sku: string;
+  priceCrc: number | null;
+  priceFromCrc: number | null;
+};
 
 export class ConfirmOrderPaymentError extends Error {
   code: "ORDER_NOT_FOUND" | "PAYMENT_ALREADY_CONFIRMED" | "INVALID_ORDER_TRANSITION";
@@ -52,6 +67,24 @@ export class ConfirmOrderPaymentError extends Error {
   ) {
     super(message);
     this.name = "ConfirmOrderPaymentError";
+    this.code = code;
+  }
+}
+
+export class CreateOrderError extends Error {
+  code:
+    | "CUSTOMER_NOT_FOUND"
+    | "CUSTOMER_WITHOUT_CONVERSATION"
+    | "PRODUCT_NOT_FOUND"
+    | "DUPLICATE_PRODUCT";
+
+  constructor(
+    code: CreateOrderError["code"],
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "CreateOrderError";
     this.code = code;
   }
 }
@@ -281,6 +314,63 @@ async function findOrderDetailRecord(db: OrdersDbClient, orderId: string) {
   });
 }
 
+function buildOrderItemCreateData(input: {
+  orderId: string;
+  product: OrderItemCatalogProduct;
+  quantity: number;
+}): Prisma.OrderItemUncheckedCreateInput {
+  const unitPriceCrc = input.product.priceCrc ?? input.product.priceFromCrc ?? null;
+
+  return {
+    orderId: input.orderId,
+    productId: input.product.id,
+    quantity: input.quantity,
+    unitPriceCrc,
+    totalPriceCrc: calculateOrderItemSubtotalCrc({
+      quantity: input.quantity,
+      unitPriceCrc,
+    }),
+    productNameSnapshot: input.product.name,
+    skuSnapshot: input.product.sku,
+  };
+}
+
+async function getCatalogProductsByIds(
+  db: OrdersDbClient,
+  productIds: string[],
+): Promise<Map<string, OrderItemCatalogProduct>> {
+  const products = await db.mwlProduct.findMany({
+    where: {
+      id: {
+        in: productIds,
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+      sku: true,
+      priceCrc: true,
+      priceFromCrc: true,
+    },
+  });
+
+  return new Map(products.map((product) => [product.id, product]));
+}
+
+function findDuplicateProductId(items: CreateOrderInput["items"]) {
+  const seen = new Set<string>();
+
+  for (const item of items) {
+    if (seen.has(item.productId)) {
+      return item.productId;
+    }
+
+    seen.add(item.productId);
+  }
+
+  return null;
+}
+
 async function recalculateOrderTotals(
   tx: Prisma.TransactionClient,
   input: {
@@ -298,7 +388,7 @@ async function recalculateOrderTotals(
     },
   });
 
-  const subtotalCrc = orderItems.reduce((sum, orderItem) => sum + (orderItem.totalPriceCrc ?? 0), 0);
+  const subtotalCrc = calculateOrderItemsSubtotalCrc(orderItems);
   const netAdjustment = input.previousSubtotalCrc - input.previousTotalCrc;
   const totalCrc = Math.max(0, subtotalCrc - netAdjustment);
 
@@ -313,29 +403,31 @@ async function recalculateOrderTotals(
   });
 }
 
-export async function listOrderItemProductOptions(
+async function listAvailableOrderItemProducts(
   input: {
-    orderId: string;
     query?: string;
+    excludeOrderId?: string;
   },
   options?: ServiceOptions,
 ): Promise<OrderItemProductOption[]> {
   const db = resolveDb(options);
   const normalizedQuery = input.query?.trim();
 
-  const order = await db.order.findUnique({
-    where: {
-      id: input.orderId,
-    },
-    select: {
-      id: true,
-    },
-  });
-
-  if (!order) {
-    throw new CreateOrderItemError("ORDER_NOT_FOUND", "Order not found.", {
-      orderId: input.orderId,
+  if (input.excludeOrderId) {
+    const order = await db.order.findUnique({
+      where: {
+        id: input.excludeOrderId,
+      },
+      select: {
+        id: true,
+      },
     });
+
+    if (!order) {
+      throw new CreateOrderItemError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.excludeOrderId,
+      });
+    }
   }
 
   const products = await db.mwlProduct.findMany({
@@ -360,11 +452,15 @@ export async function listOrderItemProductOptions(
             ],
           }
         : {}),
-      orderItems: {
-        none: {
-          orderId: input.orderId,
-        },
-      },
+      ...(input.excludeOrderId
+        ? {
+            orderItems: {
+              none: {
+                orderId: input.excludeOrderId,
+              },
+            },
+          }
+        : {}),
     },
     orderBy: [
       {
@@ -387,6 +483,149 @@ export async function listOrderItemProductOptions(
   });
 
   return products.map(mapOrderItemProductOption);
+}
+
+export async function listOrderItemProductOptions(
+  input: {
+    orderId: string;
+    query?: string;
+  },
+  options?: ServiceOptions,
+): Promise<OrderItemProductOption[]> {
+  return listAvailableOrderItemProducts(
+    {
+      query: input.query,
+      excludeOrderId: input.orderId,
+    },
+    options,
+  );
+}
+
+export async function listOrderCatalogProductOptions(
+  input: {
+    query?: string;
+  },
+  options?: ServiceOptions,
+): Promise<OrderItemProductOption[]> {
+  return listAvailableOrderItemProducts(input, options);
+}
+
+export async function createOrder(
+  input: CreateOrderInput,
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    const duplicateProductId = findDuplicateProductId(input.items);
+
+    if (duplicateProductId) {
+      throw new CreateOrderError(
+        "DUPLICATE_PRODUCT",
+        "No se puede agregar el mismo producto mas de una vez en la misma orden.",
+        {
+          productId: duplicateProductId,
+        },
+      );
+    }
+
+    const customer = await tx.contact.findUnique({
+      where: {
+        id: input.customerId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!customer) {
+      throw new CreateOrderError("CUSTOMER_NOT_FOUND", "Cliente no encontrado.", {
+        customerId: input.customerId,
+      });
+    }
+
+    const leadThread = await tx.leadThread.findFirst({
+      where: {
+        contactId: input.customerId,
+      },
+      orderBy: {
+        updatedAt: "desc",
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!leadThread) {
+      throw new CreateOrderError(
+        "CUSTOMER_WITHOUT_CONVERSATION",
+        "El cliente seleccionado no tiene una conversacion asociada para crear la orden.",
+        {
+          customerId: input.customerId,
+        },
+      );
+    }
+
+    const productIds = input.items.map((item) => item.productId);
+    const productsById = await getCatalogProductsByIds(tx, productIds);
+    const preparedItems = input.items.map((item) => {
+      const product = productsById.get(item.productId);
+
+      if (!product) {
+        throw new CreateOrderError("PRODUCT_NOT_FOUND", "Producto no encontrado.", {
+          customerId: input.customerId,
+          productId: item.productId,
+        });
+      }
+
+      return buildOrderItemCreateData({
+        orderId: "",
+        product,
+        quantity: item.quantity,
+      });
+    });
+
+    const subtotalCrc = calculateOrderItemsSubtotalCrc(
+      preparedItems.map((item) => ({
+        totalPriceCrc: item.totalPriceCrc,
+      })),
+    );
+
+    const order = await tx.order.create({
+      data: {
+        leadThreadId: leadThread.id,
+        contactId: input.customerId,
+        statusLegacy: MANUAL_ORDER_INITIAL_STATUS,
+        paymentStatus: MANUAL_ORDER_INITIAL_PAYMENT_STATUS,
+        currency: "CRC",
+        subtotalCrc,
+        totalCrc: subtotalCrc,
+        source: MANUAL_ORDER_SOURCE,
+        status: MANUAL_ORDER_INITIAL_STATUS,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    await tx.orderItem.createMany({
+      data: preparedItems.map((item) => ({
+        ...item,
+        orderId: order.id,
+      })),
+    });
+
+    const createdOrder = await findOrderDetailRecord(tx, order.id);
+
+    if (!createdOrder) {
+      throw new CreateOrderError("CUSTOMER_NOT_FOUND", "No se pudo cargar la orden creada.", {
+        customerId: input.customerId,
+        orderId: order.id,
+      });
+    }
+
+    return mapOrderDetail(createdOrder);
+  });
 }
 
 export async function createOrderItem(
@@ -417,18 +656,7 @@ export async function createOrderItem(
       });
     }
 
-    const product = await tx.mwlProduct.findUnique({
-      where: {
-        id: input.productId,
-      },
-      select: {
-        id: true,
-        name: true,
-        sku: true,
-        priceCrc: true,
-        priceFromCrc: true,
-      },
-    });
+    const product = (await getCatalogProductsByIds(tx, [input.productId])).get(input.productId);
 
     if (!product) {
       throw new CreateOrderItemError("PRODUCT_NOT_FOUND", "Producto no encontrado.", {
@@ -458,19 +686,12 @@ export async function createOrderItem(
         },
       );
     }
-
-    const unitPriceCrc = product.priceCrc ?? product.priceFromCrc ?? null;
-
     await tx.orderItem.create({
-      data: {
+      data: buildOrderItemCreateData({
         orderId: input.orderId,
-        productId: product.id,
+        product,
         quantity: input.quantity,
-        unitPriceCrc,
-        totalPriceCrc: unitPriceCrc != null ? unitPriceCrc * input.quantity : null,
-        productNameSnapshot: product.name,
-        skuSnapshot: product.sku,
-      },
+      }),
     });
 
     await recalculateOrderTotals(tx, {

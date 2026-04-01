@@ -15,6 +15,7 @@ import type {
 } from "@/server/services/conversations/types";
 import type { FunnelSummary } from "@/server/services/funnel/types";
 import type {
+  CreateOrderInput,
   ListOrdersParams,
   OrderDetail,
   OrderItemProductOption,
@@ -62,6 +63,20 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     },
     getOrderItemProductOptions(orderId: string, query?: string, init?: RequestInit) {
       return get<OrderItemProductOption[]>(`/api/orders/${orderId}/items/products`, { query }, init);
+    },
+    listOrderCatalogProductOptions(query?: string, init?: RequestInit) {
+      return get<OrderItemProductOption[]>("/api/orders/item-products", { query }, init);
+    },
+    createOrder(input: CreateOrderInput, init?: RequestInit) {
+      return get<OrderDetail>("/api/orders", undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
     },
     createOrderItem(orderId: string, productId: string, quantity: number, init?: RequestInit) {
       return get<OrderDetail>(`/api/orders/${orderId}/items`, undefined, {

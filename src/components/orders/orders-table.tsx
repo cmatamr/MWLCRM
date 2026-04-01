@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 
 import { formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
@@ -14,9 +15,10 @@ import { TableEmptyStateRow } from "@/components/ui/state-display";
 
 type OrdersTableProps = {
   orders: OrdersListResponse["items"];
+  action?: ReactNode;
 };
 
-export function OrdersTable({ orders }: OrdersTableProps) {
+export function OrdersTable({ orders, action }: OrdersTableProps) {
   return (
     <section className="rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
       <div className="flex items-end justify-between gap-4">
@@ -33,6 +35,7 @@ export function OrdersTable({ orders }: OrdersTableProps) {
             </p>
           </div>
         </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
 
       <div className="mt-6 overflow-hidden rounded-[24px] border border-border/70">

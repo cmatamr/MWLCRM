@@ -1,17 +1,19 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { TableEmptyStateRow } from "@/components/ui/state-display";
 import { useCreateOrderItem } from "@/hooks/use-create-order-item";
-import { useDeleteOrderItem } from "@/hooks/use-delete-order-item";
-import { useOrderItemProductOptions } from "@/hooks/use-order-item-product-options";
 import { useUpdateOrderItemEventDate } from "@/hooks/use-update-order-item-event-date";
 import { useUpdateOrderItemQuantity } from "@/hooks/use-update-order-item-quantity";
+import { useDeleteOrderItem } from "@/hooks/use-delete-order-item";
 import { formatCalendarDate, formatCurrencyCRC } from "@/lib/formatters";
-import type { OrderItemProductOption, OrderItemSummary } from "@/server/services/orders/types";
+import type { OrderItemSummary } from "@/server/services/orders/types";
+
+import { validateOrderItemEventDateInput, validateOrderItemQuantityInput } from "./order-item-form-utils";
+import { OrderItemPicker } from "./order-item-picker";
 
 type OrderItemsTableProps = {
   orderId: string;
@@ -30,77 +32,12 @@ type AddOrderItemModalProps = {
   orderId: string;
 };
 
-function validateQuantity(value: string) {
-  const normalized = value.trim();
-
-  if (!normalized) {
-    return "La cantidad es obligatoria.";
-  }
-
-  if (!/^\d+$/.test(normalized)) {
-    return "La cantidad debe ser un entero positivo.";
-  }
-
-  const parsed = Number.parseInt(normalized, 10);
-
-  if (parsed <= 0) {
-    return "La cantidad debe ser mayor que cero.";
-  }
-
-  return null;
-}
-
-function validateEventDate(value: string) {
-  const normalized = value.trim();
-
-  if (!normalized) {
-    return null;
-  }
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    return "La fecha debe usar el formato YYYY-MM-DD.";
-  }
-
-  const parts = normalized.split("-").map((part) => Number(part));
-
-  if (parts.length !== 3) {
-    return "La fecha de evento no es valida.";
-  }
-
-  const year = parts[0] ?? Number.NaN;
-  const month = parts[1] ?? Number.NaN;
-  const day = parts[2] ?? Number.NaN;
-  const candidate = new Date(Date.UTC(year, month - 1, day));
-
-  if (
-    !Number.isFinite(candidate.getTime()) ||
-    candidate.getUTCFullYear() !== year ||
-    candidate.getUTCMonth() !== month - 1 ||
-    candidate.getUTCDate() !== day
-  ) {
-    return "La fecha de evento no es valida.";
-  }
-
-  return null;
-}
-
 function AddOrderItemModal({ isOpen, onClose, orderId }: AddOrderItemModalProps) {
   const createMutation = useCreateOrderItem(orderId);
-  const [search, setSearch] = useState("");
-  const deferredSearch = useDeferredValue(search);
-  const [selectedProduct, setSelectedProduct] = useState<OrderItemProductOption | null>(null);
-  const [draftQuantity, setDraftQuantity] = useState("1");
-  const [quantityTouched, setQuantityTouched] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const productsQuery = useOrderItemProductOptions(orderId, deferredSearch, isOpen);
-  const quantityValidationError = useMemo(() => validateQuantity(draftQuantity), [draftQuantity]);
 
   useEffect(() => {
     if (!isOpen) {
-      setSearch("");
-      setSelectedProduct(null);
-      setDraftQuantity("1");
-      setQuantityTouched(false);
       setFormError(null);
     }
   }, [isOpen]);
@@ -113,23 +50,13 @@ function AddOrderItemModal({ isOpen, onClose, orderId }: AddOrderItemModalProps)
     onClose();
   }
 
-  async function handleSubmit() {
+  async function handleSubmit(input: { product: { id: string }; quantity: number }) {
     setFormError(null);
-    setQuantityTouched(true);
-
-    if (!selectedProduct) {
-      setFormError("Debes seleccionar un producto del catalogo.");
-      return;
-    }
-
-    if (quantityValidationError) {
-      return;
-    }
 
     try {
       await createMutation.mutateAsync({
-        productId: selectedProduct.id,
-        quantity: Number.parseInt(draftQuantity, 10),
+        productId: input.product.id,
+        quantity: input.quantity,
       });
       onClose();
     } catch (error) {
@@ -145,9 +72,6 @@ function AddOrderItemModal({ isOpen, onClose, orderId }: AddOrderItemModalProps)
   if (!isOpen) {
     return null;
   }
-
-  const products = productsQuery.data ?? [];
-  const hasSearch = deferredSearch.trim().length > 0;
 
   return (
     <div
@@ -177,150 +101,17 @@ function AddOrderItemModal({ isOpen, onClose, orderId }: AddOrderItemModalProps)
           </Button>
         </div>
 
-        <div className="mt-6 space-y-4">
-          <div className="space-y-2">
-            <label htmlFor="order-item-product-search" className="text-sm font-medium text-slate-950">
-              Producto
-            </label>
-            <input
-              id="order-item-product-search"
-              type="text"
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setFormError(null);
-              }}
-              placeholder="Buscar por nombre o SKU"
-              className="h-11 w-full rounded-[18px] border border-border bg-white px-4 text-sm text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-            />
-            <p className="text-xs text-muted-foreground">
-              Se muestran productos que todavia no existen en esta orden.
-            </p>
-          </div>
-
-          <div className="rounded-[22px] border border-border/70 bg-slate-50/70">
-            <div className="max-h-72 overflow-y-auto p-2">
-              {productsQuery.isLoading ? (
-                <p className="px-3 py-8 text-center text-sm text-muted-foreground">Cargando productos...</p>
-              ) : null}
-
-              {productsQuery.isError ? (
-                <p className="px-3 py-8 text-center text-sm font-medium text-rose-700">
-                  {productsQuery.error.message}
-                </p>
-              ) : null}
-
-              {!productsQuery.isLoading && !productsQuery.isError && products.length === 0 ? (
-                <p className="px-3 py-8 text-center text-sm text-muted-foreground">
-                  {hasSearch
-                    ? "No encontramos productos que coincidan con esta busqueda."
-                    : "No hay mas productos disponibles para agregar a esta orden."}
-                </p>
-              ) : null}
-
-              {!productsQuery.isLoading && !productsQuery.isError
-                ? products.map((product) => {
-                    const isSelected = selectedProduct?.id === product.id;
-
-                    return (
-                      <button
-                        key={product.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedProduct(product);
-                          setFormError(null);
-                        }}
-                        className={`flex w-full flex-col gap-1 rounded-[18px] px-4 py-3 text-left transition ${
-                          isSelected
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "bg-white text-slate-950 hover:bg-slate-100"
-                        }`}
-                      >
-                        <span className="text-sm font-semibold">{product.name}</span>
-                        <span
-                          className={`text-xs ${
-                            isSelected ? "text-primary-foreground/85" : "text-muted-foreground"
-                          }`}
-                        >
-                          {product.sku} {product.unitPriceCrc != null ? `• ${formatCurrencyCRC(product.unitPriceCrc)}` : ""}
-                        </span>
-                      </button>
-                    );
-                  })
-                : null}
-            </div>
-          </div>
-
-          <div className="rounded-[22px] border border-border/70 bg-white px-4 py-4">
-            <p className="text-sm font-medium text-slate-950">Resumen del nuevo item</p>
-            {selectedProduct ? (
-              <div className="mt-3 grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Producto</p>
-                  <p className="mt-1 font-medium text-slate-950">{selectedProduct.name}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">SKU</p>
-                  <p className="mt-1 font-medium text-slate-950">{selectedProduct.sku}</p>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Cantidad inicial</p>
-                  <div className="mt-1 space-y-2">
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min={1}
-                      step={1}
-                      value={draftQuantity}
-                      onChange={(event) => {
-                        setDraftQuantity(event.target.value);
-                        setQuantityTouched(true);
-                        setFormError(null);
-                      }}
-                      disabled={createMutation.isPending}
-                      aria-label="Cantidad inicial del nuevo item"
-                      aria-invalid={quantityTouched && quantityValidationError ? true : undefined}
-                      className="h-11 w-28 rounded-full border border-border bg-white px-4 text-center font-medium text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-muted"
-                    />
-                    {quantityTouched && quantityValidationError ? (
-                      <p className="text-xs font-medium text-rose-700">{quantityValidationError}</p>
-                    ) : null}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Precio unitario</p>
-                  <p className="mt-1 font-medium text-slate-950">
-                    {selectedProduct.unitPriceCrc != null
-                      ? formatCurrencyCRC(selectedProduct.unitPriceCrc)
-                      : "Pendiente"}
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <p className="mt-3 text-sm text-muted-foreground">
-                Elige un producto para ver el detalle que se guardara en `order_items`.
-              </p>
-            )}
-          </div>
-
-          {formError ? (
-            <p className="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
-              {formError}
-            </p>
-          ) : null}
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <Button type="button" variant="outline" onClick={handleClose} disabled={createMutation.isPending}>
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              onClick={() => void handleSubmit()}
-              disabled={createMutation.isPending || !selectedProduct}
-            >
-              {createMutation.isPending ? "Guardando..." : "Agregar item"}
-            </Button>
-          </div>
+        <div className="mt-6">
+          <OrderItemPicker
+            isOpen={isOpen}
+            orderId={orderId}
+            title="Resumen del nuevo item"
+            description="Elige un producto para ver el detalle que se guardara en `order_items`."
+            submitLabel="Agregar item"
+            isSubmitting={createMutation.isPending}
+            formError={formError}
+            onAddItem={handleSubmit}
+          />
         </div>
       </div>
     </div>
@@ -348,8 +139,11 @@ function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
     setEventDateTouched(false);
   }, [item.eventDate]);
 
-  const validationError = useMemo(() => validateQuantity(draftQuantity), [draftQuantity]);
-  const eventDateValidationError = useMemo(() => validateEventDate(draftEventDate), [draftEventDate]);
+  const validationError = useMemo(() => validateOrderItemQuantityInput(draftQuantity), [draftQuantity]);
+  const eventDateValidationError = useMemo(
+    () => validateOrderItemEventDateInput(draftEventDate),
+    [draftEventDate],
+  );
   const isDirty = draftQuantity.trim() !== String(item.quantity);
   const isDateDirty = draftEventDate.trim() !== (item.eventDate ?? "");
   const isSaving = quantityMutation.isPending;
@@ -358,7 +152,7 @@ function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
   const isLastItem = itemCount <= 1;
 
   async function handleSave() {
-    const error = validateQuantity(draftQuantity);
+    const error = validateOrderItemQuantityInput(draftQuantity);
 
     setQuantityTouched(true);
 
@@ -396,7 +190,7 @@ function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
   }
 
   async function handleEventDateSave() {
-    const error = validateEventDate(draftEventDate);
+    const error = validateOrderItemEventDateInput(draftEventDate);
 
     setEventDateTouched(true);
 

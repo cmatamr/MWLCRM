@@ -65,6 +65,16 @@ export interface OrderItemProductOption {
   family: string;
 }
 
+export interface CreateOrderItemInput {
+  productId: string;
+  quantity: number;
+}
+
+export interface CreateOrderInput {
+  customerId: string;
+  items: CreateOrderItemInput[];
+}
+
 export interface OrderReceiptSummary {
   id: string;
   status: string;
@@ -100,4 +110,23 @@ export interface OrderDetail {
   };
   items: OrderItemSummary[];
   receipts: OrderReceiptSummary[];
+}
+
+export function calculateOrderItemSubtotalCrc(input: {
+  quantity: number;
+  unitPriceCrc: number | null;
+}) {
+  if (input.unitPriceCrc == null) {
+    return null;
+  }
+
+  return input.quantity * input.unitPriceCrc;
+}
+
+export function calculateOrderItemsSubtotalCrc(
+  items: Array<{
+    totalPriceCrc: number | null | undefined;
+  }>,
+) {
+  return items.reduce((sum, item) => sum + (item.totalPriceCrc ?? 0), 0);
 }
