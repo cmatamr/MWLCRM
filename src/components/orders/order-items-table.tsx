@@ -493,7 +493,7 @@ export function OrderItemsTable({ orderId, items }: OrderItemsTableProps) {
                   <th scope="col" className="px-4 py-3 align-middle font-medium text-right">Precio unitario</th>
                   <th scope="col" className="px-4 py-3 align-middle font-medium text-right">Total</th>
                   <th scope="col" className="px-4 py-3 align-middle font-medium">Tema</th>
-                  <th scope="col" className="px-4 py-3 align-middle font-medium text-center">Fecha Evento</th>
+                  <th scope="col" className="px-4 py-3 align-middle font-medium text-center">Fecha entrega</th>
                   <th scope="col" className="px-4 py-3 align-middle font-medium text-center">
                     <span className="sr-only">Accion</span>
                   </th>
