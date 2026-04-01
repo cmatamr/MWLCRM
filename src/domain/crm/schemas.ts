@@ -33,6 +33,43 @@ function normalizeOptionalNumber(value: unknown): number | undefined {
   return Number.isInteger(parsed) ? parsed : Number.NaN;
 }
 
+function normalizeNullableDateString(value: unknown): string | null | undefined {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function isValidIsoDateOnly(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const parts = value.split("-").map((part) => Number(part));
+
+  if (parts.length !== 3) {
+    return false;
+  }
+
+  const year = parts[0] ?? Number.NaN;
+  const month = parts[1] ?? Number.NaN;
+  const day = parts[2] ?? Number.NaN;
+  const candidate = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    Number.isFinite(candidate.getTime()) &&
+    candidate.getUTCFullYear() === year &&
+    candidate.getUTCMonth() === month - 1 &&
+    candidate.getUTCDate() === day
+  );
+}
+
 const optionalQueryString = z.preprocess(
   normalizeOptionalString,
   z.string().min(1).optional(),
@@ -54,9 +91,31 @@ export const crmEntityIdParamsSchema = z
   })
   .strict();
 
+export const orderItemRouteParamsSchema = z
+  .object({
+    id: z.string().uuid(),
+    itemId: z.coerce.bigint().positive(),
+  })
+  .strict();
+
 export const orderPaymentActionSchema = z
   .object({
     action: z.literal("confirm_payment"),
+  })
+  .strict();
+
+export const updateOrderItemQuantitySchema = z
+  .object({
+    quantity: z.number().int().positive(),
+  })
+  .strict();
+
+export const updateOrderItemEventDateSchema = z
+  .object({
+    eventDate: z.preprocess(
+      normalizeNullableDateString,
+      z.union([z.string().refine(isValidIsoDateOnly, "Invalid event date."), z.null()]),
+    ),
   })
   .strict();
 

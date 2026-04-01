@@ -59,6 +59,37 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     getOrder(id: string, init?: RequestInit) {
       return get<OrderDetail>(`/api/orders/${id}`, undefined, init);
     },
+    updateOrderItemQuantity(orderId: string, itemId: string, quantity: number, init?: RequestInit) {
+      return get<OrderDetail>(`/api/orders/${orderId}/items/${itemId}`, undefined, {
+        method: "PATCH",
+        body: JSON.stringify({
+          quantity,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    updateOrderItemEventDate(
+      orderId: string,
+      itemId: string,
+      eventDate: string | null,
+      init?: RequestInit,
+    ) {
+      return get<OrderDetail>(`/api/orders/${orderId}/items/${itemId}/event-date`, undefined, {
+        method: "PATCH",
+        body: JSON.stringify({
+          eventDate,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
     confirmOrderPayment(id: string, init?: RequestInit) {
       return get<OrderPaymentConfirmationResult>(`/api/orders/${id}`, undefined, {
         method: "PATCH",

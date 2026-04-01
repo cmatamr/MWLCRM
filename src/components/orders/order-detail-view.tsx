@@ -54,7 +54,7 @@ export function OrderDetailView({ orderId, initialOrder }: OrderDetailViewProps)
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,7fr)_minmax(320px,3fr)] xl:items-start">
         <div className="space-y-6">
-          <OrderItemsTable items={order.items} />
+          <OrderItemsTable orderId={order.id} items={order.items} />
           <OrderTotalsCard order={order} />
           <OrderNotesCard notes={order.notes} />
           <PaymentReceiptsTable receipts={order.receipts} />

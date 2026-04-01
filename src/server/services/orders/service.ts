@@ -39,6 +39,8 @@ function isPendingPaymentStatus(status: string) {
   return PAYMENT_PENDING_STATUSES.some((candidate) => candidate === status);
 }
 
+type OrdersDbClient = Prisma.TransactionClient | ReturnType<typeof resolveDb>;
+
 export class ConfirmOrderPaymentError extends Error {
   code: "ORDER_NOT_FOUND" | "PAYMENT_ALREADY_CONFIRMED" | "INVALID_ORDER_TRANSITION";
 
@@ -49,6 +51,34 @@ export class ConfirmOrderPaymentError extends Error {
   ) {
     super(message);
     this.name = "ConfirmOrderPaymentError";
+    this.code = code;
+  }
+}
+
+export class UpdateOrderItemQuantityError extends Error {
+  code: "ORDER_NOT_FOUND" | "ITEM_NOT_FOUND" | "ITEM_NOT_IN_ORDER";
+
+  constructor(
+    code: UpdateOrderItemQuantityError["code"],
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "UpdateOrderItemQuantityError";
+    this.code = code;
+  }
+}
+
+export class UpdateOrderItemEventDateError extends Error {
+  code: "ORDER_NOT_FOUND" | "ITEM_NOT_FOUND" | "ITEM_NOT_IN_ORDER";
+
+  constructor(
+    code: UpdateOrderItemEventDateError["code"],
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "UpdateOrderItemEventDateError";
     this.code = code;
   }
 }
@@ -154,8 +184,13 @@ export async function getOrderDetail(
   options?: ServiceOptions,
 ): Promise<OrderDetail | null> {
   const db = resolveDb(options);
+  const order = await findOrderDetailRecord(db, orderId);
 
-  const order = await db.order.findUnique({
+  return order ? mapOrderDetail(order) : null;
+}
+
+async function findOrderDetailRecord(db: OrdersDbClient, orderId: string) {
+  return db.order.findUnique({
     where: {
       id: orderId,
     },
@@ -212,8 +247,187 @@ export async function getOrderDetail(
       },
     },
   });
+}
 
-  return order ? mapOrderDetail(order) : null;
+export async function updateOrderItemQuantity(
+  input: {
+    orderId: string;
+    itemId: bigint;
+    quantity: number;
+  },
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: {
+        id: input.orderId,
+      },
+      select: {
+        id: true,
+        subtotalCrc: true,
+        totalCrc: true,
+      },
+    });
+
+    if (!order) {
+      throw new UpdateOrderItemQuantityError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    const item = await tx.orderItem.findUnique({
+      where: {
+        id: input.itemId,
+      },
+      select: {
+        id: true,
+        orderId: true,
+        unitPriceCrc: true,
+      },
+    });
+
+    if (!item) {
+      throw new UpdateOrderItemQuantityError("ITEM_NOT_FOUND", "Order item not found.", {
+        orderId: input.orderId,
+        itemId: input.itemId.toString(),
+      });
+    }
+
+    if (item.orderId !== input.orderId) {
+      throw new UpdateOrderItemQuantityError(
+        "ITEM_NOT_IN_ORDER",
+        "Order item does not belong to the requested order.",
+        {
+          orderId: input.orderId,
+          itemId: input.itemId.toString(),
+          itemOrderId: item.orderId,
+        },
+      );
+    }
+
+    const netAdjustment = order.subtotalCrc - order.totalCrc;
+    const nextLineTotal = item.unitPriceCrc != null ? item.unitPriceCrc * input.quantity : null;
+
+    await tx.orderItem.update({
+      where: {
+        id: item.id,
+      },
+      data: {
+        quantity: input.quantity,
+        totalPriceCrc: nextLineTotal,
+      },
+    });
+
+    const orderItems = await tx.orderItem.findMany({
+      where: {
+        orderId: input.orderId,
+      },
+      select: {
+        totalPriceCrc: true,
+      },
+    });
+
+    const subtotalCrc = orderItems.reduce((sum, orderItem) => sum + (orderItem.totalPriceCrc ?? 0), 0);
+    const totalCrc = Math.max(0, subtotalCrc - netAdjustment);
+
+    await tx.order.update({
+      where: {
+        id: input.orderId,
+      },
+      data: {
+        subtotalCrc,
+        totalCrc,
+      },
+    });
+
+    const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
+
+    if (!updatedOrder) {
+      throw new UpdateOrderItemQuantityError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    return mapOrderDetail(updatedOrder);
+  });
+}
+
+export async function updateOrderItemEventDate(
+  input: {
+    orderId: string;
+    itemId: bigint;
+    eventDate: string | null;
+  },
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: {
+        id: input.orderId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!order) {
+      throw new UpdateOrderItemEventDateError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    const item = await tx.orderItem.findUnique({
+      where: {
+        id: input.itemId,
+      },
+      select: {
+        id: true,
+        orderId: true,
+      },
+    });
+
+    if (!item) {
+      throw new UpdateOrderItemEventDateError("ITEM_NOT_FOUND", "Order item not found.", {
+        orderId: input.orderId,
+        itemId: input.itemId.toString(),
+      });
+    }
+
+    if (item.orderId !== input.orderId) {
+      throw new UpdateOrderItemEventDateError(
+        "ITEM_NOT_IN_ORDER",
+        "Order item does not belong to the requested order.",
+        {
+          orderId: input.orderId,
+          itemId: input.itemId.toString(),
+          itemOrderId: item.orderId,
+        },
+      );
+    }
+
+    await tx.orderItem.update({
+      where: {
+        id: item.id,
+      },
+      data: {
+        eventDate: input.eventDate ? new Date(`${input.eventDate}T00:00:00.000Z`) : null,
+      },
+    });
+
+    const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
+
+    if (!updatedOrder) {
+      throw new UpdateOrderItemEventDateError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    return mapOrderDetail(updatedOrder);
+  });
 }
 
 export async function getOrderFilterOptions(
