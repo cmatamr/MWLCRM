@@ -264,21 +264,23 @@ function OrderRow({ order }: { order: OrdersListResponse["items"][number] }) {
 export function OrdersTable({ orders, action }: OrdersTableProps) {
   return (
     <section className="rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-      <div className="flex items-end justify-between gap-4">
-        <div className="space-y-2">
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-4">
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
             Orders
           </p>
-          <div className="space-y-1">
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-4">
             <h3 className="text-2xl font-semibold tracking-tight text-slate-950">
               Operación de órdenes
             </h3>
-            <p className="text-sm leading-6 text-muted-foreground">
-              Vista transaccional para revisar estado, pago y monto total por orden.
-            </p>
+            {action ? <div className="shrink-0">{action}</div> : null}
           </div>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Vista transaccional para revisar estado, pago y monto total por orden.
+          </p>
         </div>
-        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
 
       <div className="mt-6 overflow-hidden rounded-[24px] border border-border/70">
