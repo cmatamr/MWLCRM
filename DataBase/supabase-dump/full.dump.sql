@@ -4,7 +4,7 @@ SET session_replication_role = replica;
 -- PostgreSQL database dump
 --
 
--- \restrict yNx4B0fdaGrKG4n4gfJdR0iVFB3okircQ0LWjzmPVtlP3Bkl9ZKf8Cvdgoi4TZZ
+-- \restrict qkwhcrbHvRse3zSHEhlkVucP6fJ3OKrUfip2H7VwsY1PpKwqAt6bkHf2ZboS5QA
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.6
@@ -204,6 +204,7 @@ COPY "auth"."webauthn_credentials" ("id", "user_id", "credential_id", "public_ke
 COPY "public"."contacts" ("id", "primary_channel", "external_id", "display_name", "tags", "created_at", "updated_at", "total_orders", "total_spent_crc", "last_order_at", "customer_status") FROM stdin;
 380b34f3-8a87-4455-8dec-1e31570403fa	wa	+50688928728	Carlos Mata	{}	2026-03-25 04:02:00.701812+00	2026-03-25 04:02:00.701812+00	0	0.00	\N	\N
 28c8f937-9baa-4bc0-9e68-fa11031eb9fe	wa	+50684732111	4 mas uno Technology	{}	2026-03-26 04:29:45.460476+00	2026-03-26 04:29:45.460476+00	0	0.00	\N	\N
+28a1d2cd-622b-46a7-87e1-0b6a1d6fb095	wa	88980098	Daniel Mata	{}	2026-04-02 02:41:45.808+00	2026-04-02 02:41:45.808+00	0	0.00	\N	Activo
 \.
 
 
@@ -222,6 +223,23 @@ ca6e26a1-147c-498a-8bf5-b0f83c4df99f	+50684732111	wa	ai	karol	\N	2026-03-28 22:0
 --
 
 COPY "public"."alerts" ("id", "lead_thread_id", "alert_type", "channel", "priority", "recipient", "status", "payload", "created_at") FROM stdin;
+\.
+
+
+--
+-- Data for Name: banks; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY "public"."banks" ("id", "name", "code", "is_active", "created_at") FROM stdin;
+8ef01a70-f154-4c33-b512-4be4ce3152fb	BAC Credomatic	BAC	t	2026-04-02 08:51:19.44819+00
+4b41bf2c-e52f-43f7-8ed3-279852dff72d	Banco Nacional	BN	t	2026-04-02 08:51:19.44819+00
+1a796a68-b8c7-41f2-9896-96d1fafe72f9	Banco de Costa Rica	BCR	t	2026-04-02 08:51:19.44819+00
+bd44cf09-865f-4169-9dc8-50b6d54a5eef	Scotiabank	SCOTIA	t	2026-04-02 08:51:19.44819+00
+3418665f-ebff-49c8-824e-d6985c02e20f	Davivienda	DAV	t	2026-04-02 08:51:19.44819+00
+a7c57808-691e-4262-869f-3d056df258c6	Banco Popular	BP	t	2026-04-02 08:51:19.44819+00
+fbfdc154-9e2f-417c-bb37-9f20771e748f	Banco Promerica	PROMERICA	t	2026-04-02 08:51:19.44819+00
+5a40d338-04de-431d-b65d-8291ea02f91d	Banco Lafise	LAFISE	t	2026-04-02 08:51:19.44819+00
+5fffe8cd-04fe-49cd-9e2e-27bc5b150241	Mucap	MUCAP	t	2026-04-02 08:51:19.44819+00
 \.
 
 
@@ -697,6 +715,16 @@ COPY "public"."orders" ("id", "lead_thread_id", "status_legacy", "payment_status
 8a49360d-9a47-46bf-b045-3e75c68644b7	68f01174-621c-4a28-9401-98e1e14b631a	pending_payment	pending_validation	CRC	19650	19650	CRM	\N	2026-04-01 04:20:24.604+00	2026-04-01 15:10:40.835311+00	380b34f3-8a87-4455-8dec-1e31570403fa	pending_payment	\N
 5ecf3af5-bf0d-40d6-b9bc-77cf8cec5a11	68f01174-621c-4a28-9401-98e1e14b631a	draft	pending_validation	CRC	22000	22000	nova	\N	2026-03-31 02:33:10.07105+00	2026-04-01 21:17:08.531514+00	380b34f3-8a87-4455-8dec-1e31570403fa	draft	2026-04-20
 d96a8f38-c38b-489e-80b3-b63f8bcb4560	68f01174-621c-4a28-9401-98e1e14b631a	draft	validated	CRC	36900	36900	nova	null	2026-03-26 03:47:39.162961+00	2026-04-01 21:20:23.300855+00	380b34f3-8a87-4455-8dec-1e31570403fa	in_production	2026-04-20
+8e5e6151-04fc-4c84-a566-e396580ec032	68f01174-621c-4a28-9401-98e1e14b631a	pending_payment	pending_validation	CRC	3200	3200	CRM	\N	2026-04-02 02:39:52.327+00	2026-04-02 02:40:29.064738+00	380b34f3-8a87-4455-8dec-1e31570403fa	pending_payment	\N
+\.
+
+
+--
+-- Data for Name: order_activity; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY "public"."order_activity" ("id", "order_id", "type", "content", "metadata", "created_at", "created_by") FROM stdin;
+5d3eb719-aee7-4de1-b1eb-06dd1b7264d3	8a49360d-9a47-46bf-b045-3e75c68644b7	note	nota de prueba ahora editada	\N	2026-04-02 06:43:24.6+00	\N
 \.
 
 
@@ -713,6 +741,7 @@ COPY "public"."order_items" ("id", "order_id", "product_id", "quantity", "unit_p
 8	8a49360d-9a47-46bf-b045-3e75c68644b7	clear_bag_22x7x17	2	2200	4400	Clear Bag 22x7x17 cm	MWL-CLEAR-BAG-22X7X17	\N	\N	2026-04-01 15:10:40.862+00	\N
 11	d96a8f38-c38b-489e-80b3-b63f8bcb4560	cups_vinyl_std	5	2200	11000	Vasos personalizados	MWL-CUP-VINYL-STD	Batman	2026-04-20	2026-04-01 21:23:07.882946+00	\N
 12	d96a8f38-c38b-489e-80b3-b63f8bcb4560	bag_confitero_20x25_std	3	1000	3000	Confitero 20x25 cm	MWL-BAG-CONF-20X25-STD	Batman	2026-04-22	2026-04-01 21:23:47.826561+00	Entrega separada
+13	8e5e6151-04fc-4c84-a566-e396580ec032	book_coloring_std	2	1600	3200	Libro para colorear personalizado	MWL-BOOK-COLORING-STD	\N	\N	2026-04-02 02:39:52.499+00	\N
 \.
 
 
@@ -720,8 +749,8 @@ COPY "public"."order_items" ("id", "order_id", "product_id", "quantity", "unit_p
 -- Data for Name: payment_receipts; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY "public"."payment_receipts" ("id", "order_id", "message_id", "receipt_key", "status", "bank", "transfer_type", "amount_text", "currency", "reference", "sender_name", "recipient_name", "destination_phone", "receipt_date", "receipt_time", "created_at", "updated_at") FROM stdin;
-4f88d614-b2d7-419e-b4ab-3fec933284dc	5ecf3af5-bf0d-40d6-b9bc-77cf8cec5a11	\N	ycloud:69cb4ba53a48151462cda978	pending_validation	BAC	SINPE Móvil	₡9,000.00	CRC	\N	SANDRA VERONICA AGUILAR GALDAMEZ	KAROL ANDREA BOLAÑOS MENESES	88131053	2026-02-27	14:17	2026-03-31 04:34:01.546918+00	2026-03-31 04:34:01.546918+00
+COPY "public"."payment_receipts" ("id", "order_id", "message_id", "receipt_key", "status", "bank", "transfer_type", "amount_text", "currency", "reference", "sender_name", "recipient_name", "destination_phone", "receipt_date", "receipt_time", "created_at", "updated_at", "raw_payload", "amount_crc", "source", "internal_notes", "validated_at", "validated_by", "deleted_at", "deleted_by", "bank_id") FROM stdin;
+4f88d614-b2d7-419e-b4ab-3fec933284dc	5ecf3af5-bf0d-40d6-b9bc-77cf8cec5a11	\N	ycloud:69cb4ba53a48151462cda978	pending_validation	BAC	SINPE Móvil	₡9,000.00	CRC	\N	SANDRA VERONICA AGUILAR GALDAMEZ	KAROL ANDREA BOLAÑOS MENESES	88131053	2026-02-27	14:17	2026-03-31 04:34:01.546918+00	2026-04-02 07:46:31.996394+00	{}	9000	automation	\N	\N	\N	\N	\N	\N
 \.
 
 
@@ -861,14 +890,14 @@ SELECT pg_catalog.setval('"public"."n8n_chat_histories_id_seq"', 842, true);
 -- Name: order_items_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('"public"."order_items_id_seq"', 12, true);
+SELECT pg_catalog.setval('"public"."order_items_id_seq"', 13, true);
 
 
 --
 -- PostgreSQL database dump complete
 --
 
--- \unrestrict yNx4B0fdaGrKG4n4gfJdR0iVFB3okircQ0LWjzmPVtlP3Bkl9ZKf8Cvdgoi4TZZ
+-- \unrestrict qkwhcrbHvRse3zSHEhlkVucP6fJ3OKrUfip2H7VwsY1PpKwqAt6bkHf2ZboS5QA
 
 RESET ALL;
 
@@ -1014,6 +1043,27 @@ CREATE TYPE "public"."order_status_enum" AS ENUM (
 
 
 ALTER TYPE "public"."order_status_enum" OWNER TO "postgres";
+
+
+CREATE TYPE "public"."payment_receipt_source_enum" AS ENUM (
+    'automation',
+    'manual_crm'
+);
+
+
+ALTER TYPE "public"."payment_receipt_source_enum" OWNER TO "postgres";
+
+
+CREATE TYPE "public"."payment_receipt_status_enum" AS ENUM (
+    'pending_validation',
+    'validated',
+    'rejected',
+    'cancelled',
+    'soft_deleted'
+);
+
+
+ALTER TYPE "public"."payment_receipt_status_enum" OWNER TO "postgres";
 
 
 CREATE TYPE "public"."provider_type" AS ENUM (
@@ -1287,6 +1337,18 @@ CREATE TABLE IF NOT EXISTS "public"."alerts" (
 
 
 ALTER TABLE "public"."alerts" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."banks" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "name" "text" NOT NULL,
+    "code" "text",
+    "is_active" boolean DEFAULT true NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."banks" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."campaign_attribution" (
@@ -1961,6 +2023,22 @@ ALTER SEQUENCE "public"."n8n_chat_histories_id_seq" OWNED BY "public"."n8n_chat_
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."order_activity" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "order_id" "uuid" NOT NULL,
+    "type" "text" NOT NULL,
+    "content" "text",
+    "metadata" "jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_by" "text",
+    CONSTRAINT "order_activity_note_content_check" CHECK ((("type" <> 'note'::"text") OR (("content" IS NOT NULL) AND ("btrim"("content") <> ''::"text")))),
+    CONSTRAINT "order_activity_type_check" CHECK (("type" = ANY (ARRAY['note'::"text", 'status_change'::"text", 'payment_validation'::"text", 'system_event'::"text"])))
+);
+
+
+ALTER TABLE "public"."order_activity" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."order_items" (
     "id" bigint NOT NULL,
     "order_id" "uuid" NOT NULL,
@@ -1984,7 +2062,7 @@ COMMENT ON COLUMN "public"."order_items"."item_notes" IS 'Detalles especificos d
 
 
 
-CREATE OR REPLACE VIEW "public"."order_items_delivery_exceptions" AS
+CREATE OR REPLACE VIEW "public"."order_items_delivery_exceptions" WITH ("security_invoker"='on') AS
  SELECT "oi"."id",
     "oi"."order_id",
     "oi"."product_id",
@@ -2019,11 +2097,11 @@ CREATE TABLE IF NOT EXISTS "public"."payment_receipts" (
     "order_id" "uuid" NOT NULL,
     "message_id" "uuid",
     "receipt_key" "text" NOT NULL,
-    "status" "text" DEFAULT 'pending_validation'::"text" NOT NULL,
+    "status" "public"."payment_receipt_status_enum" DEFAULT 'pending_validation'::"public"."payment_receipt_status_enum" NOT NULL,
     "bank" "text",
     "transfer_type" "text",
     "amount_text" "text",
-    "currency" "text",
+    "currency" "text" DEFAULT 'CRC'::"text" NOT NULL,
     "reference" "text",
     "sender_name" "text",
     "recipient_name" "text",
@@ -2031,7 +2109,20 @@ CREATE TABLE IF NOT EXISTS "public"."payment_receipts" (
     "receipt_date" "date",
     "receipt_time" "text",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "raw_payload" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "amount_crc" integer,
+    "source" "public"."payment_receipt_source_enum" DEFAULT 'automation'::"public"."payment_receipt_source_enum" NOT NULL,
+    "internal_notes" "text",
+    "validated_at" timestamp with time zone,
+    "validated_by" "text",
+    "deleted_at" timestamp with time zone,
+    "deleted_by" "text",
+    "bank_id" "uuid",
+    CONSTRAINT "payment_receipts_amount_crc_nonnegative_check" CHECK ((("amount_crc" IS NULL) OR ("amount_crc" >= 0))),
+    CONSTRAINT "payment_receipts_currency_not_blank_check" CHECK (("btrim"("currency") <> ''::"text")),
+    CONSTRAINT "payment_receipts_soft_delete_fields_check" CHECK (((("status" = 'soft_deleted'::"public"."payment_receipt_status_enum") AND ("deleted_at" IS NOT NULL)) OR (("status" <> 'soft_deleted'::"public"."payment_receipt_status_enum") AND ("deleted_at" IS NULL)))),
+    CONSTRAINT "payment_receipts_validated_fields_check" CHECK ((("status" <> 'validated'::"public"."payment_receipt_status_enum") OR (("validated_at" IS NOT NULL) AND ("amount_crc" IS NOT NULL))))
 );
 
 
@@ -2111,6 +2202,11 @@ ALTER TABLE ONLY "public"."order_items" ALTER COLUMN "id" SET DEFAULT "nextval"(
 
 ALTER TABLE ONLY "public"."alerts"
     ADD CONSTRAINT "alerts_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."banks"
+    ADD CONSTRAINT "banks_pkey" PRIMARY KEY ("id");
 
 
 
@@ -2254,6 +2350,11 @@ ALTER TABLE ONLY "public"."n8n_chat_histories"
 
 
 
+ALTER TABLE ONLY "public"."order_activity"
+    ADD CONSTRAINT "order_activity_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."order_items"
     ADD CONSTRAINT "order_items_pkey" PRIMARY KEY ("id");
 
@@ -2289,6 +2390,18 @@ CREATE INDEX "alerts_conversation_idx" ON "public"."alerts" USING "btree" ("lead
 
 
 CREATE INDEX "alerts_status_idx" ON "public"."alerts" USING "btree" ("status", "created_at" DESC);
+
+
+
+CREATE UNIQUE INDEX "banks_code_unique_idx" ON "public"."banks" USING "btree" ("lower"("code")) WHERE ("code" IS NOT NULL);
+
+
+
+CREATE INDEX "banks_is_active_idx" ON "public"."banks" USING "btree" ("is_active");
+
+
+
+CREATE UNIQUE INDEX "banks_name_unique_idx" ON "public"."banks" USING "btree" ("lower"("name"));
 
 
 
@@ -2392,6 +2505,10 @@ CREATE INDEX "idx_mwl_search_terms_term" ON "public"."mwl_product_search_terms" 
 
 
 
+CREATE INDEX "idx_order_activity_order_id_created_at" ON "public"."order_activity" USING "btree" ("order_id", "created_at" DESC);
+
+
+
 CREATE INDEX "idx_order_items_order_id" ON "public"."order_items" USING "btree" ("order_id");
 
 
@@ -2408,11 +2525,31 @@ CREATE INDEX "idx_orders_status" ON "public"."orders" USING "btree" ("status", "
 
 
 
+CREATE INDEX "idx_payment_receipts_bank_id" ON "public"."payment_receipts" USING "btree" ("bank_id");
+
+
+
 CREATE INDEX "idx_payment_receipts_message_id" ON "public"."payment_receipts" USING "btree" ("message_id");
 
 
 
 CREATE INDEX "idx_payment_receipts_order_id" ON "public"."payment_receipts" USING "btree" ("order_id");
+
+
+
+CREATE INDEX "idx_payment_receipts_order_pending_active" ON "public"."payment_receipts" USING "btree" ("order_id", "created_at" DESC) WHERE (("status" = 'pending_validation'::"public"."payment_receipt_status_enum") AND ("deleted_at" IS NULL));
+
+
+
+CREATE INDEX "idx_payment_receipts_order_status_active" ON "public"."payment_receipts" USING "btree" ("order_id", "status") WHERE ("deleted_at" IS NULL);
+
+
+
+CREATE INDEX "idx_payment_receipts_order_validated_active" ON "public"."payment_receipts" USING "btree" ("order_id", "validated_at" DESC) WHERE (("status" = 'validated'::"public"."payment_receipt_status_enum") AND ("deleted_at" IS NULL));
+
+
+
+CREATE INDEX "idx_payment_receipts_reference_active" ON "public"."payment_receipts" USING "btree" ("reference") WHERE (("reference" IS NOT NULL) AND ("deleted_at" IS NULL));
 
 
 
@@ -2599,6 +2736,11 @@ ALTER TABLE ONLY "public"."mwl_product_search_terms"
 
 
 
+ALTER TABLE ONLY "public"."order_activity"
+    ADD CONSTRAINT "order_activity_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."order_items"
     ADD CONSTRAINT "order_items_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE CASCADE;
 
@@ -2620,6 +2762,11 @@ ALTER TABLE ONLY "public"."orders"
 
 
 ALTER TABLE ONLY "public"."payment_receipts"
+    ADD CONSTRAINT "payment_receipts_bank_id_fkey" FOREIGN KEY ("bank_id") REFERENCES "public"."banks"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."payment_receipts"
     ADD CONSTRAINT "payment_receipts_message_id_fkey" FOREIGN KEY ("message_id") REFERENCES "public"."messages"("id") ON DELETE SET NULL;
 
 
@@ -2635,6 +2782,9 @@ ALTER TABLE ONLY "public"."state_changes"
 
 
 ALTER TABLE "public"."alerts" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."banks" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."campaign_attribution" ENABLE ROW LEVEL SECURITY;
@@ -2701,6 +2851,9 @@ ALTER TABLE "public"."mwl_search_synonyms" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."n8n_chat_histories" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."order_activity" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."order_items" ENABLE ROW LEVEL SECURITY;
@@ -3154,6 +3307,12 @@ GRANT ALL ON TABLE "public"."alerts" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."banks" TO "anon";
+GRANT ALL ON TABLE "public"."banks" TO "authenticated";
+GRANT ALL ON TABLE "public"."banks" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."campaign_attribution" TO "anon";
 GRANT ALL ON TABLE "public"."campaign_attribution" TO "authenticated";
 GRANT ALL ON TABLE "public"."campaign_attribution" TO "service_role";
@@ -3361,6 +3520,12 @@ GRANT ALL ON TABLE "public"."n8n_chat_histories" TO "service_role";
 GRANT ALL ON SEQUENCE "public"."n8n_chat_histories_id_seq" TO "anon";
 GRANT ALL ON SEQUENCE "public"."n8n_chat_histories_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."n8n_chat_histories_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."order_activity" TO "anon";
+GRANT ALL ON TABLE "public"."order_activity" TO "authenticated";
+GRANT ALL ON TABLE "public"."order_activity" TO "service_role";
 
 
 

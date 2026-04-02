@@ -130,6 +130,27 @@ CREATE TYPE "public"."order_status_enum" AS ENUM (
 ALTER TYPE "public"."order_status_enum" OWNER TO "postgres";
 
 
+CREATE TYPE "public"."payment_receipt_source_enum" AS ENUM (
+    'automation',
+    'manual_crm'
+);
+
+
+ALTER TYPE "public"."payment_receipt_source_enum" OWNER TO "postgres";
+
+
+CREATE TYPE "public"."payment_receipt_status_enum" AS ENUM (
+    'pending_validation',
+    'validated',
+    'rejected',
+    'cancelled',
+    'soft_deleted'
+);
+
+
+ALTER TYPE "public"."payment_receipt_status_enum" OWNER TO "postgres";
+
+
 CREATE TYPE "public"."provider_type" AS ENUM (
     'ycloud',
     'chatwoot'
@@ -401,6 +422,18 @@ CREATE TABLE IF NOT EXISTS "public"."alerts" (
 
 
 ALTER TABLE "public"."alerts" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."banks" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "name" "text" NOT NULL,
+    "code" "text",
+    "is_active" boolean DEFAULT true NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."banks" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."campaign_attribution" (
@@ -1075,6 +1108,22 @@ ALTER SEQUENCE "public"."n8n_chat_histories_id_seq" OWNED BY "public"."n8n_chat_
 
 
 
+CREATE TABLE IF NOT EXISTS "public"."order_activity" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "order_id" "uuid" NOT NULL,
+    "type" "text" NOT NULL,
+    "content" "text",
+    "metadata" "jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "created_by" "text",
+    CONSTRAINT "order_activity_note_content_check" CHECK ((("type" <> 'note'::"text") OR (("content" IS NOT NULL) AND ("btrim"("content") <> ''::"text")))),
+    CONSTRAINT "order_activity_type_check" CHECK (("type" = ANY (ARRAY['note'::"text", 'status_change'::"text", 'payment_validation'::"text", 'system_event'::"text"])))
+);
+
+
+ALTER TABLE "public"."order_activity" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."order_items" (
     "id" bigint NOT NULL,
     "order_id" "uuid" NOT NULL,
@@ -1098,7 +1147,7 @@ COMMENT ON COLUMN "public"."order_items"."item_notes" IS 'Detalles especificos d
 
 
 
-CREATE OR REPLACE VIEW "public"."order_items_delivery_exceptions" AS
+CREATE OR REPLACE VIEW "public"."order_items_delivery_exceptions" WITH ("security_invoker"='on') AS
  SELECT "oi"."id",
     "oi"."order_id",
     "oi"."product_id",
@@ -1133,11 +1182,11 @@ CREATE TABLE IF NOT EXISTS "public"."payment_receipts" (
     "order_id" "uuid" NOT NULL,
     "message_id" "uuid",
     "receipt_key" "text" NOT NULL,
-    "status" "text" DEFAULT 'pending_validation'::"text" NOT NULL,
+    "status" "public"."payment_receipt_status_enum" DEFAULT 'pending_validation'::"public"."payment_receipt_status_enum" NOT NULL,
     "bank" "text",
     "transfer_type" "text",
     "amount_text" "text",
-    "currency" "text",
+    "currency" "text" DEFAULT 'CRC'::"text" NOT NULL,
     "reference" "text",
     "sender_name" "text",
     "recipient_name" "text",
@@ -1145,7 +1194,20 @@ CREATE TABLE IF NOT EXISTS "public"."payment_receipts" (
     "receipt_date" "date",
     "receipt_time" "text",
     "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "raw_payload" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "amount_crc" integer,
+    "source" "public"."payment_receipt_source_enum" DEFAULT 'automation'::"public"."payment_receipt_source_enum" NOT NULL,
+    "internal_notes" "text",
+    "validated_at" timestamp with time zone,
+    "validated_by" "text",
+    "deleted_at" timestamp with time zone,
+    "deleted_by" "text",
+    "bank_id" "uuid",
+    CONSTRAINT "payment_receipts_amount_crc_nonnegative_check" CHECK ((("amount_crc" IS NULL) OR ("amount_crc" >= 0))),
+    CONSTRAINT "payment_receipts_currency_not_blank_check" CHECK (("btrim"("currency") <> ''::"text")),
+    CONSTRAINT "payment_receipts_soft_delete_fields_check" CHECK (((("status" = 'soft_deleted'::"public"."payment_receipt_status_enum") AND ("deleted_at" IS NOT NULL)) OR (("status" <> 'soft_deleted'::"public"."payment_receipt_status_enum") AND ("deleted_at" IS NULL)))),
+    CONSTRAINT "payment_receipts_validated_fields_check" CHECK ((("status" <> 'validated'::"public"."payment_receipt_status_enum") OR (("validated_at" IS NOT NULL) AND ("amount_crc" IS NOT NULL))))
 );
 
 
@@ -1225,6 +1287,11 @@ ALTER TABLE ONLY "public"."order_items" ALTER COLUMN "id" SET DEFAULT "nextval"(
 
 ALTER TABLE ONLY "public"."alerts"
     ADD CONSTRAINT "alerts_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."banks"
+    ADD CONSTRAINT "banks_pkey" PRIMARY KEY ("id");
 
 
 
@@ -1368,6 +1435,11 @@ ALTER TABLE ONLY "public"."n8n_chat_histories"
 
 
 
+ALTER TABLE ONLY "public"."order_activity"
+    ADD CONSTRAINT "order_activity_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."order_items"
     ADD CONSTRAINT "order_items_pkey" PRIMARY KEY ("id");
 
@@ -1403,6 +1475,18 @@ CREATE INDEX "alerts_conversation_idx" ON "public"."alerts" USING "btree" ("lead
 
 
 CREATE INDEX "alerts_status_idx" ON "public"."alerts" USING "btree" ("status", "created_at" DESC);
+
+
+
+CREATE UNIQUE INDEX "banks_code_unique_idx" ON "public"."banks" USING "btree" ("lower"("code")) WHERE ("code" IS NOT NULL);
+
+
+
+CREATE INDEX "banks_is_active_idx" ON "public"."banks" USING "btree" ("is_active");
+
+
+
+CREATE UNIQUE INDEX "banks_name_unique_idx" ON "public"."banks" USING "btree" ("lower"("name"));
 
 
 
@@ -1506,6 +1590,10 @@ CREATE INDEX "idx_mwl_search_terms_term" ON "public"."mwl_product_search_terms" 
 
 
 
+CREATE INDEX "idx_order_activity_order_id_created_at" ON "public"."order_activity" USING "btree" ("order_id", "created_at" DESC);
+
+
+
 CREATE INDEX "idx_order_items_order_id" ON "public"."order_items" USING "btree" ("order_id");
 
 
@@ -1522,11 +1610,31 @@ CREATE INDEX "idx_orders_status" ON "public"."orders" USING "btree" ("status", "
 
 
 
+CREATE INDEX "idx_payment_receipts_bank_id" ON "public"."payment_receipts" USING "btree" ("bank_id");
+
+
+
 CREATE INDEX "idx_payment_receipts_message_id" ON "public"."payment_receipts" USING "btree" ("message_id");
 
 
 
 CREATE INDEX "idx_payment_receipts_order_id" ON "public"."payment_receipts" USING "btree" ("order_id");
+
+
+
+CREATE INDEX "idx_payment_receipts_order_pending_active" ON "public"."payment_receipts" USING "btree" ("order_id", "created_at" DESC) WHERE (("status" = 'pending_validation'::"public"."payment_receipt_status_enum") AND ("deleted_at" IS NULL));
+
+
+
+CREATE INDEX "idx_payment_receipts_order_status_active" ON "public"."payment_receipts" USING "btree" ("order_id", "status") WHERE ("deleted_at" IS NULL);
+
+
+
+CREATE INDEX "idx_payment_receipts_order_validated_active" ON "public"."payment_receipts" USING "btree" ("order_id", "validated_at" DESC) WHERE (("status" = 'validated'::"public"."payment_receipt_status_enum") AND ("deleted_at" IS NULL));
+
+
+
+CREATE INDEX "idx_payment_receipts_reference_active" ON "public"."payment_receipts" USING "btree" ("reference") WHERE (("reference" IS NOT NULL) AND ("deleted_at" IS NULL));
 
 
 
@@ -1713,6 +1821,11 @@ ALTER TABLE ONLY "public"."mwl_product_search_terms"
 
 
 
+ALTER TABLE ONLY "public"."order_activity"
+    ADD CONSTRAINT "order_activity_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE CASCADE;
+
+
+
 ALTER TABLE ONLY "public"."order_items"
     ADD CONSTRAINT "order_items_order_id_fkey" FOREIGN KEY ("order_id") REFERENCES "public"."orders"("id") ON DELETE CASCADE;
 
@@ -1734,6 +1847,11 @@ ALTER TABLE ONLY "public"."orders"
 
 
 ALTER TABLE ONLY "public"."payment_receipts"
+    ADD CONSTRAINT "payment_receipts_bank_id_fkey" FOREIGN KEY ("bank_id") REFERENCES "public"."banks"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."payment_receipts"
     ADD CONSTRAINT "payment_receipts_message_id_fkey" FOREIGN KEY ("message_id") REFERENCES "public"."messages"("id") ON DELETE SET NULL;
 
 
@@ -1749,6 +1867,9 @@ ALTER TABLE ONLY "public"."state_changes"
 
 
 ALTER TABLE "public"."alerts" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."banks" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."campaign_attribution" ENABLE ROW LEVEL SECURITY;
@@ -1815,6 +1936,9 @@ ALTER TABLE "public"."mwl_search_synonyms" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."n8n_chat_histories" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."order_activity" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."order_items" ENABLE ROW LEVEL SECURITY;
@@ -2268,6 +2392,12 @@ GRANT ALL ON TABLE "public"."alerts" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."banks" TO "anon";
+GRANT ALL ON TABLE "public"."banks" TO "authenticated";
+GRANT ALL ON TABLE "public"."banks" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."campaign_attribution" TO "anon";
 GRANT ALL ON TABLE "public"."campaign_attribution" TO "authenticated";
 GRANT ALL ON TABLE "public"."campaign_attribution" TO "service_role";
@@ -2475,6 +2605,12 @@ GRANT ALL ON TABLE "public"."n8n_chat_histories" TO "service_role";
 GRANT ALL ON SEQUENCE "public"."n8n_chat_histories_id_seq" TO "anon";
 GRANT ALL ON SEQUENCE "public"."n8n_chat_histories_id_seq" TO "authenticated";
 GRANT ALL ON SEQUENCE "public"."n8n_chat_histories_id_seq" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."order_activity" TO "anon";
+GRANT ALL ON TABLE "public"."order_activity" TO "authenticated";
+GRANT ALL ON TABLE "public"."order_activity" TO "service_role";
 
 
 

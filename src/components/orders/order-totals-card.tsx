@@ -5,64 +5,15 @@ type OrderTotalsCardProps = {
   order: OrderDetail;
 };
 
-const RECEIPT_STATUSES_EXCLUDED_FROM_ADVANCE = new Set([
-  "cancelled",
-  "failed",
-  "rejected",
-]);
-
 function formatNegativeCurrency(value: number) {
   return `-${formatCurrencyCRC(Math.abs(value))}`;
-}
-
-function parseReceiptAmountToCrc(amountText: string | null) {
-  if (!amountText) {
-    return 0;
-  }
-
-  const normalized = amountText.replace(/[^\d,.-]/g, "").trim();
-
-  if (!normalized) {
-    return 0;
-  }
-
-  const lastCommaIndex = normalized.lastIndexOf(",");
-  const lastDotIndex = normalized.lastIndexOf(".");
-  const decimalSeparatorIndex = Math.max(lastCommaIndex, lastDotIndex);
-
-  if (decimalSeparatorIndex >= 0) {
-    const decimalDigits = normalized.slice(decimalSeparatorIndex + 1).replace(/[^\d]/g, "");
-
-    if (decimalDigits.length === 2) {
-      const integerPart = normalized.slice(0, decimalSeparatorIndex).replace(/[^\d-]/g, "");
-      const decimalPart = decimalDigits;
-      const parsedValue = Number(`${integerPart}.${decimalPart}`);
-
-      return Number.isFinite(parsedValue) ? Math.round(parsedValue) : 0;
-    }
-  }
-
-  const integerValue = Number(normalized.replace(/[^\d-]/g, ""));
-  return Number.isFinite(integerValue) ? integerValue : 0;
 }
 
 export function OrderTotalsCard({ order }: OrderTotalsCardProps) {
   const discount = order.subtotalCrc - order.totalCrc;
   const iva = 0;
-  const advance = order.receipts.reduce((sum, receipt) => {
-    const normalizedStatus = receipt.status.trim().toLowerCase();
-    const normalizedCurrency = receipt.currency?.trim().toUpperCase();
-
-    if (RECEIPT_STATUSES_EXCLUDED_FROM_ADVANCE.has(normalizedStatus)) {
-      return sum;
-    }
-
-    if (normalizedCurrency && normalizedCurrency !== "CRC") {
-      return sum;
-    }
-
-    return sum + parseReceiptAmountToCrc(receipt.amountText);
-  }, 0);
+  const advance = order.advancePaidCrc;
+  const pendingValidation = order.pendingValidationCrc;
   const pendingAmount = Math.max(order.totalCrc - advance, 0);
   const detailRows = [
     {
@@ -83,6 +34,11 @@ export function OrderTotalsCard({ order }: OrderTotalsCardProps) {
     {
       label: "Adelanto",
       value: formatNegativeCurrency(advance),
+      tone: "muted" as const,
+    },
+    {
+      label: "Pendiente de validacion",
+      value: formatNegativeCurrency(pendingValidation),
       tone: "muted" as const,
     },
     {

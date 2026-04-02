@@ -1,7 +1,6 @@
-import { crmEntityIdParamsSchema, orderPaymentActionSchema } from "@/domain/crm/schemas";
+import { crmEntityIdParamsSchema } from "@/domain/crm/schemas";
 import {
   badRequest,
-  conflict,
   handleRouteError,
   notFound,
   ok,
@@ -9,10 +8,10 @@ import {
 } from "@/server/api/http";
 import {
   confirmOrderPayment,
-  ConfirmOrderPaymentError,
   deleteOrder,
   DeleteOrderError,
   getOrderDetail,
+  PaymentReceiptError,
 } from "@/server/services/orders";
 
 export async function GET(_request: Request, context: RouteContext<{ id: string }>) {
@@ -33,23 +32,15 @@ export async function GET(_request: Request, context: RouteContext<{ id: string 
 export async function PATCH(request: Request, context: RouteContext<{ id: string }>) {
   try {
     const orderId = crmEntityIdParamsSchema.parse(await context.params).id;
-    const body = orderPaymentActionSchema.parse(await request.json());
-
-    if (body.action !== "confirm_payment") {
-      throw badRequest("Unsupported order action.", {
-        action: body.action,
-      });
-    }
-
-    const result = await confirmOrderPayment(orderId);
-    return ok(result);
+    await request.text();
+    await confirmOrderPayment(orderId);
+    throw badRequest(
+      "Order-level payment confirmation is deprecated. Use payment receipt validation endpoints instead.",
+      { orderId, deprecated: true },
+    );
   } catch (error) {
-    if (error instanceof ConfirmOrderPaymentError) {
-      if (error.code === "ORDER_NOT_FOUND") {
-        return handleRouteError(notFound(error.message, error.details));
-      }
-
-      return handleRouteError(conflict(error.message, error.details));
+    if (error instanceof PaymentReceiptError) {
+      return handleRouteError(badRequest(error.message, error.details));
     }
 
     return handleRouteError(error);

@@ -105,6 +105,13 @@ export const orderActivityRouteParamsSchema = z
   })
   .strict();
 
+export const paymentReceiptRouteParamsSchema = z
+  .object({
+    id: z.string().uuid(),
+    receiptId: z.string().uuid(),
+  })
+  .strict();
+
 export const orderPaymentActionSchema = z
   .object({
     action: z.literal("confirm_payment"),
@@ -159,6 +166,65 @@ export const createOrderActivitySchema = z
 export const updateOrderActivitySchema = z
   .object({
     content: z.string().trim().min(1, "Content is required."),
+  })
+  .strict();
+
+export const createPaymentReceiptSchema = z
+  .object({
+    messageId: z.string().uuid().optional(),
+    receiptKey: z.string().trim().min(1).optional(),
+    amountCrc: z.number().int().min(0),
+    amountText: optionalQueryString,
+    currency: z.preprocess(
+      normalizeOptionalString,
+      z.string().min(1).default("CRC"),
+    ),
+    bankId: z.string().uuid().nullable().optional(),
+    bank: optionalQueryString,
+    transferType: optionalQueryString,
+    reference: optionalQueryString,
+    senderName: optionalQueryString,
+    recipientName: optionalQueryString,
+    destinationPhone: optionalQueryString,
+    receiptDate: z.preprocess(
+      normalizeNullableDateString,
+      z.union([z.string().refine(isValidIsoDateOnly, "Invalid receipt date."), z.null()]),
+    ).optional(),
+    receiptTime: optionalQueryString,
+    internalNotes: optionalQueryString,
+    rawPayload: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
+export const updatePaymentReceiptSchema = z
+  .object({
+    amountCrc: z.number().int().min(0).optional(),
+    amountText: optionalQueryString,
+    currency: optionalQueryString,
+    bankId: z.string().uuid().nullable().optional(),
+    bank: optionalQueryString,
+    transferType: optionalQueryString,
+    reference: optionalQueryString,
+    senderName: optionalQueryString,
+    recipientName: optionalQueryString,
+    destinationPhone: optionalQueryString,
+    receiptDate: z.preprocess(
+      normalizeNullableDateString,
+      z.union([z.string().refine(isValidIsoDateOnly, "Invalid receipt date."), z.null()]),
+    ).optional(),
+    receiptTime: optionalQueryString,
+    internalNotes: optionalQueryString,
+  })
+  .strict()
+  .refine(
+    (value) => Object.values(value).some((fieldValue) => fieldValue !== undefined),
+    "At least one payment receipt field must be provided.",
+  );
+
+export const paymentReceiptReviewActionSchema = z
+  .object({
+    performedBy: z.string().trim().min(1, "performedBy is required."),
+    internalNotes: optionalQueryString,
   })
   .strict();
 

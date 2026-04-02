@@ -1,4 +1,5 @@
 export * as dashboardService from "./dashboard";
+export * as banksService from "./banks";
 export * as customersService from "./customers";
 export * as ordersService from "./orders";
 export * as campaignsService from "./campaigns";

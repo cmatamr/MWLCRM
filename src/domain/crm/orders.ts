@@ -104,9 +104,44 @@ export interface UpdateOrderActivityInput {
   content: string;
 }
 
+export interface CreatePaymentReceiptInput {
+  amountCrc: number;
+  currency?: string;
+  bankId?: string | null;
+  bank?: string | null;
+  reference?: string | null;
+  senderName?: string | null;
+  recipientName?: string | null;
+  destinationPhone?: string | null;
+  receiptDate?: string | null;
+  receiptTime?: string | null;
+  internalNotes?: string | null;
+}
+
+export interface UpdatePaymentReceiptInput {
+  amountCrc?: number;
+  currency?: string;
+  bankId?: string | null;
+  bank?: string | null;
+  reference?: string | null;
+  senderName?: string | null;
+  recipientName?: string | null;
+  destinationPhone?: string | null;
+  receiptDate?: string | null;
+  receiptTime?: string | null;
+  internalNotes?: string | null;
+}
+
+export interface PaymentReceiptReviewActionInput {
+  performedBy: string;
+  internalNotes?: string | null;
+}
+
 export interface OrderReceiptSummary {
   id: string;
   status: string;
+  amountCrc: number | null;
+  bankId: string | null;
   bank: string | null;
   transferType: string | null;
   amountText: string | null;
@@ -116,6 +151,8 @@ export interface OrderReceiptSummary {
   recipientName: string | null;
   destinationPhone: string | null;
   receiptDate: string | null;
+  receiptTime: string | null;
+  internalNotes: string | null;
   createdAt: string;
 }
 
@@ -132,6 +169,8 @@ export interface OrderDetail {
   createdAt: string;
   updatedAt: string;
   deliveryDate: string | null;
+  advancePaidCrc: number;
+  pendingValidationCrc: number;
   customer: CustomerReferenceWithExternalId;
   conversation: {
     id: string;
@@ -160,4 +199,35 @@ export function calculateOrderItemsSubtotalCrc(
   }>,
 ) {
   return items.reduce((sum, item) => sum + (item.totalPriceCrc ?? 0), 0);
+}
+
+export function calculateOrderReceiptAggregates(
+  receipts: Array<{
+    status: string;
+    amountCrc: number | null | undefined;
+  }>,
+) {
+  return receipts.reduce(
+    (accumulator, receipt) => {
+      const amountCrc = receipt.amountCrc ?? 0;
+
+      if (amountCrc <= 0) {
+        return accumulator;
+      }
+
+      const normalizedStatus = receipt.status.trim().toLowerCase();
+
+      if (normalizedStatus === "validated") {
+        accumulator.advancePaidCrc += amountCrc;
+      } else if (normalizedStatus === "pending_validation") {
+        accumulator.pendingValidationCrc += amountCrc;
+      }
+
+      return accumulator;
+    },
+    {
+      advancePaidCrc: 0,
+      pendingValidationCrc: 0,
+    },
+  );
 }

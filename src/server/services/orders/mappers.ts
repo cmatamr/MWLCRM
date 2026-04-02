@@ -1,10 +1,11 @@
-import type { Contact, LeadThread, Order, OrderActivity, OrderItem, PaymentReceipt } from "@prisma/client";
+import type { Bank, Contact, LeadThread, Order, OrderActivity, OrderItem, PaymentReceipt } from "@prisma/client";
 
 import {
   mapConversationStageReference,
   mapCustomerReference,
   mapCustomerReferenceWithExternalId,
 } from "@/domain/crm/mappers";
+import { calculateOrderReceiptAggregates } from "@/domain/crm/orders";
 import { toNullableIsoDate } from "@/server/services/shared";
 
 import type {
@@ -55,6 +56,8 @@ type OrderDetailRecord = Order & {
     PaymentReceipt,
     | "id"
     | "status"
+    | "amountCrc"
+    | "bankId"
     | "bank"
     | "transferType"
     | "amountText"
@@ -64,8 +67,12 @@ type OrderDetailRecord = Order & {
     | "recipientName"
     | "destinationPhone"
     | "receiptDate"
+    | "receiptTime"
+    | "internalNotes"
     | "createdAt"
-  >[];
+  >[] & {
+    bankRef?: Pick<Bank, "id" | "name"> | null;
+  }[];
 };
 
 function normalizeOptionalText(value: string | null | undefined): string | null {
@@ -140,7 +147,9 @@ export function mapOrderReceiptSummary(
   return {
     id: receipt.id,
     status: receipt.status,
-    bank: receipt.bank,
+    amountCrc: receipt.amountCrc,
+    bankId: receipt.bankId,
+    bank: receipt.bankRef?.name ?? receipt.bank,
     transferType: receipt.transferType,
     amountText: receipt.amountText,
     currency: receipt.currency,
@@ -149,6 +158,8 @@ export function mapOrderReceiptSummary(
     recipientName: receipt.recipientName,
     destinationPhone: receipt.destinationPhone,
     receiptDate: toNullableIsoDate(receipt.receiptDate),
+    receiptTime: normalizeOptionalText(receipt.receiptTime),
+    internalNotes: normalizeOptionalText(receipt.internalNotes),
     createdAt: receipt.createdAt.toISOString(),
   };
 }
@@ -167,6 +178,8 @@ export function mapOrderActivityEntry(
 }
 
 export function mapOrderDetail(order: OrderDetailRecord): OrderDetail {
+  const receiptAggregates = calculateOrderReceiptAggregates(order.paymentReceipts);
+
   return {
     id: order.id,
     status: order.status,
@@ -180,6 +193,8 @@ export function mapOrderDetail(order: OrderDetailRecord): OrderDetail {
     createdAt: order.createdAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
     deliveryDate: toNullableIsoDate(order.deliveryDate),
+    advancePaidCrc: receiptAggregates.advancePaidCrc,
+    pendingValidationCrc: receiptAggregates.pendingValidationCrc,
     customer: mapCustomerReferenceWithExternalId({
       id: order.contact?.id,
       name: order.contact?.displayName,

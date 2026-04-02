@@ -1,4 +1,9 @@
-import { OrderStatusEnum, Prisma } from "@prisma/client";
+import {
+  OrderStatusEnum,
+  PaymentReceiptSourceEnum,
+  PaymentReceiptStatusEnum,
+  Prisma,
+} from "@prisma/client";
 
 import {
   calculateOrderItemSubtotalCrc,
@@ -20,12 +25,11 @@ import type {
   OrderDetail,
   OrderFilterOptions,
   OrderItemProductOption,
-  OrderPaymentConfirmationResult,
   OrdersListResponse,
   UpdateOrderActivityInput,
 } from "./types";
 
-const PAYMENT_CONFIRMABLE_ORDER_STATUSES: OrderStatusEnum[] = [
+const ORDER_STATUSES_ALLOWED_TO_ENTER_PRODUCTION: OrderStatusEnum[] = [
   OrderStatusEnum.draft,
   OrderStatusEnum.quoted,
   OrderStatusEnum.pending_payment,
@@ -34,22 +38,15 @@ const PAYMENT_CONFIRMABLE_ORDER_STATUSES: OrderStatusEnum[] = [
   OrderStatusEnum.in_design,
 ];
 
-const PAYMENT_PENDING_STATUSES = [
-  "pending",
-  "pending_validation",
-  "review",
-  "payment_review",
-] as const;
-
-const PAYMENT_CONFIRMED_STATUS = "validated";
 const MANUAL_ORDER_SOURCE = "CRM";
 const MANUAL_ORDER_INITIAL_STATUS = OrderStatusEnum.pending_payment;
 const MANUAL_ORDER_INITIAL_PAYMENT_STATUS = "pending_validation";
 const ORDER_ACTIVITY_TYPE_NOTE = "note";
-
-function isPendingPaymentStatus(status: string) {
-  return PAYMENT_PENDING_STATUSES.some((candidate) => candidate === status);
-}
+const ORDER_ACTIVITY_TYPE_PAYMENT_VALIDATION = "payment_validation";
+const ORDER_ACTIVITY_TYPE_SYSTEM_EVENT = "system_event";
+const ORDER_PAYMENT_STATUS_PENDING_VALIDATION = "pending_validation";
+const ORDER_PAYMENT_STATUS_VALIDATED = "validated";
+const DEFAULT_RECEIPT_CURRENCY = "CRC";
 
 type OrdersDbClient = Prisma.TransactionClient | ReturnType<typeof resolveDb>;
 type OrderItemCatalogProduct = {
@@ -60,16 +57,25 @@ type OrderItemCatalogProduct = {
   priceFromCrc: number | null;
 };
 
-export class ConfirmOrderPaymentError extends Error {
-  code: "ORDER_NOT_FOUND" | "PAYMENT_ALREADY_CONFIRMED" | "INVALID_ORDER_TRANSITION";
+export class PaymentReceiptError extends Error {
+  code:
+    | "ORDER_NOT_FOUND"
+    | "BANK_NOT_FOUND"
+    | "RECEIPT_NOT_FOUND"
+    | "RECEIPT_NOT_IN_ORDER"
+    | "RECEIPT_ALREADY_VALIDATED"
+    | "RECEIPT_SOFT_DELETED"
+    | "RECEIPT_AMOUNT_REQUIRED"
+    | "INVALID_RECEIPT_TRANSITION"
+    | "DUPLICATE_RECEIPT_KEY";
 
   constructor(
-    code: ConfirmOrderPaymentError["code"],
+    code: PaymentReceiptError["code"],
     message: string,
     readonly details?: Record<string, unknown>,
   ) {
     super(message);
-    this.name = "ConfirmOrderPaymentError";
+    this.name = "PaymentReceiptError";
     this.code = code;
   }
 }
@@ -218,6 +224,262 @@ export class UpdateOrderActivityError extends Error {
     super(message);
     this.name = "UpdateOrderActivityError";
     this.code = code;
+  }
+}
+
+type PaymentReceiptMutationInput = {
+  orderId: string;
+  receiptId: string;
+  performedBy?: string | null;
+  internalNotes?: string | null;
+};
+
+type CreatePaymentReceiptInput = {
+  orderId: string;
+  messageId?: string | null;
+  receiptKey?: string | null;
+  amountCrc: number;
+  amountText?: string | null;
+  currency?: string | null;
+  bankId?: string | null;
+  bank?: string | null;
+  transferType?: string | null;
+  reference?: string | null;
+  senderName?: string | null;
+  recipientName?: string | null;
+  destinationPhone?: string | null;
+  receiptDate?: string | null;
+  receiptTime?: string | null;
+  internalNotes?: string | null;
+  rawPayload?: Prisma.InputJsonValue;
+};
+
+type UpdatePaymentReceiptInput = {
+  orderId: string;
+  receiptId: string;
+  amountCrc?: number;
+  amountText?: string | null;
+  currency?: string | null;
+  bankId?: string | null;
+  bank?: string | null;
+  transferType?: string | null;
+  reference?: string | null;
+  senderName?: string | null;
+  recipientName?: string | null;
+  destinationPhone?: string | null;
+  receiptDate?: string | null;
+  receiptTime?: string | null;
+  internalNotes?: string | null;
+};
+
+function normalizeOptionalText(value: string | null | undefined) {
+  if (value == null) {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+async function resolveBankReference(
+  tx: Prisma.TransactionClient,
+  input: { bankId?: string | null; bank?: string | null },
+) {
+  const normalizedBankId = normalizeOptionalText(input.bankId);
+
+  if (!normalizedBankId) {
+    return {
+      bankId: null,
+      bankName: normalizeOptionalText(input.bank),
+    };
+  }
+
+  const bank = await tx.bank.findUnique({
+    where: {
+      id: normalizedBankId,
+    },
+    select: {
+      id: true,
+      name: true,
+      isActive: true,
+    },
+  });
+
+  if (!bank || !bank.isActive) {
+    throw new PaymentReceiptError(
+      "BANK_NOT_FOUND",
+      "Selected bank was not found or is inactive.",
+      {
+        bankId: normalizedBankId,
+      },
+    );
+  }
+
+  return {
+    bankId: bank.id,
+    bankName: bank.name,
+  };
+}
+
+function buildManualReceiptKey(orderId: string) {
+  return `manual_crm:${orderId}:${crypto.randomUUID()}`;
+}
+
+function normalizeReceiptDateInput(value: string | null | undefined) {
+  return value ? new Date(`${value}T00:00:00.000Z`) : null;
+}
+
+async function appendOrderActivityForReceiptEvent(
+  tx: Prisma.TransactionClient,
+  input: {
+    orderId: string;
+    receiptId: string;
+    activityType?: string;
+    createdBy?: string | null;
+    content: string;
+    metadata?: Prisma.InputJsonValue;
+  },
+) {
+  await tx.orderActivity.create({
+    data: {
+      orderId: input.orderId,
+      type: input.activityType ?? ORDER_ACTIVITY_TYPE_PAYMENT_VALIDATION,
+      content: input.content,
+      createdBy: normalizeOptionalText(input.createdBy),
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+    },
+  });
+}
+
+async function getScopedReceiptOrThrow(
+  tx: Prisma.TransactionClient,
+  input: {
+    orderId: string;
+    receiptId: string;
+  },
+) {
+  const receipt = await tx.paymentReceipt.findUnique({
+    where: {
+      id: input.receiptId,
+    },
+    select: {
+      id: true,
+      orderId: true,
+      receiptKey: true,
+      status: true,
+      amountCrc: true,
+      deletedAt: true,
+    },
+  });
+
+  if (!receipt) {
+    throw new PaymentReceiptError("RECEIPT_NOT_FOUND", "Payment receipt not found.", {
+      orderId: input.orderId,
+      receiptId: input.receiptId,
+    });
+  }
+
+  if (receipt.orderId !== input.orderId) {
+    throw new PaymentReceiptError(
+      "RECEIPT_NOT_IN_ORDER",
+      "Payment receipt does not belong to the requested order.",
+      {
+        orderId: input.orderId,
+        receiptId: input.receiptId,
+        receiptOrderId: receipt.orderId,
+      },
+    );
+  }
+
+  return receipt;
+}
+
+async function ensureOrderExists(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+) {
+  const order = await tx.order.findUnique({
+    where: {
+      id: orderId,
+    },
+    select: {
+      id: true,
+      status: true,
+      paymentStatus: true,
+    },
+  });
+
+  if (!order) {
+    throw new PaymentReceiptError("ORDER_NOT_FOUND", "Order not found.", {
+      orderId,
+    });
+  }
+
+  return order;
+}
+
+export async function recomputeOrderPaymentState(
+  orderId: string,
+  options?: ServiceOptions,
+): Promise<void> {
+  const db = resolveDb(options);
+
+  await db.$transaction(async (tx) => {
+    await recomputeOrderPaymentStateTx(tx, orderId);
+  });
+}
+
+async function recomputeOrderPaymentStateTx(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+) {
+  const order = await ensureOrderExists(tx, orderId);
+
+  const [validatedCount, pendingCount] = await Promise.all([
+    tx.paymentReceipt.count({
+      where: {
+        orderId,
+        status: PaymentReceiptStatusEnum.validated,
+        deletedAt: null,
+      },
+    }),
+    tx.paymentReceipt.count({
+      where: {
+        orderId,
+        status: PaymentReceiptStatusEnum.pending_validation,
+        deletedAt: null,
+      },
+    }),
+  ]);
+
+  const nextPaymentStatus =
+    validatedCount > 0 ? ORDER_PAYMENT_STATUS_VALIDATED : ORDER_PAYMENT_STATUS_PENDING_VALIDATION;
+
+  const nextStatus =
+    validatedCount > 0 &&
+    ORDER_STATUSES_ALLOWED_TO_ENTER_PRODUCTION.includes(order.status)
+      ? OrderStatusEnum.in_production
+      : order.status;
+
+  if (order.paymentStatus !== nextPaymentStatus || order.status !== nextStatus) {
+    await tx.order.update({
+      where: {
+        id: orderId,
+      },
+      data: {
+        paymentStatus: nextPaymentStatus,
+        status: nextStatus,
+      },
+    });
+  } else if (validatedCount === 0 && pendingCount === 0 && order.paymentStatus !== ORDER_PAYMENT_STATUS_PENDING_VALIDATION) {
+    await tx.order.update({
+      where: {
+        id: orderId,
+      },
+      data: {
+        paymentStatus: ORDER_PAYMENT_STATUS_PENDING_VALIDATION,
+      },
+    });
   }
 }
 
@@ -387,6 +649,8 @@ async function findOrderDetailRecord(db: OrdersDbClient, orderId: string) {
         select: {
           id: true,
           status: true,
+          amountCrc: true,
+          bankId: true,
           bank: true,
           transferType: true,
           amountText: true,
@@ -396,7 +660,15 @@ async function findOrderDetailRecord(db: OrdersDbClient, orderId: string) {
           recipientName: true,
           destinationPhone: true,
           receiptDate: true,
+          receiptTime: true,
+          internalNotes: true,
           createdAt: true,
+          bankRef: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
       },
     },
@@ -1337,6 +1609,414 @@ export async function deleteOrder(
   });
 }
 
+export async function createPaymentReceipt(
+  input: CreatePaymentReceiptInput,
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    const order = await ensureOrderExists(tx, input.orderId);
+    const receiptKey = normalizeOptionalText(input.receiptKey) ?? buildManualReceiptKey(input.orderId);
+    const resolvedBank = await resolveBankReference(tx, input);
+
+    try {
+      const createdReceipt = await tx.paymentReceipt.create({
+        data: {
+          orderId: input.orderId,
+          messageId: input.messageId ?? null,
+          receiptKey,
+          status: PaymentReceiptStatusEnum.pending_validation,
+          amountCrc: input.amountCrc,
+          amountText: normalizeOptionalText(input.amountText),
+          currency: normalizeOptionalText(input.currency) ?? DEFAULT_RECEIPT_CURRENCY,
+          bankId: resolvedBank.bankId,
+          bank: resolvedBank.bankName,
+          transferType: normalizeOptionalText(input.transferType),
+          reference: normalizeOptionalText(input.reference),
+          senderName: normalizeOptionalText(input.senderName),
+          recipientName: normalizeOptionalText(input.recipientName),
+          destinationPhone: normalizeOptionalText(input.destinationPhone),
+          receiptDate: normalizeReceiptDateInput(input.receiptDate),
+          receiptTime: normalizeOptionalText(input.receiptTime),
+          source: PaymentReceiptSourceEnum.manual_crm,
+          internalNotes: normalizeOptionalText(input.internalNotes),
+          rawPayload: input.rawPayload ?? {},
+        },
+        select: {
+          id: true,
+          receiptKey: true,
+          amountCrc: true,
+        },
+      });
+
+      if (order.status === OrderStatusEnum.draft) {
+        await tx.order.update({
+          where: {
+            id: input.orderId,
+          },
+          data: {
+            status: OrderStatusEnum.pending_payment,
+          },
+        });
+      }
+
+      await recomputeOrderPaymentStateTx(tx, input.orderId);
+
+      await appendOrderActivityForReceiptEvent(tx, {
+        orderId: input.orderId,
+        receiptId: createdReceipt.id,
+        activityType: ORDER_ACTIVITY_TYPE_SYSTEM_EVENT,
+        content: "Payment receipt created.",
+        metadata: {
+          receiptId: createdReceipt.id,
+          receiptKey: createdReceipt.receiptKey,
+          amountCrc: createdReceipt.amountCrc,
+          source: PaymentReceiptSourceEnum.manual_crm,
+          status: PaymentReceiptStatusEnum.pending_validation,
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        throw new PaymentReceiptError(
+          "DUPLICATE_RECEIPT_KEY",
+          "A payment receipt with the same receipt key already exists.",
+          {
+            orderId: input.orderId,
+            receiptKey,
+          },
+        );
+      }
+
+      throw error;
+    }
+
+    const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
+
+    if (!updatedOrder) {
+      throw new PaymentReceiptError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    return mapOrderDetail(updatedOrder);
+  });
+}
+
+export async function updatePaymentReceipt(
+  input: UpdatePaymentReceiptInput,
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    await ensureOrderExists(tx, input.orderId);
+    const receipt = await getScopedReceiptOrThrow(tx, input);
+
+    if (receipt.status === PaymentReceiptStatusEnum.validated) {
+      throw new PaymentReceiptError(
+        "RECEIPT_ALREADY_VALIDATED",
+        "Validated payment receipts cannot be edited.",
+        {
+          orderId: input.orderId,
+          receiptId: input.receiptId,
+        },
+      );
+    }
+
+    if (receipt.status === PaymentReceiptStatusEnum.soft_deleted || receipt.deletedAt) {
+      throw new PaymentReceiptError(
+        "RECEIPT_SOFT_DELETED",
+        "Soft deleted payment receipts cannot be edited.",
+        {
+          orderId: input.orderId,
+          receiptId: input.receiptId,
+        },
+      );
+    }
+
+    const resolvedBank =
+      input.bankId !== undefined || input.bank !== undefined
+        ? await resolveBankReference(tx, input)
+        : null;
+
+    await tx.paymentReceipt.update({
+      where: {
+        id: input.receiptId,
+      },
+      data: {
+        ...(input.amountCrc !== undefined ? { amountCrc: input.amountCrc } : {}),
+        ...(input.amountText !== undefined ? { amountText: normalizeOptionalText(input.amountText) } : {}),
+        ...(input.currency !== undefined
+          ? { currency: normalizeOptionalText(input.currency) ?? DEFAULT_RECEIPT_CURRENCY }
+          : {}),
+        ...(resolvedBank
+          ? {
+              bankId: resolvedBank.bankId,
+              bank: resolvedBank.bankName,
+            }
+          : {}),
+        ...(input.transferType !== undefined
+          ? { transferType: normalizeOptionalText(input.transferType) }
+          : {}),
+        ...(input.reference !== undefined ? { reference: normalizeOptionalText(input.reference) } : {}),
+        ...(input.senderName !== undefined ? { senderName: normalizeOptionalText(input.senderName) } : {}),
+        ...(input.recipientName !== undefined
+          ? { recipientName: normalizeOptionalText(input.recipientName) }
+          : {}),
+        ...(input.destinationPhone !== undefined
+          ? { destinationPhone: normalizeOptionalText(input.destinationPhone) }
+          : {}),
+        ...(input.receiptDate !== undefined
+          ? { receiptDate: normalizeReceiptDateInput(input.receiptDate) }
+          : {}),
+        ...(input.receiptTime !== undefined
+          ? { receiptTime: normalizeOptionalText(input.receiptTime) }
+          : {}),
+        ...(input.internalNotes !== undefined
+          ? { internalNotes: normalizeOptionalText(input.internalNotes) }
+          : {}),
+      },
+    });
+
+    await appendOrderActivityForReceiptEvent(tx, {
+      orderId: input.orderId,
+      receiptId: input.receiptId,
+      activityType: ORDER_ACTIVITY_TYPE_SYSTEM_EVENT,
+      content: "Payment receipt updated.",
+      metadata: {
+        receiptId: input.receiptId,
+      },
+    });
+
+    const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
+
+    if (!updatedOrder) {
+      throw new PaymentReceiptError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    return mapOrderDetail(updatedOrder);
+  });
+}
+
+export async function validatePaymentReceipt(
+  input: PaymentReceiptMutationInput,
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    await ensureOrderExists(tx, input.orderId);
+    const receipt = await getScopedReceiptOrThrow(tx, input);
+
+    if (receipt.status === PaymentReceiptStatusEnum.validated) {
+      throw new PaymentReceiptError(
+        "RECEIPT_ALREADY_VALIDATED",
+        "Payment receipt is already validated.",
+        {
+          orderId: input.orderId,
+          receiptId: input.receiptId,
+        },
+      );
+    }
+
+    if (receipt.status === PaymentReceiptStatusEnum.soft_deleted || receipt.deletedAt) {
+      throw new PaymentReceiptError(
+        "RECEIPT_SOFT_DELETED",
+        "Soft deleted payment receipts cannot be validated.",
+        {
+          orderId: input.orderId,
+          receiptId: input.receiptId,
+        },
+      );
+    }
+
+    if (receipt.amountCrc == null) {
+      throw new PaymentReceiptError(
+        "RECEIPT_AMOUNT_REQUIRED",
+        "Payment receipt requires amountCrc before validation.",
+        {
+          orderId: input.orderId,
+          receiptId: input.receiptId,
+        },
+      );
+    }
+
+    await tx.paymentReceipt.update({
+      where: {
+        id: input.receiptId,
+      },
+      data: {
+        status: PaymentReceiptStatusEnum.validated,
+        validatedAt: new Date(),
+        validatedBy: normalizeOptionalText(input.performedBy),
+        ...(input.internalNotes !== undefined
+          ? { internalNotes: normalizeOptionalText(input.internalNotes) }
+          : {}),
+        deletedAt: null,
+        deletedBy: null,
+      },
+    });
+
+    await recomputeOrderPaymentStateTx(tx, input.orderId);
+
+    await appendOrderActivityForReceiptEvent(tx, {
+      orderId: input.orderId,
+      receiptId: input.receiptId,
+      createdBy: input.performedBy,
+      content: "Payment receipt validated.",
+      metadata: {
+        receiptId: input.receiptId,
+        status: PaymentReceiptStatusEnum.validated,
+        validatedBy: normalizeOptionalText(input.performedBy),
+      },
+    });
+
+    const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
+
+    if (!updatedOrder) {
+      throw new PaymentReceiptError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    return mapOrderDetail(updatedOrder);
+  });
+}
+
+export async function rejectPaymentReceipt(
+  input: PaymentReceiptMutationInput,
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  return mutatePaymentReceiptStatus(
+    {
+      ...input,
+      nextStatus: PaymentReceiptStatusEnum.rejected,
+      activityMessage: "Payment receipt rejected.",
+    },
+    options,
+  );
+}
+
+export async function cancelPaymentReceipt(
+  input: PaymentReceiptMutationInput,
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  return mutatePaymentReceiptStatus(
+    {
+      ...input,
+      nextStatus: PaymentReceiptStatusEnum.cancelled,
+      activityMessage: "Payment receipt cancelled.",
+    },
+    options,
+  );
+}
+
+export async function softDeletePaymentReceipt(
+  input: PaymentReceiptMutationInput,
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  return mutatePaymentReceiptStatus(
+    {
+      ...input,
+      nextStatus: PaymentReceiptStatusEnum.soft_deleted,
+      activityMessage: "Payment receipt soft deleted.",
+    },
+    options,
+  );
+}
+
+async function mutatePaymentReceiptStatus(
+  input: PaymentReceiptMutationInput & {
+    nextStatus: PaymentReceiptStatusEnum;
+    activityMessage: string;
+  },
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    await ensureOrderExists(tx, input.orderId);
+    const receipt = await getScopedReceiptOrThrow(tx, input);
+
+    if (receipt.status === input.nextStatus) {
+      throw new PaymentReceiptError(
+        "INVALID_RECEIPT_TRANSITION",
+        "Payment receipt is already in the requested status.",
+        {
+          orderId: input.orderId,
+          receiptId: input.receiptId,
+          status: receipt.status,
+          nextStatus: input.nextStatus,
+        },
+      );
+    }
+
+    if (receipt.status === PaymentReceiptStatusEnum.soft_deleted || receipt.deletedAt) {
+      throw new PaymentReceiptError(
+        "RECEIPT_SOFT_DELETED",
+        "Soft deleted payment receipts cannot transition to another status.",
+        {
+          orderId: input.orderId,
+          receiptId: input.receiptId,
+        },
+      );
+    }
+
+    await tx.paymentReceipt.update({
+      where: {
+        id: input.receiptId,
+      },
+      data: {
+        status: input.nextStatus,
+        ...(input.nextStatus === PaymentReceiptStatusEnum.soft_deleted
+          ? {
+              deletedAt: new Date(),
+              deletedBy: normalizeOptionalText(input.performedBy),
+            }
+          : {
+              deletedAt: null,
+              deletedBy: null,
+            }),
+        validatedAt: null,
+        validatedBy: null,
+        ...(input.internalNotes !== undefined
+          ? { internalNotes: normalizeOptionalText(input.internalNotes) }
+          : {}),
+      },
+    });
+
+    await recomputeOrderPaymentStateTx(tx, input.orderId);
+
+    await appendOrderActivityForReceiptEvent(tx, {
+      orderId: input.orderId,
+      receiptId: input.receiptId,
+      createdBy: input.performedBy,
+      content: input.activityMessage,
+      metadata: {
+        receiptId: input.receiptId,
+        status: input.nextStatus,
+        performedBy: normalizeOptionalText(input.performedBy),
+      },
+    });
+
+    const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
+
+    if (!updatedOrder) {
+      throw new PaymentReceiptError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    return mapOrderDetail(updatedOrder);
+  });
+}
+
 export async function getOrderFilterOptions(
   options?: ServiceOptions,
 ): Promise<OrderFilterOptions> {
@@ -1359,153 +2039,14 @@ export async function getOrderFilterOptions(
 
 export async function confirmOrderPayment(
   orderId: string,
-  options?: ServiceOptions,
-): Promise<OrderPaymentConfirmationResult> {
-  const db = resolveDb(options);
-
-  return db.$transaction(async (tx) => {
-    const order = await tx.order.findUnique({
-      where: {
-        id: orderId,
-      },
-      select: {
-        id: true,
-        status: true,
-        paymentStatus: true,
-      },
-    });
-
-    if (!order) {
-      throw new ConfirmOrderPaymentError("ORDER_NOT_FOUND", "Order not found.", {
-        orderId,
-      });
-    }
-
-    const normalizedPaymentStatus = order.paymentStatus.trim().toLowerCase();
-
-    if (normalizedPaymentStatus === PAYMENT_CONFIRMED_STATUS) {
-      throw new ConfirmOrderPaymentError(
-        "PAYMENT_ALREADY_CONFIRMED",
-        "This order payment is already confirmed.",
-        {
-          orderId,
-          paymentStatus: order.paymentStatus,
-          status: order.status,
-        },
-      );
-    }
-
-    if (!isPendingPaymentStatus(normalizedPaymentStatus)) {
-      throw new ConfirmOrderPaymentError(
-        "INVALID_ORDER_TRANSITION",
-        "The current payment status cannot be confirmed from the dashboard.",
-        {
-          orderId,
-          paymentStatus: order.paymentStatus,
-          allowedPaymentStatuses: PAYMENT_PENDING_STATUSES,
-        },
-      );
-    }
-
-    if (!PAYMENT_CONFIRMABLE_ORDER_STATUSES.includes(order.status)) {
-      throw new ConfirmOrderPaymentError(
-        "INVALID_ORDER_TRANSITION",
-        "The current order status cannot move to production after payment confirmation.",
-        {
-          orderId,
-          status: order.status,
-          allowedOrderStatuses: PAYMENT_CONFIRMABLE_ORDER_STATUSES,
-          targetStatus: OrderStatusEnum.in_production,
-        },
-      );
-    }
-
-    const updateResult = await tx.order.updateMany({
-      where: {
-        id: orderId,
-        status: {
-          in: PAYMENT_CONFIRMABLE_ORDER_STATUSES,
-        },
-        paymentStatus: {
-          in: [...PAYMENT_PENDING_STATUSES],
-        },
-      },
-      data: {
-        paymentStatus: PAYMENT_CONFIRMED_STATUS,
-        status: OrderStatusEnum.in_production,
-      },
-    });
-
-    if (updateResult.count !== 1) {
-      const latestOrder = await tx.order.findUnique({
-        where: {
-          id: orderId,
-        },
-        select: {
-          id: true,
-          status: true,
-          paymentStatus: true,
-        },
-      });
-
-      if (!latestOrder) {
-        throw new ConfirmOrderPaymentError("ORDER_NOT_FOUND", "Order not found.", {
-          orderId,
-        });
-      }
-
-      if (latestOrder.paymentStatus.trim().toLowerCase() === PAYMENT_CONFIRMED_STATUS) {
-        throw new ConfirmOrderPaymentError(
-          "PAYMENT_ALREADY_CONFIRMED",
-          "This order payment is already confirmed.",
-          {
-            orderId,
-            paymentStatus: latestOrder.paymentStatus,
-            status: latestOrder.status,
-          },
-        );
-      }
-
-      throw new ConfirmOrderPaymentError(
-        "INVALID_ORDER_TRANSITION",
-        "The order could not be updated because its current state no longer allows this transition.",
-        {
-          orderId,
-          paymentStatus: latestOrder.paymentStatus,
-          status: latestOrder.status,
-        },
-      );
-    }
-
-    await tx.paymentReceipt.updateMany({
-      where: {
-        orderId,
-        status: {
-          in: [...PAYMENT_PENDING_STATUSES],
-        },
-      },
-      data: {
-        status: PAYMENT_CONFIRMED_STATUS,
-      },
-    });
-
-    const updatedOrder = await tx.order.findUniqueOrThrow({
-      where: {
-        id: orderId,
-      },
-      select: {
-        id: true,
-        status: true,
-        paymentStatus: true,
-        updatedAt: true,
-      },
-    });
-
-    return {
-      id: updatedOrder.id,
-      status: updatedOrder.status,
-      paymentStatus: updatedOrder.paymentStatus,
-      updatedAt: updatedOrder.updatedAt.toISOString(),
-    };
-  });
+  _options?: ServiceOptions,
+): Promise<never> {
+  throw new PaymentReceiptError(
+    "INVALID_RECEIPT_TRANSITION",
+    "Order-level payment confirmation is deprecated. Validate a payment receipt by receiptId instead.",
+    {
+      orderId,
+      deprecated: true,
+    },
+  );
 }

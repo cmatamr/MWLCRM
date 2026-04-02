@@ -1,5 +1,10 @@
 export type {
+  BankListItem,
+} from "@/domain/crm/banks";
+
+export type {
   CreateOrderActivityInput,
+  CreatePaymentReceiptInput,
   CreateOrderInput,
   CreateOrderItemInput,
   DeleteOrderResult,
@@ -15,6 +20,8 @@ export type {
   OrderReceiptSummary,
   OrdersListResponse,
   OrderSort,
+  PaymentReceiptReviewActionInput,
+  UpdatePaymentReceiptInput,
   UpdateOrderActivityInput,
 } from "@/domain/crm/orders";
 

@@ -2,6 +2,7 @@ import type { OrderStatusEnum } from "@prisma/client";
 
 import type { DashboardSummary } from "@/server/services/dashboard/types";
 import type { DashboardDailySalesRangeDays } from "@/server/services/dashboard/types";
+import type { BankListItem } from "@/server/services/orders/types";
 import type {
   CreateCustomerInput,
   CustomerDetail,
@@ -17,6 +18,7 @@ import type {
 import type { FunnelSummary } from "@/server/services/funnel/types";
 import type {
   CreateOrderActivityInput,
+  CreatePaymentReceiptInput,
   CreateOrderInput,
   DeleteOrderResult,
   ListOrdersParams,
@@ -24,6 +26,8 @@ import type {
   OrderItemProductOption,
   OrderPaymentConfirmationResult,
   OrdersListResponse,
+  PaymentReceiptReviewActionInput,
+  UpdatePaymentReceiptInput,
   UpdateOrderActivityInput,
 } from "@/server/services/orders/types";
 import { buildApiUrl, fetcher, FetcherError, type QueryParams } from "@/lib/fetcher";
@@ -47,6 +51,9 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
   }
 
   return {
+    listBanks(init?: RequestInit) {
+      return get<BankListItem[]>("/api/banks", undefined, init);
+    },
     getDashboardSummary(
       params?: { days?: DashboardDailySalesRangeDays; status?: OrderStatusEnum },
       init?: RequestInit,
@@ -202,6 +209,97 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
         body: JSON.stringify({
           action: "confirm_payment",
         }),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    validatePaymentReceipt(
+      orderId: string,
+      receiptId: string,
+      input: { performedBy: string; internalNotes?: string | null },
+      init?: RequestInit,
+    ) {
+      return get<OrderDetail>(`/api/orders/${orderId}/receipts/${receiptId}/validate`, undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    createPaymentReceipt(orderId: string, input: CreatePaymentReceiptInput, init?: RequestInit) {
+      return get<OrderDetail>(`/api/orders/${orderId}/receipts`, undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    updatePaymentReceipt(
+      orderId: string,
+      receiptId: string,
+      input: UpdatePaymentReceiptInput,
+      init?: RequestInit,
+    ) {
+      return get<OrderDetail>(`/api/orders/${orderId}/receipts/${receiptId}`, undefined, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    deletePaymentReceipt(
+      orderId: string,
+      receiptId: string,
+      input: PaymentReceiptReviewActionInput,
+      init?: RequestInit,
+    ) {
+      return get<OrderDetail>(`/api/orders/${orderId}/receipts/${receiptId}`, undefined, {
+        method: "DELETE",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    rejectPaymentReceipt(
+      orderId: string,
+      receiptId: string,
+      input: PaymentReceiptReviewActionInput,
+      init?: RequestInit,
+    ) {
+      return get<OrderDetail>(`/api/orders/${orderId}/receipts/${receiptId}/reject`, undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    cancelPaymentReceipt(
+      orderId: string,
+      receiptId: string,
+      input: PaymentReceiptReviewActionInput,
+      init?: RequestInit,
+    ) {
+      return get<OrderDetail>(`/api/orders/${orderId}/receipts/${receiptId}/cancel`, undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
         headers: {
           "Content-Type": "application/json",
           ...init?.headers,

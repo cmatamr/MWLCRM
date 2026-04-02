@@ -54,6 +54,7 @@ const paymentStatusLabels: Record<string, string> = {
   rejected: "Rechazado",
   failed: "Fallido",
   cancelled: "Cancelado",
+  soft_deleted: "Eliminado",
 };
 
 const leadStageTones: Record<LeadStageType, BadgeTone> = {
@@ -265,8 +266,12 @@ export function getPaymentStatusBadge(status: string): StatusBadgeViewModel {
     return createBadge(formatPaymentStatusLabel(status), "warning");
   }
 
-  if (["rejected", "failed", "cancelled"].includes(normalizedStatus)) {
+  if (["rejected", "failed"].includes(normalizedStatus)) {
     return createBadge(formatPaymentStatusLabel(status), "danger");
+  }
+
+  if (["cancelled", "soft_deleted"].includes(normalizedStatus)) {
+    return createBadge(formatPaymentStatusLabel(status), "neutral");
   }
 
   return createBadge(formatPaymentStatusLabel(status), "neutral");

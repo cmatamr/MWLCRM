@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { formatLeadStageLabel } from "@/domain/crm/formatters";
-import { formatCalendarDate, formatDateTime } from "@/lib/formatters";
+import { formatCalendarDate, formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
 import type { OrderDetail } from "@/server/services/orders/types";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, StatusBadgeFromViewModel } from "@/components/ui/status-badge";
@@ -108,7 +108,9 @@ export function OrderPaymentSummaryCard({ order }: OrderDetailSidebarProps) {
           <div className="rounded-[24px] border border-border/70 bg-slate-50/70 p-4">
             <StatusBadgeFromViewModel badge={getPaymentStatusBadge(latestReceipt.status)} />
             <p className="mt-3 text-lg font-semibold text-slate-950">
-              {latestReceipt.amountText?.trim() || "Monto no detectado"}
+              {latestReceipt.amountCrc != null
+                ? formatCurrencyCRC(latestReceipt.amountCrc)
+                : "Monto no disponible"}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               {latestReceipt.bank ?? "Banco no detectado"} · {latestReceipt.transferType ?? "Tipo no detectado"}
@@ -123,16 +125,32 @@ export function OrderPaymentSummaryCard({ order }: OrderDetailSidebarProps) {
             </p>
           </div>
 
-          <div className="rounded-[24px] border border-border/70 bg-slate-50/70 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Totales de comprobantes
-            </p>
-            <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
-              {order.receipts.length}
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              recibo{order.receipts.length === 1 ? "" : "s"} asociado{order.receipts.length === 1 ? "" : "s"} a esta orden.
-            </p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-[24px] border border-border/70 bg-slate-50/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                Adelanto validado
+              </p>
+              <p className="mt-2 text-xl font-semibold tracking-tight text-slate-950">
+                {formatCurrencyCRC(order.advancePaidCrc)}
+              </p>
+            </div>
+            <div className="rounded-[24px] border border-border/70 bg-slate-50/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                Pendiente de validacion
+              </p>
+              <p className="mt-2 text-xl font-semibold tracking-tight text-slate-950">
+                {formatCurrencyCRC(order.pendingValidationCrc)}
+              </p>
+            </div>
+            <div className="rounded-[24px] border border-border/70 bg-slate-50/70 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                Comprobantes
+              </p>
+              <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+                {order.receipts.length}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">registrados en la orden.</p>
+            </div>
           </div>
         </div>
       ) : (

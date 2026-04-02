@@ -15,6 +15,7 @@ function normalizeQueryKeyParams<TParams extends object | undefined>(params?: TP
 }
 
 export const queryEndpoints = {
+  banks: "/api/banks",
   dashboard: "/api/dashboard/summary",
   orders: "/api/orders",
   customers: "/api/customers",
@@ -24,6 +25,7 @@ export const queryEndpoints = {
 } as const;
 
 export const queryRefetchIntervals = {
+  banks: 300000,
   dashboard: 30000,
   orders: 20000,
   orderDetail: 20000,
@@ -34,6 +36,7 @@ export const queryRefetchIntervals = {
 } as const;
 
 export const queryKeys = {
+  banks: () => ["banks"] as const,
   dashboardSummary: (params?: { days?: DashboardDailySalesRangeDays; status?: OrderStatusEnum }) =>
     ["dashboard", "summary", normalizeQueryKeyParams(params)] as const,
   orderDetail: (id: string | null) => ["orders", "detail", id] as const,

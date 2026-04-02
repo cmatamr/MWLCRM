@@ -66,6 +66,23 @@ enum SenderType {
   @@map("sender_type")
 }
 
+enum PaymentReceiptStatusEnum {
+  pending_validation
+  validated
+  rejected
+  cancelled
+  soft_deleted
+
+  @@map("payment_receipt_status_enum")
+}
+
+enum PaymentReceiptSourceEnum {
+  automation
+  manual_crm
+
+  @@map("payment_receipt_source_enum")
+}
+
 model Contact {
   id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   primaryChannel   ChannelType  @map("primary_channel")
@@ -200,28 +217,50 @@ model OrderItem {
   @@map("order_items")
 }
 
-model PaymentReceipt {
-  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  orderId          String    @map("order_id") @db.Uuid
-  messageId        String?   @map("message_id") @db.Uuid
-  receiptKey       String    @unique(map: "payment_receipts_receipt_key_unique") @map("receipt_key")
-  status           String    @default("pending_validation")
-  bank             String?
-  transferType     String?   @map("transfer_type")
-  amountText       String?   @map("amount_text")
-  currency         String?
-  reference        String?
-  senderName       String?   @map("sender_name")
-  recipientName    String?   @map("recipient_name")
-  destinationPhone String?   @map("destination_phone")
-  receiptDate      DateTime? @map("receipt_date") @db.Date
-  receiptTime      String?   @map("receipt_time")
-  rawPayload       Json      @default("{}") @map("raw_payload")
-  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
-  message          Message?  @relation(fields: [messageId], references: [id], onDelete: SetNull, map: "payment_receipts_message_id_fkey")
-  order            Order     @relation(fields: [orderId], references: [id], onDelete: Cascade, map: "payment_receipts_order_id_fkey")
+model Bank {
+  id        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  code      String?
+  isActive  Boolean          @default(true) @map("is_active")
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  receipts  PaymentReceipt[] @relation("PaymentReceiptBank")
 
+  @@index([isActive], map: "banks_is_active_idx")
+  @@map("banks")
+}
+
+model PaymentReceipt {
+  id               String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId          String                   @map("order_id") @db.Uuid
+  messageId        String?                  @map("message_id") @db.Uuid
+  receiptKey       String                   @unique(map: "payment_receipts_receipt_key_unique") @map("receipt_key")
+  status           PaymentReceiptStatusEnum @default(pending_validation)
+  bankId           String?                  @map("bank_id") @db.Uuid
+  bank             String?
+  transferType     String?                  @map("transfer_type")
+  amountCrc        Int?                     @map("amount_crc")
+  amountText       String?                  @map("amount_text")
+  currency         String                   @default("CRC")
+  reference        String?
+  senderName       String?                  @map("sender_name")
+  recipientName    String?                  @map("recipient_name")
+  destinationPhone String?                  @map("destination_phone")
+  receiptDate      DateTime?                @map("receipt_date") @db.Date
+  receiptTime      String?                  @map("receipt_time")
+  source           PaymentReceiptSourceEnum @default(automation)
+  internalNotes    String?                  @map("internal_notes")
+  validatedAt      DateTime?                @map("validated_at") @db.Timestamptz(6)
+  validatedBy      String?                  @map("validated_by")
+  deletedAt        DateTime?                @map("deleted_at") @db.Timestamptz(6)
+  deletedBy        String?                  @map("deleted_by")
+  rawPayload       Json                     @default("{}") @map("raw_payload")
+  createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime                 @default(now()) @map("updated_at") @db.Timestamptz(6)
+  bankRef          Bank?                    @relation("PaymentReceiptBank", fields: [bankId], references: [id], onDelete: SetNull, map: "payment_receipts_bank_id_fkey")
+  message          Message?                 @relation(fields: [messageId], references: [id], onDelete: SetNull, map: "payment_receipts_message_id_fkey")
+  order            Order                    @relation(fields: [orderId], references: [id], onDelete: Cascade, map: "payment_receipts_order_id_fkey")
+
+  @@index([bankId], map: "idx_payment_receipts_bank_id")
   @@index([messageId], map: "idx_payment_receipts_message_id")
   @@index([orderId], map: "idx_payment_receipts_order_id")
   @@map("payment_receipts")
