@@ -59,7 +59,7 @@ export function OrderDetailView({ orderId, initialOrder }: OrderDetailViewProps)
         <div className="space-y-6">
           <OrderItemsTable orderId={order.id} items={order.items} />
           <OrderTotalsCard order={order} />
-          <OrderNotesCard notes={order.notes} />
+          <OrderNotesCard orderId={order.id} activities={order.activities} />
           <PaymentReceiptsTable receipts={order.receipts} />
         </div>
 

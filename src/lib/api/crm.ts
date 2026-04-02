@@ -16,6 +16,7 @@ import type {
 } from "@/server/services/conversations/types";
 import type { FunnelSummary } from "@/server/services/funnel/types";
 import type {
+  CreateOrderActivityInput,
   CreateOrderInput,
   DeleteOrderResult,
   ListOrdersParams,
@@ -23,6 +24,7 @@ import type {
   OrderItemProductOption,
   OrderPaymentConfirmationResult,
   OrdersListResponse,
+  UpdateOrderActivityInput,
 } from "@/server/services/orders/types";
 import { buildApiUrl, fetcher, FetcherError, type QueryParams } from "@/lib/fetcher";
 
@@ -102,6 +104,39 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     createOrder(input: CreateOrderInput, init?: RequestInit) {
       return get<OrderDetail>("/api/orders", undefined, {
         method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    createOrderActivity(orderId: string, input: CreateOrderActivityInput, init?: RequestInit) {
+      return get<OrderDetail>(`/api/orders/${orderId}/activity`, undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    deleteOrderActivity(orderId: string, activityId: string, init?: RequestInit) {
+      return get<OrderDetail>(`/api/orders/${orderId}/activity/${activityId}`, undefined, {
+        method: "DELETE",
+        ...init,
+      });
+    },
+    updateOrderActivity(
+      orderId: string,
+      activityId: string,
+      input: UpdateOrderActivityInput,
+      init?: RequestInit,
+    ) {
+      return get<OrderDetail>(`/api/orders/${orderId}/activity/${activityId}`, undefined, {
+        method: "PATCH",
         body: JSON.stringify(input),
         headers: {
           "Content-Type": "application/json",

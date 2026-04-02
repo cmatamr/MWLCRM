@@ -14,6 +14,7 @@ import {
 
 import { mapOrderDetail, mapOrderItemProductOption, mapOrderListItem } from "./mappers";
 import type {
+  CreateOrderActivityInput,
   CreateOrderInput,
   ListOrdersParams,
   OrderDetail,
@@ -21,6 +22,7 @@ import type {
   OrderItemProductOption,
   OrderPaymentConfirmationResult,
   OrdersListResponse,
+  UpdateOrderActivityInput,
 } from "./types";
 
 const PAYMENT_CONFIRMABLE_ORDER_STATUSES: OrderStatusEnum[] = [
@@ -43,6 +45,7 @@ const PAYMENT_CONFIRMED_STATUS = "validated";
 const MANUAL_ORDER_SOURCE = "CRM";
 const MANUAL_ORDER_INITIAL_STATUS = OrderStatusEnum.pending_payment;
 const MANUAL_ORDER_INITIAL_PAYMENT_STATUS = "pending_validation";
+const ORDER_ACTIVITY_TYPE_NOTE = "note";
 
 function isPendingPaymentStatus(status: string) {
   return PAYMENT_PENDING_STATUSES.some((candidate) => candidate === status);
@@ -176,6 +179,48 @@ export class DeleteOrderError extends Error {
   }
 }
 
+export class CreateOrderActivityError extends Error {
+  code: "ORDER_NOT_FOUND";
+
+  constructor(
+    code: CreateOrderActivityError["code"],
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "CreateOrderActivityError";
+    this.code = code;
+  }
+}
+
+export class DeleteOrderActivityError extends Error {
+  code: "ORDER_NOT_FOUND" | "ACTIVITY_NOT_FOUND" | "ACTIVITY_NOT_IN_ORDER";
+
+  constructor(
+    code: DeleteOrderActivityError["code"],
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "DeleteOrderActivityError";
+    this.code = code;
+  }
+}
+
+export class UpdateOrderActivityError extends Error {
+  code: "ORDER_NOT_FOUND" | "ACTIVITY_NOT_FOUND" | "ACTIVITY_NOT_IN_ORDER";
+
+  constructor(
+    code: UpdateOrderActivityError["code"],
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "UpdateOrderActivityError";
+    this.code = code;
+  }
+}
+
 function buildOrdersWhere(params: ListOrdersParams): Prisma.OrderWhereInput {
   const search = params.search?.trim();
   const searchFilters: Prisma.OrderWhereInput[] = [];
@@ -300,6 +345,22 @@ async function findOrderDetailRecord(db: OrdersDbClient, orderId: string) {
           id: true,
           leadThreadKey: true,
           leadStage: true,
+        },
+      },
+      activityEntries: {
+        where: {
+          type: ORDER_ACTIVITY_TYPE_NOTE,
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        select: {
+          id: true,
+          type: true,
+          content: true,
+          metadata: true,
+          createdAt: true,
+          createdBy: true,
         },
       },
       items: {
@@ -732,6 +793,199 @@ export async function createOrderItem(
 
     if (!updatedOrder) {
       throw new CreateOrderItemError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    return mapOrderDetail(updatedOrder);
+  });
+}
+
+export async function createOrderActivity(
+  input: {
+    orderId: string;
+    activity: CreateOrderActivityInput;
+  },
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: {
+        id: input.orderId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!order) {
+      throw new CreateOrderActivityError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    await tx.orderActivity.create({
+      data: {
+        orderId: input.orderId,
+        type: input.activity.type,
+        content: input.activity.content.trim(),
+      },
+    });
+
+    const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
+
+    if (!updatedOrder) {
+      throw new CreateOrderActivityError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    return mapOrderDetail(updatedOrder);
+  });
+}
+
+export async function deleteOrderActivity(
+  input: {
+    orderId: string;
+    activityId: string;
+  },
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: {
+        id: input.orderId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!order) {
+      throw new DeleteOrderActivityError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    const activity = await tx.orderActivity.findUnique({
+      where: {
+        id: input.activityId,
+      },
+      select: {
+        id: true,
+        orderId: true,
+      },
+    });
+
+    if (!activity) {
+      throw new DeleteOrderActivityError("ACTIVITY_NOT_FOUND", "Order activity not found.", {
+        orderId: input.orderId,
+        activityId: input.activityId,
+      });
+    }
+
+    if (activity.orderId !== input.orderId) {
+      throw new DeleteOrderActivityError(
+        "ACTIVITY_NOT_IN_ORDER",
+        "Order activity does not belong to the requested order.",
+        {
+          orderId: input.orderId,
+          activityId: input.activityId,
+          activityOrderId: activity.orderId,
+        },
+      );
+    }
+
+    await tx.orderActivity.delete({
+      where: {
+        id: input.activityId,
+      },
+    });
+
+    const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
+
+    if (!updatedOrder) {
+      throw new DeleteOrderActivityError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    return mapOrderDetail(updatedOrder);
+  });
+}
+
+export async function updateOrderActivity(
+  input: {
+    orderId: string;
+    activityId: string;
+    activity: UpdateOrderActivityInput;
+  },
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: {
+        id: input.orderId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!order) {
+      throw new UpdateOrderActivityError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    const activity = await tx.orderActivity.findUnique({
+      where: {
+        id: input.activityId,
+      },
+      select: {
+        id: true,
+        orderId: true,
+      },
+    });
+
+    if (!activity) {
+      throw new UpdateOrderActivityError("ACTIVITY_NOT_FOUND", "Order activity not found.", {
+        orderId: input.orderId,
+        activityId: input.activityId,
+      });
+    }
+
+    if (activity.orderId !== input.orderId) {
+      throw new UpdateOrderActivityError(
+        "ACTIVITY_NOT_IN_ORDER",
+        "Order activity does not belong to the requested order.",
+        {
+          orderId: input.orderId,
+          activityId: input.activityId,
+          activityOrderId: activity.orderId,
+        },
+      );
+    }
+
+    await tx.orderActivity.update({
+      where: {
+        id: input.activityId,
+      },
+      data: {
+        content: input.activity.content.trim(),
+      },
+    });
+
+    const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
+
+    if (!updatedOrder) {
+      throw new UpdateOrderActivityError("ORDER_NOT_FOUND", "Order not found.", {
         orderId: input.orderId,
       });
     }

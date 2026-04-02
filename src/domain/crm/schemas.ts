@@ -98,6 +98,13 @@ export const orderItemRouteParamsSchema = z
   })
   .strict();
 
+export const orderActivityRouteParamsSchema = z
+  .object({
+    id: z.string().uuid(),
+    activityId: z.string().uuid(),
+  })
+  .strict();
+
 export const orderPaymentActionSchema = z
   .object({
     action: z.literal("confirm_payment"),
@@ -139,6 +146,19 @@ export const createOrderSchema = z
   .object({
     customerId: z.string().uuid(),
     items: z.array(createOrderItemSchema).min(1),
+  })
+  .strict();
+
+export const createOrderActivitySchema = z
+  .object({
+    type: z.literal("note"),
+    content: z.string().trim().min(1, "Content is required."),
+  })
+  .strict();
+
+export const updateOrderActivitySchema = z
+  .object({
+    content: z.string().trim().min(1, "Content is required."),
   })
   .strict();
 

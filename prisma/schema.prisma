@@ -156,12 +156,27 @@ model Order {
   deliveryDate    DateTime?         @map("delivery_date") @db.Date
   contact         Contact?          @relation(fields: [contactId], references: [id], map: "orders_contact_id_fkey")
   leadThread      LeadThread        @relation(fields: [leadThreadId], references: [id], map: "orders_lead_thread_id_fkey")
+  activityEntries OrderActivity[]
   items           OrderItem[]
   paymentReceipts PaymentReceipt[]
 
   @@index([leadThreadId], map: "idx_orders_conversation_id")
   @@index([status, paymentStatus], map: "idx_orders_status")
   @@map("orders")
+}
+
+model OrderActivity {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId   String   @map("order_id") @db.Uuid
+  type      String
+  content   String?
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy String?  @map("created_by")
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade, map: "order_activity_order_id_fkey")
+
+  @@index([orderId, createdAt(sort: Desc)], map: "idx_order_activity_order_created_at")
+  @@map("order_activity")
 }
 
 model OrderItem {

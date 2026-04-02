@@ -1,4 +1,4 @@
-import type { Contact, LeadThread, Order, OrderItem, PaymentReceipt } from "@prisma/client";
+import type { Contact, LeadThread, Order, OrderActivity, OrderItem, PaymentReceipt } from "@prisma/client";
 
 import {
   mapConversationStageReference,
@@ -8,6 +8,7 @@ import {
 import { toNullableIsoDate } from "@/server/services/shared";
 
 import type {
+  OrderActivityEntry,
   OrderDetail,
   OrderItemProductOption,
   OrderItemSummary,
@@ -33,6 +34,10 @@ type OrderListRecord = Pick<
 type OrderDetailRecord = Order & {
   contact: Pick<Contact, "id" | "displayName" | "externalId"> | null;
   leadThread: Pick<LeadThread, "id" | "leadThreadKey" | "leadStage">;
+  activityEntries: Pick<
+    OrderActivity,
+    "id" | "type" | "content" | "metadata" | "createdAt" | "createdBy"
+  >[];
   items: Pick<
     OrderItem,
     | "id"
@@ -148,6 +153,19 @@ export function mapOrderReceiptSummary(
   };
 }
 
+export function mapOrderActivityEntry(
+  activity: OrderDetailRecord["activityEntries"][number],
+): OrderActivityEntry {
+  return {
+    id: activity.id,
+    type: activity.type as OrderActivityEntry["type"],
+    content: normalizeOptionalText(activity.content),
+    metadata: activity.metadata ?? null,
+    createdAt: activity.createdAt.toISOString(),
+    createdBy: normalizeOptionalText(activity.createdBy),
+  };
+}
+
 export function mapOrderDetail(order: OrderDetailRecord): OrderDetail {
   return {
     id: order.id,
@@ -172,6 +190,7 @@ export function mapOrderDetail(order: OrderDetailRecord): OrderDetail {
       leadThreadKey: order.leadThread.leadThreadKey,
       leadStage: order.leadThread.leadStage,
     }),
+    activities: order.activityEntries.map(mapOrderActivityEntry),
     items: order.items.map(mapOrderItemSummary),
     receipts: order.paymentReceipts.map(mapOrderReceiptSummary),
   };

@@ -44,8 +44,23 @@ export interface OrderPaymentConfirmationResult {
   updatedAt: string;
 }
 
+export type OrderActivityType =
+  | "note"
+  | "status_change"
+  | "payment_validation"
+  | "system_event";
+
 export interface DeleteOrderResult {
   id: string;
+}
+
+export interface OrderActivityEntry {
+  id: string;
+  type: OrderActivityType;
+  content: string | null;
+  metadata: unknown | null;
+  createdAt: string;
+  createdBy: string | null;
 }
 
 export interface OrderItemSummary {
@@ -78,6 +93,15 @@ export interface CreateOrderItemInput {
 export interface CreateOrderInput {
   customerId: string;
   items: CreateOrderItemInput[];
+}
+
+export interface CreateOrderActivityInput {
+  type: OrderActivityType;
+  content: string;
+}
+
+export interface UpdateOrderActivityInput {
+  content: string;
 }
 
 export interface OrderReceiptSummary {
@@ -114,6 +138,7 @@ export interface OrderDetail {
     leadThreadKey: string;
     leadStage: LeadStageType;
   };
+  activities: OrderActivityEntry[];
   items: OrderItemSummary[];
   receipts: OrderReceiptSummary[];
 }
