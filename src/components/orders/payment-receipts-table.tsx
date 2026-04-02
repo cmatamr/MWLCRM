@@ -473,21 +473,32 @@ export function PaymentReceiptsTable({ orderId, receipts }: PaymentReceiptsTable
           </Button>
         </div>
 
-        <div className="mt-6 overflow-hidden rounded-[24px] border border-border/70">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-border/70 text-left">
+        <div className="mt-6 overflow-hidden rounded-[24px] border border-border/70 bg-white/95">
+          <div className="w-full overflow-x-auto">
+            <table className="w-full min-w-[1220px] table-fixed divide-y divide-border/70 text-left">
               <caption className="sr-only">
                 Comprobantes de pago asociados a la orden y sus acciones disponibles.
               </caption>
+              <colgroup>
+                <col className="w-[14%]" />
+                <col className="w-[12%]" />
+                <col className="w-[11%]" />
+                <col className="w-[11%]" />
+                <col className="w-[13%]" />
+                <col className="w-[15%]" />
+                <col className="w-[10%]" />
+                <col className="w-[14%]" />
+              </colgroup>
               <thead className="bg-muted/40 text-xs uppercase tracking-[0.16em] text-muted-foreground">
                 <tr>
-                  <th scope="col" className="px-4 py-3 font-medium">Estado</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Monto</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Banco</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Referencia</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Remitente</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Fecha</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Acciones</th>
+                  <th scope="col" className="px-5 py-4 text-center font-medium">Estado</th>
+                  <th scope="col" className="px-5 py-4 text-center font-medium">Monto</th>
+                  <th scope="col" className="px-5 py-4 text-center font-medium">Banco</th>
+                  <th scope="col" className="px-4 py-4 text-center font-medium">Tipo Comprobante</th>
+                  <th scope="col" className="px-6 py-4 font-medium">Referencia</th>
+                  <th scope="col" className="px-4 py-4 font-medium">Remitente</th>
+                  <th scope="col" className="px-4 py-4 text-center font-medium">Fecha</th>
+                  <th scope="col" className="px-6 py-4 text-center font-medium">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60 bg-white">
@@ -497,11 +508,13 @@ export function PaymentReceiptsTable({ orderId, receipts }: PaymentReceiptsTable
                     const normalizedStatus = getNormalizedReceiptStatus(receipt);
 
                     return (
-                      <tr key={receipt.id} className="align-top text-sm text-slate-700">
-                        <td className="px-4 py-4">
-                          <StatusBadgeFromViewModel badge={receiptStatusBadge} />
+                      <tr key={receipt.id} className="align-middle text-sm text-slate-700">
+                        <td className="px-5 py-5 text-center">
+                          <div className="flex justify-center">
+                            <StatusBadgeFromViewModel badge={receiptStatusBadge} />
+                          </div>
                         </td>
-                        <td className="px-4 py-4">
+                        <td className="px-5 py-5 text-center">
                           <div className="space-y-1">
                             <p className="font-medium text-slate-950">
                               {receipt.amountCrc != null
@@ -513,33 +526,38 @@ export function PaymentReceiptsTable({ orderId, receipts }: PaymentReceiptsTable
                             </p>
                           </div>
                         </td>
-                        <td className="px-4 py-4">
+                        <td className="px-5 py-5 text-center">
                           <div className="space-y-1">
-                            <p>{receipt.bank ?? "Banco no detectado"}</p>
-                            <p className="text-xs text-muted-foreground">
+                            <p className="font-medium text-slate-950">{receipt.bank ?? "Banco no detectado"}</p>
+                            <p className="text-xs leading-5 text-muted-foreground">
                               {receipt.internalNotes ?? "Sin notas internas"}
                             </p>
                           </div>
                         </td>
-                        <td className="px-4 py-4">{receipt.reference ?? "Sin referencia"}</td>
-                        <td className="px-4 py-4">
+                        <td className="px-4 py-5 text-center">
+                          <p className="font-medium text-slate-950">{receipt.transferType ?? "Sin tipo"}</p>
+                        </td>
+                        <td className="px-6 py-5">
+                          <p className="leading-6 text-slate-950">{receipt.reference ?? "Sin referencia"}</p>
+                        </td>
+                        <td className="px-4 py-5">
                           <div className="space-y-1">
-                            <p>{receipt.senderName ?? "Remitente no detectado"}</p>
-                            <p className="text-xs text-muted-foreground">
+                            <p className="leading-6 text-slate-950">{receipt.senderName ?? "Remitente no detectado"}</p>
+                            <p className="text-xs leading-5 text-muted-foreground">
                               {receipt.destinationPhone ?? receipt.recipientName ?? "Sin destino detectado"}
                             </p>
                           </div>
                         </td>
-                        <td className="px-4 py-4">
+                        <td className="px-4 py-5 text-center">
                           <div className="space-y-1">
-                            <p>{receipt.receiptDate ? formatCalendarDate(receipt.receiptDate) : "Sin fecha"}</p>
-                            <p className="text-xs text-muted-foreground">
+                            <p className="font-medium text-slate-950">{receipt.receiptDate ? formatCalendarDate(receipt.receiptDate) : "Sin fecha"}</p>
+                            <p className="text-xs leading-5 text-muted-foreground">
                               {receipt.receiptTime ? `Hora: ${receipt.receiptTime}` : `Registrado: ${formatDateTime(receipt.createdAt)}`}
                             </p>
                           </div>
                         </td>
-                        <td className="px-4 py-4">
-                          <div className="flex items-center gap-2 whitespace-nowrap">
+                        <td className="px-6 py-5 text-center">
+                          <div className="flex items-center justify-center gap-2.5 whitespace-nowrap">
                             {normalizedStatus === "pending_validation" ? (
                               <Button
                                 type="button"
@@ -574,7 +592,7 @@ export function PaymentReceiptsTable({ orderId, receipts }: PaymentReceiptsTable
                   })
                 ) : (
                   <TableEmptyStateRow
-                    colSpan={7}
+                    colSpan={8}
                     title="No hay comprobantes asociados"
                     description="Cuando se registren transferencias o recibos de pago, esta tabla mostrará su validación y acciones."
                   />

@@ -5,7 +5,10 @@ import {
   mapCustomerReference,
   mapCustomerReferenceWithExternalId,
 } from "@/domain/crm/mappers";
-import { calculateOrderReceiptAggregates } from "@/domain/crm/orders";
+import {
+  calculateOrderReceiptAggregates,
+  normalizePaymentReceiptTransferType,
+} from "@/domain/crm/orders";
 import { toNullableIsoDate } from "@/server/services/shared";
 
 import type {
@@ -150,7 +153,7 @@ export function mapOrderReceiptSummary(
     amountCrc: receipt.amountCrc,
     bankId: receipt.bankId,
     bank: receipt.bankRef?.name ?? receipt.bank,
-    transferType: receipt.transferType,
+    transferType: normalizePaymentReceiptTransferType(receipt.transferType),
     amountText: receipt.amountText,
     currency: receipt.currency,
     reference: receipt.reference,

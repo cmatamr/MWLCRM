@@ -8,6 +8,12 @@ import type {
 } from "./common";
 
 export const orderSortValues = ["recent", "oldest", "highest_total"] as const;
+export const paymentReceiptTransferTypeValues = [
+  "Transferencia",
+  "Sinpe",
+  "Efectivo",
+] as const;
+type PaymentReceiptTransferType = (typeof paymentReceiptTransferTypeValues)[number];
 
 export type OrderSort = (typeof orderSortValues)[number];
 
@@ -109,6 +115,7 @@ export interface CreatePaymentReceiptInput {
   currency?: string;
   bankId?: string | null;
   bank?: string | null;
+  transferType?: PaymentReceiptTransferType | null;
   reference?: string | null;
   senderName?: string | null;
   recipientName?: string | null;
@@ -123,6 +130,7 @@ export interface UpdatePaymentReceiptInput {
   currency?: string;
   bankId?: string | null;
   bank?: string | null;
+  transferType?: PaymentReceiptTransferType | null;
   reference?: string | null;
   senderName?: string | null;
   recipientName?: string | null;
@@ -135,6 +143,34 @@ export interface UpdatePaymentReceiptInput {
 export interface PaymentReceiptReviewActionInput {
   performedBy: string;
   internalNotes?: string | null;
+}
+
+export function normalizePaymentReceiptTransferType(
+  value: string | null | undefined,
+): PaymentReceiptTransferType | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === "transferencia") {
+    return "Transferencia";
+  }
+
+  if (normalized === "sinpe") {
+    return "Sinpe";
+  }
+
+  if (normalized === "efectivo") {
+    return "Efectivo";
+  }
+
+  return null;
 }
 
 export interface OrderReceiptSummary {

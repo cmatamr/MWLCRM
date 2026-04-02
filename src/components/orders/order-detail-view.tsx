@@ -60,7 +60,6 @@ export function OrderDetailView({ orderId, initialOrder }: OrderDetailViewProps)
           <OrderItemsTable orderId={order.id} items={order.items} />
           <OrderTotalsCard order={order} />
           <OrderNotesCard orderId={order.id} activities={order.activities} />
-          <PaymentReceiptsTable orderId={order.id} receipts={order.receipts} />
         </div>
 
         <div className="space-y-6">
@@ -68,6 +67,8 @@ export function OrderDetailView({ orderId, initialOrder }: OrderDetailViewProps)
           <OrderPaymentSummaryCard order={order} />
         </div>
       </div>
+
+      <PaymentReceiptsTable orderId={order.id} receipts={order.receipts} />
     </div>
   );
 }

@@ -5,9 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useBanks } from "@/hooks/use-banks";
 import { Button } from "@/components/ui/button";
 import type {
+  BankListItem,
   CreatePaymentReceiptInput,
   OrderReceiptSummary,
 } from "@/server/services/orders/types";
+import { paymentReceiptTransferTypeValues } from "@/domain/crm/orders";
 
 type PaymentReceiptModalProps = {
   isOpen: boolean;
@@ -26,8 +28,8 @@ type FormState = {
   senderName: string;
   recipientName: string;
   destinationPhone: string;
-  receiptDate: string;
-  receiptTime: string;
+  receiptDateTime: string;
+  transferType: string;
   internalNotes: string;
 };
 
@@ -40,25 +42,182 @@ const INITIAL_FORM_STATE: FormState = {
   senderName: "",
   recipientName: "",
   destinationPhone: "",
-  receiptDate: "",
-  receiptTime: "",
+  receiptDateTime: "",
+  transferType: "",
   internalNotes: "",
 };
 
-function buildInitialFormState(receipt?: OrderReceiptSummary | null): FormState {
+const fieldControlClassName =
+  "box-border w-full rounded-[18px] border border-border bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20";
+
+function getCurrentLocalDateTimeInputValue() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function normalizeBankLookupValue(value: string | null | undefined) {
+  return value?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
+}
+
+function resolveInitialBankId(
+  receipt: OrderReceiptSummary | null | undefined,
+  banks: BankListItem[],
+) {
   if (!receipt) {
-    return INITIAL_FORM_STATE;
+    return "";
+  }
+
+  if (receipt.bankId) {
+    return receipt.bankId;
+  }
+
+  const normalizedBank = normalizeBankLookupValue(receipt.bank);
+
+  if (!normalizedBank) {
+    return "";
+  }
+
+  const matchedBank = banks.find((bank) => {
+    const normalizedName = normalizeBankLookupValue(bank.name);
+    const normalizedCode = normalizeBankLookupValue(bank.code);
+
+    return normalizedBank === normalizedName || normalizedBank === normalizedCode;
+  });
+
+  return matchedBank?.id ?? "";
+}
+
+function normalizeDateForDateTimeInput(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  const trimmed = value.trim();
+  const isoDateMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+
+  if (isoDateMatch) {
+    return isoDateMatch[1] ?? "";
+  }
+
+  return "";
+}
+
+function normalizeTimeForDateTimeInput(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  const normalized = value.trim().toUpperCase();
+  const twelveHourMatch = normalized.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/);
+
+  if (twelveHourMatch) {
+    let hours = Number.parseInt(twelveHourMatch[1] ?? "0", 10);
+    const minutes = twelveHourMatch[2] ?? "00";
+    const meridiem = twelveHourMatch[3];
+
+    if (meridiem === "AM") {
+      hours = hours % 12;
+    } else {
+      hours = (hours % 12) + 12;
+    }
+
+    return `${String(hours).padStart(2, "0")}:${minutes}`;
+  }
+
+  const twentyFourHourMatch = normalized.match(/^(\d{2}):(\d{2})(?::\d{2})?$/);
+
+  if (twentyFourHourMatch) {
+    return `${twentyFourHourMatch[1]}:${twentyFourHourMatch[2]}`;
+  }
+
+  return "";
+}
+
+function combineReceiptDateTime(
+  receiptDate: string | null | undefined,
+  receiptTime: string | null | undefined,
+) {
+  const normalizedDate = normalizeDateForDateTimeInput(receiptDate);
+
+  if (!normalizedDate) {
+    return "";
+  }
+
+  const normalizedTime = normalizeTimeForDateTimeInput(receiptTime);
+
+  if (!normalizedTime) {
+    return `${normalizedDate}T00:00`;
+  }
+
+  return `${normalizedDate}T${normalizedTime}`;
+}
+
+function splitReceiptDateTimeInput(value: string) {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return {
+      receiptDate: null,
+      receiptTime: null,
+    };
+  }
+
+  const [receiptDate, timeValue] = normalized.split("T");
+
+  if (!receiptDate || !timeValue) {
+    return {
+      receiptDate: null,
+      receiptTime: null,
+    };
+  }
+
+  const [hoursText, minutesText] = timeValue.split(":");
+  const hours = Number.parseInt(hoursText ?? "", 10);
+  const minutes = Number.parseInt(minutesText ?? "", 10);
+
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes)) {
+    return {
+      receiptDate,
+      receiptTime: null,
+    };
+  }
+
+  const meridiem = hours >= 12 ? "PM" : "AM";
+  const normalizedHours = hours % 12 === 0 ? 12 : hours % 12;
+  const receiptTime = `${String(normalizedHours).padStart(2, "0")}:${String(minutes).padStart(2, "0")} ${meridiem}`;
+
+  return {
+    receiptDate,
+    receiptTime,
+  };
+}
+
+function buildInitialFormState(
+  receipt?: OrderReceiptSummary | null,
+  banks: BankListItem[] = [],
+): FormState {
+  if (!receipt) {
+    return {
+      ...INITIAL_FORM_STATE,
+      receiptDateTime: getCurrentLocalDateTimeInputValue(),
+    };
   }
 
   return {
     amountCrc: receipt.amountCrc != null ? String(receipt.amountCrc) : "",
-    bankId: receipt.bankId ?? "",
+    bankId: resolveInitialBankId(receipt, banks),
     reference: receipt.reference ?? "",
     senderName: receipt.senderName ?? "",
     recipientName: receipt.recipientName ?? "",
     destinationPhone: receipt.destinationPhone ?? "",
-    receiptDate: receipt.receiptDate ?? "",
-    receiptTime: receipt.receiptTime ?? "",
+    receiptDateTime: combineReceiptDateTime(receipt.receiptDate, receipt.receiptTime),
+    transferType: receipt.transferType ?? "",
     internalNotes: receipt.internalNotes ?? "",
   };
 }
@@ -94,6 +253,7 @@ export function PaymentReceiptModal({
   const [form, setForm] = useState<FormState>(INITIAL_FORM_STATE);
   const [touchedFields, setTouchedFields] = useState<Partial<Record<keyof FormState, boolean>>>({});
   const [localError, setLocalError] = useState<string | null>(null);
+  const isEditMode = mode === "edit";
 
   useEffect(() => {
     if (isOpen) {
@@ -107,8 +267,24 @@ export function PaymentReceiptModal({
     }
   }, [initialReceipt, isOpen]);
 
+  useEffect(() => {
+    if (!isOpen || !isEditMode || !initialReceipt || form.bankId || banks.length === 0) {
+      return;
+    }
+
+    const resolvedBankId = resolveInitialBankId(initialReceipt, banks);
+
+    if (!resolvedBankId) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      bankId: resolvedBankId,
+    }));
+  }, [banks, form.bankId, initialReceipt, isEditMode, isOpen]);
+
   const formErrors = useMemo(() => validateForm(form), [form]);
-  const isEditMode = mode === "edit";
 
   if (!isOpen) {
     return null;
@@ -140,8 +316,8 @@ export function PaymentReceiptModal({
       senderName: true,
       recipientName: true,
       destinationPhone: true,
-      receiptDate: true,
-      receiptTime: true,
+      receiptDateTime: true,
+      transferType: true,
       internalNotes: true,
     });
     setLocalError(null);
@@ -151,6 +327,18 @@ export function PaymentReceiptModal({
     }
 
     const parsedAmount = Number.parseInt(form.amountCrc.trim(), 10);
+    const normalizedReceiptDateTime = normalizeOptionalString(form.receiptDateTime);
+    const splitReceiptDateTime = normalizedReceiptDateTime
+      ? splitReceiptDateTimeInput(normalizedReceiptDateTime)
+      : isEditMode && !touchedFields.receiptDateTime
+        ? {
+            receiptDate: initialReceipt?.receiptDate ?? undefined,
+            receiptTime: initialReceipt?.receiptTime ?? undefined,
+          }
+        : {
+            receiptDate: null,
+            receiptTime: null,
+          };
 
     const payload = {
       amountCrc: parsedAmount,
@@ -160,8 +348,9 @@ export function PaymentReceiptModal({
       senderName: normalizeOptionalString(form.senderName),
       recipientName: normalizeOptionalString(form.recipientName),
       destinationPhone: normalizeOptionalString(form.destinationPhone),
-      receiptDate: normalizeOptionalString(form.receiptDate),
-      receiptTime: normalizeOptionalString(form.receiptTime),
+      receiptDate: splitReceiptDateTime.receiptDate,
+      receiptTime: splitReceiptDateTime.receiptTime,
+      transferType: normalizeOptionalString(form.transferType) as CreatePaymentReceiptInput["transferType"],
       internalNotes: normalizeOptionalString(form.internalNotes),
     } satisfies CreatePaymentReceiptInput;
 
@@ -216,7 +405,7 @@ export function PaymentReceiptModal({
               onChange={(event) => updateField("amountCrc", event.target.value)}
               onBlur={() => touchField("amountCrc")}
               disabled={isSubmitting}
-              className="w-full rounded-[18px] border border-border bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={fieldControlClassName}
             />
             {touchedFields.amountCrc && formErrors.amountCrc ? (
               <p className="text-xs font-medium text-rose-700">{formErrors.amountCrc}</p>
@@ -229,7 +418,7 @@ export function PaymentReceiptModal({
               value={form.bankId}
               onChange={(event) => updateField("bankId", event.target.value)}
               disabled={isSubmitting || isLoadingBanks}
-              className="w-full rounded-[18px] border border-border bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={`${fieldControlClassName} appearance-none`}
             >
               <option value="">
                 {isLoadingBanks ? "Cargando bancos..." : "Selecciona un banco"}
@@ -249,7 +438,7 @@ export function PaymentReceiptModal({
               value={form.reference}
               onChange={(event) => updateField("reference", event.target.value)}
               disabled={isSubmitting}
-              className="w-full rounded-[18px] border border-border bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={fieldControlClassName}
             />
           </label>
 
@@ -260,7 +449,7 @@ export function PaymentReceiptModal({
               value={form.senderName}
               onChange={(event) => updateField("senderName", event.target.value)}
               disabled={isSubmitting}
-              className="w-full rounded-[18px] border border-border bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={fieldControlClassName}
             />
           </label>
 
@@ -271,7 +460,7 @@ export function PaymentReceiptModal({
               value={form.recipientName}
               onChange={(event) => updateField("recipientName", event.target.value)}
               disabled={isSubmitting}
-              className="w-full rounded-[18px] border border-border bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={fieldControlClassName}
             />
           </label>
 
@@ -282,29 +471,38 @@ export function PaymentReceiptModal({
               value={form.destinationPhone}
               onChange={(event) => updateField("destinationPhone", event.target.value)}
               disabled={isSubmitting}
-              className="w-full rounded-[18px] border border-border bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={fieldControlClassName}
             />
+          </label>
+        </div>
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <label className="block space-y-2">
+            <span className="text-sm font-medium text-slate-950">Tipo de transferencia</span>
+            <select
+              value={form.transferType}
+              onChange={(event) => updateField("transferType", event.target.value)}
+              disabled={isSubmitting}
+              className={`${fieldControlClassName} appearance-none`}
+            >
+              <option value="">Selecciona un tipo</option>
+              {paymentReceiptTransferTypeValues.map((transferType) => (
+                <option key={transferType} value={transferType}>
+                  {transferType}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label className="block space-y-2">
-            <span className="text-sm font-medium text-slate-950">Fecha</span>
+            <span className="text-sm font-medium text-slate-950">Fecha y hora</span>
             <input
-              type="date"
-              value={form.receiptDate}
-              onChange={(event) => updateField("receiptDate", event.target.value)}
+              type="datetime-local"
+              value={form.receiptDateTime}
+              onChange={(event) => updateField("receiptDateTime", event.target.value)}
+              onBlur={() => touchField("receiptDateTime")}
               disabled={isSubmitting}
-              className="w-full rounded-[18px] border border-border bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-            />
-          </label>
-
-          <label className="block space-y-2">
-            <span className="text-sm font-medium text-slate-950">Hora</span>
-            <input
-              type="time"
-              value={form.receiptTime}
-              onChange={(event) => updateField("receiptTime", event.target.value)}
-              disabled={isSubmitting}
-              className="w-full rounded-[18px] border border-border bg-white px-4 py-3 text-sm text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className={fieldControlClassName}
             />
           </label>
         </div>
@@ -316,7 +514,7 @@ export function PaymentReceiptModal({
             onChange={(event) => updateField("internalNotes", event.target.value)}
             rows={4}
             disabled={isSubmitting}
-            className="w-full rounded-[18px] border border-border bg-white px-4 py-3 text-sm leading-6 text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
+            className={`${fieldControlClassName} leading-6`}
           />
         </label>
 

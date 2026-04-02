@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import type { QueryParamRecord, QueryParamValue } from "./common";
 import { customerSortValues } from "./customers";
-import { orderSortValues } from "./orders";
+import { orderSortValues, paymentReceiptTransferTypeValues } from "./orders";
 
 function readQueryValue(value: QueryParamValue): string | undefined {
   if (Array.isArray(value)) {
@@ -73,6 +73,11 @@ function isValidIsoDateOnly(value: string) {
 const optionalQueryString = z.preprocess(
   normalizeOptionalString,
   z.string().min(1).optional(),
+);
+
+const optionalPaymentReceiptTransferType = z.preprocess(
+  normalizeOptionalString,
+  z.enum(paymentReceiptTransferTypeValues).optional(),
 );
 
 const optionalPositiveInt = z.preprocess(
@@ -181,7 +186,7 @@ export const createPaymentReceiptSchema = z
     ),
     bankId: z.string().uuid().nullable().optional(),
     bank: optionalQueryString,
-    transferType: optionalQueryString,
+    transferType: optionalPaymentReceiptTransferType,
     reference: optionalQueryString,
     senderName: optionalQueryString,
     recipientName: optionalQueryString,
@@ -203,7 +208,7 @@ export const updatePaymentReceiptSchema = z
     currency: optionalQueryString,
     bankId: z.string().uuid().nullable().optional(),
     bank: optionalQueryString,
-    transferType: optionalQueryString,
+    transferType: optionalPaymentReceiptTransferType,
     reference: optionalQueryString,
     senderName: optionalQueryString,
     recipientName: optionalQueryString,

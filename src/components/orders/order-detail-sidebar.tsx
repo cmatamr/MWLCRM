@@ -125,31 +125,51 @@ export function OrderPaymentSummaryCard({ order }: OrderDetailSidebarProps) {
             </p>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-[24px] border border-border/70 bg-slate-50/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                Adelanto validado
-              </p>
-              <p className="mt-2 text-xl font-semibold tracking-tight text-slate-950">
-                {formatCurrencyCRC(order.advancePaidCrc)}
-              </p>
+          <div className="grid gap-3 grid-cols-1">
+            <div className="flex min-h-[120px] flex-col justify-between rounded-[24px] border border-border/70 bg-slate-50/70 p-5">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Adelanto validado
+                </p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[1.75rem] font-semibold leading-tight tracking-tight text-slate-950">
+                  {formatCurrencyCRC(order.advancePaidCrc)}
+                </p>
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                  Confirmado
+                </p>
+              </div>
             </div>
-            <div className="rounded-[24px] border border-border/70 bg-slate-50/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                Pendiente de validacion
-              </p>
-              <p className="mt-2 text-xl font-semibold tracking-tight text-slate-950">
-                {formatCurrencyCRC(order.pendingValidationCrc)}
-              </p>
+            <div className="flex min-h-[120px] flex-col justify-between rounded-[24px] border border-border/70 bg-slate-50/70 p-5">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Pendiente
+                </p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[1.75rem] font-semibold leading-tight tracking-tight text-slate-950">
+                  {formatCurrencyCRC(order.pendingValidationCrc)}
+                </p>
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                  En validacion
+                </p>
+              </div>
             </div>
-            <div className="rounded-[24px] border border-border/70 bg-slate-50/70 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                Comprobantes
-              </p>
-              <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
-                {order.receipts.length}
-              </p>
-              <p className="mt-1 text-sm text-muted-foreground">registrados en la orden.</p>
+            <div className="flex min-h-[120px] flex-col justify-between rounded-[24px] border border-border/70 bg-slate-50/70 p-5">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Comprobantes
+                </p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-[1.85rem] font-semibold leading-tight tracking-tight text-slate-950">
+                  {order.receipts.length}
+                </p>
+                <p className="text-xs font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                  Registrados
+                </p>
+              </div>
             </div>
           </div>
         </div>
