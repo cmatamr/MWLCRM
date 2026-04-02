@@ -8,7 +8,27 @@ import {
 } from "@/server/services/shared";
 
 import { mapCustomerDetail, mapCustomerListItem, mapCustomerMetrics } from "./mappers";
-import type { CustomerDetail, CustomersListResponse, ListCustomersParams } from "./types";
+import type {
+  CreateCustomerInput,
+  CustomerDetail,
+  CustomerListItem,
+  CustomersListResponse,
+  ListCustomersParams,
+} from "./types";
+
+export class CreateCustomerError extends Error {
+  code: "DUPLICATE_CUSTOMER";
+
+  constructor(
+    code: CreateCustomerError["code"],
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "CreateCustomerError";
+    this.code = code;
+  }
+}
 
 function buildCustomerWhere(params: ListCustomersParams): Prisma.ContactWhereInput {
   const search = params.search?.trim();
@@ -250,4 +270,48 @@ export async function getCustomerDetail(
     orders,
     conversations,
   });
+}
+
+export async function createCustomer(
+  input: CreateCustomerInput,
+  options?: ServiceOptions,
+): Promise<CustomerListItem> {
+  const db = resolveDb(options);
+
+  try {
+    const contact = await db.contact.create({
+      data: {
+        primaryChannel: input.primaryChannel,
+        externalId: input.externalId.trim(),
+        displayName: input.displayName.trim(),
+        customerStatus: input.customerStatus?.trim() || null,
+      },
+      select: {
+        id: true,
+        displayName: true,
+        externalId: true,
+        primaryChannel: true,
+        customerStatus: true,
+        createdAt: true,
+      },
+    });
+
+    return mapCustomerListItem(contact, mapCustomerMetrics());
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw new CreateCustomerError(
+        "DUPLICATE_CUSTOMER",
+        "Ya existe un customer con ese canal e identificador externo.",
+        {
+          primaryChannel: input.primaryChannel,
+          externalId: input.externalId.trim(),
+        },
+      );
+    }
+
+    throw error;
+  }
 }

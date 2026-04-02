@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { customerSortValues } from "@/domain/crm";
+import { CreateCustomerModal } from "@/components/customers/create-customer-modal";
 import { CustomersTable } from "@/components/customers/customers-table";
 import { formatChannelLabel } from "@/components/customers/customer-presenters";
 import { PageHeader } from "@/components/layout/page-header";
@@ -106,6 +108,8 @@ function PaginationButton(props: {
 }
 
 export function CustomersPageClient({ channelOptions }: CustomersPageClientProps) {
+  const [isCreateCustomerOpen, setIsCreateCustomerOpen] = useState(false);
+  const [creationFeedback, setCreationFeedback] = useState<string | null>(null);
   const searchParams = useSearchParams();
   const searchParamsKey = searchParams.toString();
   const params = toListParams(new URLSearchParams(searchParamsKey), channelOptions);
@@ -130,6 +134,15 @@ export function CustomersPageClient({ channelOptions }: CustomersPageClientProps
 
   return (
     <div className="space-y-8">
+      <CreateCustomerModal
+        channelOptions={channelOptions}
+        isOpen={isCreateCustomerOpen}
+        onClose={() => setIsCreateCustomerOpen(false)}
+        onCreated={(displayName) => {
+          setCreationFeedback(`Customer creado correctamente: ${displayName}.`);
+        }}
+      />
+
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <PageHeader
           title="Customers"
@@ -139,6 +152,22 @@ export function CustomersPageClient({ channelOptions }: CustomersPageClientProps
           {data.pagination.total} customers encontrados
         </div>
       </div>
+
+      {creationFeedback ? (
+        <section className="rounded-[24px] border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm font-medium text-emerald-800 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p>{creationFeedback}</p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCreationFeedback(null)}
+              className="border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-100"
+            >
+              Cerrar
+            </Button>
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-[28px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
         <form
@@ -216,7 +245,14 @@ export function CustomersPageClient({ channelOptions }: CustomersPageClientProps
         </form>
       </section>
 
-      <CustomersTable customers={data.items} />
+      <CustomersTable
+        customers={data.items}
+        action={
+          <Button type="button" onClick={() => setIsCreateCustomerOpen(true)}>
+            Nuevo cliente
+          </Button>
+        }
+      />
 
       <section className="flex flex-col gap-4 rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm text-muted-foreground">

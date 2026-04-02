@@ -18,6 +18,13 @@ export interface ListCustomersParams extends PaginationParams {
   sort?: CustomerSort;
 }
 
+export interface CreateCustomerInput {
+  primaryChannel: ChannelType;
+  externalId: string;
+  displayName: string;
+  customerStatus?: string;
+}
+
 export interface CustomerListItem {
   id: string;
   displayName: string | null;

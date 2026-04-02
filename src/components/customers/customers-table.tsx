@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 
 import type { CustomersListResponse } from "@/server/services/customers/types";
@@ -13,12 +14,13 @@ import {
 
 type CustomersTableProps = {
   customers: CustomersListResponse["items"];
+  action?: ReactNode;
 };
 
-export function CustomersTable({ customers }: CustomersTableProps) {
+export function CustomersTable({ customers, action }: CustomersTableProps) {
   return (
     <section className="rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-      <div className="flex items-end justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-2">
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
             Customers
@@ -32,6 +34,7 @@ export function CustomersTable({ customers }: CustomersTableProps) {
             </p>
           </div>
         </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
       </div>
 
       <div className="mt-6 overflow-hidden rounded-[24px] border border-border/70">

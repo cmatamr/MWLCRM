@@ -3,6 +3,7 @@ import type { OrderStatusEnum } from "@prisma/client";
 import type { DashboardSummary } from "@/server/services/dashboard/types";
 import type { DashboardDailySalesRangeDays } from "@/server/services/dashboard/types";
 import type {
+  CreateCustomerInput,
   CustomerDetail,
   CustomersListResponse,
   ListCustomersParams,
@@ -52,6 +53,17 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     },
     listCustomers(params?: ListCustomersParams, init?: RequestInit) {
       return get<CustomersListResponse>("/api/customers", params, init);
+    },
+    createCustomer(input: CreateCustomerInput, init?: RequestInit) {
+      return get<CustomersListResponse["items"][number]>("/api/customers", undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
     },
     getCustomer(id: string, init?: RequestInit) {
       return get<CustomerDetail>(`/api/customers/${id}`, undefined, init);

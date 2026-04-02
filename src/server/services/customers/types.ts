@@ -1,4 +1,5 @@
 export type {
+  CreateCustomerInput,
   CustomerConversationSummary,
   CustomerDetail,
   CustomerListItem,

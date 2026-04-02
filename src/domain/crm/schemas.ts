@@ -159,6 +159,15 @@ export const listCustomersParamsSchema = z
   })
   .strict();
 
+export const createCustomerSchema = z
+  .object({
+    primaryChannel: z.nativeEnum(ChannelType),
+    externalId: z.string().trim().min(1, "External ID is required."),
+    displayName: z.string().trim().min(1, "Display name is required."),
+    customerStatus: optionalQueryString,
+  })
+  .strict();
+
 export const listOrdersParamsSchema = z
   .object({
     page: optionalPositiveInt,
