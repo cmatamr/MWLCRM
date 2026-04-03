@@ -8,6 +8,7 @@ import type {
   CustomerDetail,
   CustomersListResponse,
   ListCustomersParams,
+  UpdateCustomerInput,
 } from "@/server/services/customers/types";
 import type { CampaignKpis, CampaignsListResponse, ListCampaignsParams } from "@/server/services/campaigns/types";
 import type {
@@ -76,6 +77,17 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     },
     getCustomer(id: string, init?: RequestInit) {
       return get<CustomerDetail>(`/api/customers/${id}`, undefined, init);
+    },
+    updateCustomer(id: string, input: UpdateCustomerInput, init?: RequestInit) {
+      return get<CustomerDetail>(`/api/customers/${id}`, undefined, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
     },
     listOrders(params?: ListOrdersParams, init?: RequestInit) {
       return get<OrdersListResponse>("/api/orders", params, init);

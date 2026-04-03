@@ -8,6 +8,7 @@ export type {
   CustomerSort,
   CustomersListResponse,
   ListCustomersParams,
+  UpdateCustomerInput,
 } from "@/domain/crm/customers";
 
 export { customerSortValues } from "@/domain/crm/customers";

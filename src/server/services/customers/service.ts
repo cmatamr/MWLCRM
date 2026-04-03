@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 
+import { normalizeCustomerExternalIdForStorage } from "@/domain/crm/customer-edit";
 import {
   createPaginationMeta,
   normalizePagination,
@@ -14,6 +15,7 @@ import type {
   CustomerListItem,
   CustomersListResponse,
   ListCustomersParams,
+  UpdateCustomerInput,
 } from "./types";
 
 export class CreateCustomerError extends Error {
@@ -26,6 +28,20 @@ export class CreateCustomerError extends Error {
   ) {
     super(message);
     this.name = "CreateCustomerError";
+    this.code = code;
+  }
+}
+
+export class UpdateCustomerError extends Error {
+  code: "DUPLICATE_CUSTOMER" | "INVALID_EXTERNAL_ID" | "INVALID_DISPLAY_NAME";
+
+  constructor(
+    code: UpdateCustomerError["code"],
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "UpdateCustomerError";
     this.code = code;
   }
 }
@@ -314,4 +330,83 @@ export async function createCustomer(
 
     throw error;
   }
+}
+
+export async function updateCustomer(
+  customerId: string,
+  input: UpdateCustomerInput,
+  options?: ServiceOptions,
+): Promise<CustomerDetail | null> {
+  const db = resolveDb(options);
+  const existingContact = await db.contact.findUnique({
+    where: {
+      id: customerId,
+    },
+    select: {
+      id: true,
+      primaryChannel: true,
+    },
+  });
+
+  if (!existingContact) {
+    return null;
+  }
+
+  const normalizedExternalId = normalizeCustomerExternalIdForStorage(
+    input.externalId,
+    existingContact.primaryChannel,
+  );
+
+  if (!normalizedExternalId) {
+    throw new UpdateCustomerError(
+      "INVALID_EXTERNAL_ID",
+      existingContact.primaryChannel === "wa"
+        ? "El teléfono de WhatsApp debe tener exactamente 8 dígitos locales."
+        : "El identificador externo es obligatorio.",
+      {
+        primaryChannel: existingContact.primaryChannel,
+      },
+    );
+  }
+
+  if (!input.displayName || input.displayName.trim().length === 0) {
+    throw new UpdateCustomerError(
+      "INVALID_DISPLAY_NAME",
+      "display_name is required",
+    );
+  }
+
+  try {
+    await db.contact.update({
+      where: {
+        id: customerId,
+      },
+      data: {
+        externalId: normalizedExternalId,
+        displayName: input.displayName.trim(),
+        customerStatus: input.customerStatus?.trim() || null,
+      },
+      select: {
+        id: true,
+      },
+    });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw new UpdateCustomerError(
+        "DUPLICATE_CUSTOMER",
+        "Ya existe un customer con ese canal e identificador externo.",
+        {
+          primaryChannel: existingContact.primaryChannel,
+          externalId: normalizedExternalId,
+        },
+      );
+    }
+
+    throw error;
+  }
+
+  return getCustomerDetail(customerId, options);
 }

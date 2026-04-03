@@ -259,6 +259,20 @@ export const createCustomerSchema = z
   })
   .strict();
 
+export const updateCustomerSchema = z
+  .object({
+    externalId: z.string().trim().min(1, "External ID is required."),
+    displayName: z.preprocess(
+      normalizeOptionalString,
+      z.string().optional().nullable(),
+    ),
+    customerStatus: z.preprocess(
+      normalizeOptionalString,
+      z.string().optional().nullable(),
+    ),
+  })
+  .strict();
+
 export const listOrdersParamsSchema = z
   .object({
     page: optionalPositiveInt,

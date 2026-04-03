@@ -30,7 +30,7 @@ function buildSummaryItems(customer: NonNullable<Awaited<ReturnType<typeof getCu
       hint: "Cantidad histórica registrada",
     },
     {
-      label: "Total gastado",
+      label: "Total Compras",
       value: formatCurrencyCRC(customer.metrics.totalSpentCrc),
       hint: "Revenue acumulado del customer",
     },

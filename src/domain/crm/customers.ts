@@ -25,6 +25,12 @@ export interface CreateCustomerInput {
   customerStatus?: string;
 }
 
+export interface UpdateCustomerInput {
+  externalId: string;
+  displayName?: string | null;
+  customerStatus?: string | null;
+}
+
 export interface CustomerListItem {
   id: string;
   displayName: string | null;

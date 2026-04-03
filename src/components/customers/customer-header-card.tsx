@@ -2,6 +2,7 @@ import type { CustomerDetail } from "@/server/services/customers/types";
 import { formatDateTime } from "@/lib/formatters";
 import { StatusBadge, StatusBadgeFromViewModel } from "@/components/ui/status-badge";
 
+import { CustomerEditAction } from "./customer-edit-action";
 import {
   extractTagLabels,
   formatChannelLabel,
@@ -31,9 +32,12 @@ export function CustomerHeaderCard({ customer }: CustomerHeaderCardProps) {
                 <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
                   Customer profile
                 </p>
-                <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-950">
-                  {getCustomerDisplayName(customer.displayName)}
-                </h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-950">
+                    {getCustomerDisplayName(customer.displayName)}
+                  </h1>
+                  <CustomerEditAction customer={customer} />
+                </div>
                 <p className="text-sm text-slate-600">External ID: {customer.externalId}</p>
               </div>
 
