@@ -260,11 +260,10 @@ export function CustomerEditAction({ customer }: CustomerEditActionProps) {
                   {isWhatsappCustomer ? "Teléfono WhatsApp" : "Identificador externo"}
                 </span>
                 {isWhatsappCustomer ? (
-                  <div
-                    className="flex h-11 items-center rounded-2xl border border-border bg-white px-4 text-sm text-slate-950 transition focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20"
-                    aria-invalid={touchedFields.externalId && validationErrors.externalId ? true : undefined}
-                  >
-                    <span className="shrink-0 font-medium text-slate-600">{COSTA_RICA_PHONE_PREFIX}</span>
+                  <div className="flex items-stretch gap-3">
+                    <div className="flex h-11 w-24 shrink-0 items-center justify-center rounded-2xl border border-border bg-slate-50 px-4 text-sm font-medium text-slate-700">
+                      {COSTA_RICA_PHONE_PREFIX}
+                    </div>
                     <input
                       type="text"
                       inputMode="numeric"
@@ -278,7 +277,8 @@ export function CustomerEditAction({ customer }: CustomerEditActionProps) {
                       autoComplete="off"
                       autoCorrect="off"
                       spellCheck={false}
-                      className="ml-3 h-full min-w-0 flex-1 appearance-none border-0 bg-transparent p-0 text-sm text-slate-950 shadow-none outline-none ring-0 placeholder:text-slate-400 focus:border-0 focus:outline-none focus:ring-0"
+                      aria-invalid={touchedFields.externalId && validationErrors.externalId ? true : undefined}
+                      className="h-11 min-w-0 flex-1 appearance-none rounded-2xl border border-border bg-white px-4 text-sm text-slate-950 shadow-none outline-none ring-0 transition placeholder:text-slate-400 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                     />
                   </div>
                 ) : (
