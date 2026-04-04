@@ -951,7 +951,7 @@ async function resolveUniqueProductId(
       const match = new RegExp(`^${escapedBaseId}_(\\d+)$`).exec(row.id);
       return match ? Number.parseInt(match[1] ?? "", 10) : null;
     })
-    .filter((value): value is number => Number.isInteger(value) && value >= 2);
+    .filter((value): value is number => value !== null && Number.isInteger(value) && value >= 2);
 
   const next = (suffixes.length > 0 ? Math.max(...suffixes) : 1) + 1;
   return `${baseId}_${next}`;
@@ -978,7 +978,7 @@ async function resolveUniqueProductSku(
       const match = new RegExp(`^${escapedBaseSku}-(\\d+)$`).exec(row.sku);
       return match ? Number.parseInt(match[1] ?? "", 10) : null;
     })
-    .filter((value): value is number => Number.isInteger(value) && value >= 2);
+    .filter((value): value is number => value !== null && Number.isInteger(value) && value >= 2);
 
   const next = (suffixes.length > 0 ? Math.max(...suffixes) : 1) + 1;
   return `${baseSku}-${next}`;
