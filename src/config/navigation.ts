@@ -1,4 +1,5 @@
 import {
+  Boxes,
   ChartColumnBig,
   LayoutDashboard,
   Megaphone,
@@ -21,6 +22,12 @@ export const navigationItems: NavigationItem[] = [
     label: "Customers",
     description: "Clientes y prospectos",
     icon: UsersRound,
+  },
+  {
+    href: "/products",
+    label: "Products",
+    description: "Catalogo y performance comercial",
+    icon: Boxes,
   },
   {
     href: "/orders",

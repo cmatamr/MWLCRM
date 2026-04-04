@@ -36,6 +36,18 @@ import type {
   UpdatePaymentReceiptInput,
   UpdateOrderActivityInput,
 } from "@/server/services/orders/types";
+import type {
+  AddProductAliasInput,
+  CreateProductInput,
+  AddProductImageInput,
+  ListCatalogProductsParams,
+  ProductDetail as CatalogProductDetail,
+  UpdateProductImageInput,
+  UpdateProductSearchTermInput,
+  AddProductSearchTermInput,
+  ProductsCatalogResponse,
+  UpdateProductInput,
+} from "@/server/services/products";
 import { buildApiUrl, fetcher, FetcherError, type QueryParams } from "@/lib/fetcher";
 
 type QueryInput = object;
@@ -124,6 +136,129 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     },
     listOrderCatalogProductOptions(query?: string, init?: RequestInit) {
       return get<OrderItemProductOption[]>("/api/orders/item-products", { query }, init);
+    },
+    listProductsCatalog(params?: ListCatalogProductsParams, init?: RequestInit) {
+      return get<ProductsCatalogResponse>("/api/products", {
+        page: params?.page,
+        page_size: params?.pageSize,
+        search: params?.search,
+        category: params?.category,
+        family: params?.family,
+        is_active: params?.isActive,
+        is_agent_visible: params?.isAgentVisible,
+        pricing_mode: params?.pricingMode,
+        max_price_crc: params?.maxPriceCrc,
+        min_qty: params?.minQty,
+        exact_product_id: params?.exactProductId,
+      }, init);
+    },
+    getProductDetail(id: string, init?: RequestInit) {
+      return get<CatalogProductDetail>(`/api/products/${id}`, undefined, init);
+    },
+    updateProduct(id: string, input: UpdateProductInput, init?: RequestInit) {
+      return get<CatalogProductDetail>(`/api/products/${id}`, undefined, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    createProduct(input: CreateProductInput, init?: RequestInit) {
+      return get<CatalogProductDetail>("/api/products", undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    addProductImage(id: string, input: AddProductImageInput, init?: RequestInit) {
+      return get<CatalogProductDetail>(`/api/products/${id}/images`, undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    updateProductImage(
+      id: string,
+      imageId: number,
+      input: UpdateProductImageInput,
+      init?: RequestInit,
+    ) {
+      return get<CatalogProductDetail>(`/api/products/${id}/images/${imageId}`, undefined, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    deleteProductImage(id: string, imageId: number, init?: RequestInit) {
+      return get<CatalogProductDetail>(`/api/products/${id}/images/${imageId}`, undefined, {
+        method: "DELETE",
+        ...init,
+      });
+    },
+    addProductAlias(id: string, input: AddProductAliasInput, init?: RequestInit) {
+      return get<CatalogProductDetail>(`/api/products/${id}/aliases`, undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    deleteProductAlias(id: string, aliasId: number, init?: RequestInit) {
+      return get<CatalogProductDetail>(`/api/products/${id}/aliases/${aliasId}`, undefined, {
+        method: "DELETE",
+        ...init,
+      });
+    },
+    addProductSearchTerm(id: string, input: AddProductSearchTermInput, init?: RequestInit) {
+      return get<CatalogProductDetail>(`/api/products/${id}/search-terms`, undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    updateProductSearchTerm(
+      id: string,
+      termId: number,
+      input: UpdateProductSearchTermInput,
+      init?: RequestInit,
+    ) {
+      return get<CatalogProductDetail>(`/api/products/${id}/search-terms/${termId}`, undefined, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    deleteProductSearchTerm(id: string, termId: number, init?: RequestInit) {
+      return get<CatalogProductDetail>(`/api/products/${id}/search-terms/${termId}`, undefined, {
+        method: "DELETE",
+        ...init,
+      });
     },
     createOrder(input: CreateOrderInput, init?: RequestInit) {
       return get<OrderDetail>("/api/orders", undefined, {

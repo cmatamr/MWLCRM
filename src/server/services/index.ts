@@ -7,3 +7,4 @@ export * as searchService from "./search";
 export * as funnelService from "./funnel";
 export * as conversationsService from "./conversations";
 export * as metaCampaignSyncService from "./meta-campaign-sync";
+export * as productsService from "./products";
