@@ -4,7 +4,7 @@ SET session_replication_role = replica;
 -- PostgreSQL database dump
 --
 
--- \restrict tMWt94PnClgl4ljuPDIeOhbaSHUhqJ5gc1m1eN25sJpNnbQycWt9nsd3Th5jCg8
+-- \restrict gAKQVNoFpCZY2K7QAYvUi6CMjRpILcdVIDoMSUIQnC9de0h2NpzZ1e0OoDHZV4r
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.6
@@ -213,7 +213,7 @@ COPY "public"."contacts" ("id", "primary_channel", "external_id", "display_name"
 --
 
 COPY "public"."lead_threads" ("id", "lead_thread_key", "channel", "mode", "owner", "ai_lock_until", "last_customer_ts", "last_human_ts", "last_ai_ts", "lead_stage", "lead_score", "created_at", "updated_at", "contact_id", "stage_confidence", "stage_source", "stage_locked", "stage_lock_reason", "last_agent_assessment_at", "last_human_override_at", "intent_level", "requirement_clarity", "quote_readiness", "abandonment_risk", "budget_status", "urgency_level", "stage_reason", "stage_evidence") FROM stdin;
-68f01174-621c-4a28-9401-98e1e14b631a	+50688928728	wa	ai	karol	\N	2026-03-31 04:20:51+00	\N	\N	new	0	2026-03-26 03:39:49.016827+00	2026-03-31 04:21:03.323927+00	380b34f3-8a87-4455-8dec-1e31570403fa	\N	system	f	\N	\N	\N	\N	\N	\N	\N	\N	\N	\N	{}
+68f01174-621c-4a28-9401-98e1e14b631a	+50688928728	wa	ai	karol	\N	2026-03-31 04:20:51+00	\N	\N	new	0	2026-03-26 03:39:49.016827+00	2026-04-03 22:39:57.366349+00	380b34f3-8a87-4455-8dec-1e31570403fa	\N	system	f	\N	\N	\N	\N	\N	\N	\N	\N	\N	\N	{}
 ca6e26a1-147c-498a-8bf5-b0f83c4df99f	+50684732111	wa	ai	karol	\N	2026-03-28 22:07:04+00	\N	\N	new	0	2026-03-26 04:29:45.569294+00	2026-03-28 22:07:11.48014+00	28c8f937-9baa-4bc0-9e68-fa11031eb9fe	\N	system	f	\N	\N	\N	\N	\N	\N	\N	\N	\N	\N	{}
 \.
 
@@ -256,6 +256,7 @@ COPY "public"."campaigns" ("id", "name", "platform", "objective", "start_date", 
 --
 
 COPY "public"."campaign_attribution" ("id", "lead_thread_id", "source", "campaign_id", "adset_id", "creative_id", "referral_payload", "first_touch_at", "campaign_uuid") FROM stdin;
+e065ef0b-16cd-4a00-818a-dceb4f8085c3	68f01174-621c-4a28-9401-98e1e14b631a	prueba	123	\N	\N	{}	2026-04-03 22:21:55.072723+00	\N
 \.
 
 
@@ -907,6 +908,6 @@ SELECT pg_catalog.setval('"public"."order_items_id_seq"', 13, true);
 -- PostgreSQL database dump complete
 --
 
--- \unrestrict tMWt94PnClgl4ljuPDIeOhbaSHUhqJ5gc1m1eN25sJpNnbQycWt9nsd3Th5jCg8
+-- \unrestrict gAKQVNoFpCZY2K7QAYvUi6CMjRpILcdVIDoMSUIQnC9de0h2NpzZ1e0OoDHZV4r
 
 RESET ALL;

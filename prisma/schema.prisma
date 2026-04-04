@@ -273,7 +273,10 @@ model Campaign {
   objective      String?
   startDate      DateTime?            @map("start_date") @db.Date
   endDate        DateTime?            @map("end_date") @db.Date
+  metaCampaignId String?              @map("meta_campaign_id")
+  status         String?              @default("active")
   createdAt      DateTime?            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime?            @default(now()) @map("updated_at") @db.Timestamptz(6)
   campaignSpends CampaignSpend[]
 
   @@map("campaigns")
@@ -284,6 +287,10 @@ model CampaignSpend {
   campaignId String?   @map("campaign_id") @db.Uuid
   date       DateTime  @db.Date
   amountCrc  Decimal   @map("amount_crc") @db.Decimal(12, 2)
+  impressions Int?
+  clicks      Int?
+  cpc         Decimal? @db.Decimal(10, 2)
+  ctr         Decimal? @db.Decimal(5, 2)
   createdAt  DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
   campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade, map: "campaign_spend_campaign_id_fkey")
 

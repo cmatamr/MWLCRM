@@ -741,7 +741,7 @@ CREATE OR REPLACE VIEW "public"."campaign_kpi" WITH ("security_invoker"='on') AS
 ALTER VIEW "public"."campaign_kpi" OWNER TO "postgres";
 
 
-CREATE OR REPLACE VIEW "public"."campaign_kpi_extended" AS
+CREATE OR REPLACE VIEW "public"."campaign_kpi_extended" WITH ("security_invoker"='on') AS
  SELECT "c"."id",
     "c"."name",
     "k"."total_spend",
@@ -803,7 +803,7 @@ CREATE TABLE IF NOT EXISTS "public"."lead_threads" (
 ALTER TABLE "public"."lead_threads" OWNER TO "postgres";
 
 
-CREATE OR REPLACE VIEW "public"."campaign_lead_quality" AS
+CREATE OR REPLACE VIEW "public"."campaign_lead_quality" WITH ("security_invoker"='on') AS
  SELECT "ca"."campaign_uuid" AS "campaign_id",
     "count"(DISTINCT "lt"."id") AS "total_leads",
     "count"(DISTINCT

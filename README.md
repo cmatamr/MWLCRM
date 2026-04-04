@@ -33,3 +33,16 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY="[YOUR_SUPABASE_ANON_KEY]"
 - Vercel uses `6543`.
 - After changing environment variables, restart the local dev server or redeploy on Vercel.
 - Local development should only require `.env.local`.
+
+## Meta Campaign Sync
+
+- Sync config is centralized at `src/config/campaignSync.ts`.
+- Vercel Cron invokes `GET /api/internal/cron/meta-campaign-sync` every minute (`vercel.json`).
+- Effective sync cadence is controlled by `campaignSyncConfig.cron.intervalMinutes` (default `30`).
+- Add these env vars in Vercel/local when running the sync:
+  - `META_ACCESS_TOKEN`
+  - `META_AD_ACCOUNT_ID`
+  - `META_APP_ID`
+  - `META_APP_SECRET`
+  - `META_BUSINESS_ID`
+  - `CRON_SECRET` (recommended in production; required by route auth when set)
