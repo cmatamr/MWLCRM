@@ -4,11 +4,14 @@ import { mapCustomerReference } from "@/domain/crm/mappers";
 import { calculatePercentage, toNullableIsoDate, toNumber } from "@/server/services/shared";
 
 import type {
+  CampaignAlertSummary,
   CampaignAttributedLead,
   CampaignAttributedOrder,
   CampaignDetail,
   CampaignKpis,
+  CampaignLeadQualitySummary,
   CampaignListItem,
+  CampaignsOverviewSummary,
   CampaignPerformanceSummary,
   CampaignSpendPoint,
 } from "./types";
@@ -83,6 +86,68 @@ export function mapCampaignKpis(input: {
   };
 }
 
+export function mapCampaignLeadQualitySummary(input: {
+  totalLeads: number;
+  progressedLeads: number;
+  qualifiedLeads: number;
+  quotedLeads: number;
+  wonLeads: number;
+}): CampaignLeadQualitySummary {
+  return {
+    totalLeads: input.totalLeads,
+    progressedLeads: input.progressedLeads,
+    qualifiedLeads: input.qualifiedLeads,
+    quotedLeads: input.quotedLeads,
+    wonLeads: input.wonLeads,
+    progressRate: calculatePercentage(input.progressedLeads, input.totalLeads),
+    qualificationRate: calculatePercentage(input.qualifiedLeads, input.totalLeads),
+    quoteRate: calculatePercentage(input.quotedLeads, input.totalLeads),
+    winRate: calculatePercentage(input.wonLeads, input.totalLeads),
+  };
+}
+
+export function mapCampaignAlertSummary(input: CampaignAlertSummary): CampaignAlertSummary {
+  return input;
+}
+
+export function mapCampaignsOverview(input: {
+  totalCampaigns: number;
+  totalSpendCrc: number;
+  attributedLeads: number;
+  attributedOrders: number;
+  attributedRevenueCrc: number;
+  totalLeads: number;
+  progressedLeads: number;
+  qualifiedLeads: number;
+  quotedLeads: number;
+  wonLeads: number;
+  spendWithoutRevenueCount: number;
+  highLeadNoOrderCount: number;
+  highRoasCount: number;
+}): CampaignsOverviewSummary {
+  return {
+    totalCampaigns: input.totalCampaigns,
+    ...mapCampaignPerformanceSummary({
+      totalSpendCrc: input.totalSpendCrc,
+      attributedLeads: input.attributedLeads,
+      attributedOrders: input.attributedOrders,
+      attributedRevenueCrc: input.attributedRevenueCrc,
+    }),
+    ...mapCampaignLeadQualitySummary({
+      totalLeads: input.totalLeads,
+      progressedLeads: input.progressedLeads,
+      qualifiedLeads: input.qualifiedLeads,
+      quotedLeads: input.quotedLeads,
+      wonLeads: input.wonLeads,
+    }),
+    ...mapCampaignAlertSummary({
+      spendWithoutRevenueCount: input.spendWithoutRevenueCount,
+      highLeadNoOrderCount: input.highLeadNoOrderCount,
+      highRoasCount: input.highRoasCount,
+    }),
+  };
+}
+
 export function mapCampaignListItem(input: {
   campaign: CampaignListRecord;
   summary: CampaignPerformanceSummary;
@@ -98,6 +163,8 @@ export function mapCampaignListItem(input: {
     leads: input.summary.attributedLeads,
     orders: input.summary.attributedOrders,
     revenueCrc: input.summary.attributedRevenueCrc,
+    roas: input.summary.roas,
+    conversionRate: input.summary.leadToOrderConversionRate,
   };
 }
 

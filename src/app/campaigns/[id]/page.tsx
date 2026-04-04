@@ -33,9 +33,14 @@ export default async function CampaignDetailPage({ params }: CampaignDetailPageP
           title="Campaign Detail"
           description="Vista analítica por campaña con resumen, evolución de gasto, leads atribuidos, órdenes e ingresos asociados."
         />
-        <Button asChild variant="outline">
-          <Link href="/campaigns">Volver al listado</Link>
-        </Button>
+        <div className="flex flex-wrap gap-3">
+          <Button asChild variant="outline">
+            <Link href={`/funnel?campaign_id=${campaign.campaign.id}`}>Abrir Funnel filtrado</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/campaigns">Volver al listado</Link>
+          </Button>
+        </div>
       </div>
 
       <CampaignSummaryCard campaign={campaign.campaign} summary={campaign.summary} />

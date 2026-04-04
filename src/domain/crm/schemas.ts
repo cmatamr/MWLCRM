@@ -302,6 +302,12 @@ export const listConversationsParamsSchema = z
   })
   .strict();
 
+export const funnelSummaryParamsSchema = z
+  .object({
+    campaignId: z.string().uuid().optional(),
+  })
+  .strict();
+
 export const conversationSelectionParamsSchema = z
   .object({
     threadId: z.string().uuid().optional(),

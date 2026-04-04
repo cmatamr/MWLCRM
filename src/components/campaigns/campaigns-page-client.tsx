@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 
+import { CampaignAlertsCard } from "@/components/campaigns/campaign-alerts-card";
+import { CampaignEfficiencyCard } from "@/components/campaigns/campaign-efficiency-card";
+import { CampaignLeadQualityCard } from "@/components/campaigns/campaign-lead-quality-card";
 import { CampaignsTable } from "@/components/campaigns/campaigns-table";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -85,56 +88,54 @@ export function CampaignsPageClient() {
 
   const previousPage = Math.max(1, data.pagination.page - 1);
   const nextPage = Math.min(data.pagination.totalPages, data.pagination.page + 1);
-  const totalSpendCrc = data.items.reduce((sum, campaign) => sum + campaign.totalSpendCrc, 0);
-  const totalRevenueCrc = data.items.reduce((sum, campaign) => sum + campaign.revenueCrc, 0);
-  const totalOrders = data.items.reduce((sum, campaign) => sum + campaign.orders, 0);
-  const totalLeads = data.items.reduce((sum, campaign) => sum + campaign.leads, 0);
+  const topCards = [
+    {
+      label: "Spend",
+      value: formatCurrencyCRC(data.overview.totalSpendCrc),
+    },
+    {
+      label: "Leads",
+      value: data.overview.attributedLeads.toLocaleString("es-CR"),
+    },
+    {
+      label: "Orders",
+      value: data.overview.attributedOrders.toLocaleString("es-CR"),
+    },
+    {
+      label: "Revenue",
+      value: formatCurrencyCRC(data.overview.attributedRevenueCrc),
+    },
+    {
+      label: "ROAS",
+      value: `${data.overview.roas.toFixed(2)}x`,
+    },
+  ];
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <PageHeader
           title="Campaigns"
-          description="Modulo comercial de campanas con gasto, leads, ordenes e ingresos atribuidos desde servicios con agregacion controlada."
+          description="Vista agregada de adquisición, revenue y calidad comercial para identificar qué campañas realmente traen negocio."
         />
         <div className="rounded-2xl border border-border/70 bg-white/80 px-4 py-3 text-sm text-muted-foreground">
-          {data.pagination.total} campanas encontradas
+          {data.overview.totalCampaigns} campanas encontradas
         </div>
       </div>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <article className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Spend visible
-          </p>
-          <p className="mt-2 text-2xl font-semibold text-slate-950">
-            {formatCurrencyCRC(totalSpendCrc)}
-          </p>
-        </article>
-        <article className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Leads visibles
-          </p>
-          <p className="mt-2 text-2xl font-semibold text-slate-950">
-            {totalLeads.toLocaleString("es-CR")}
-          </p>
-        </article>
-        <article className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Orders visibles
-          </p>
-          <p className="mt-2 text-2xl font-semibold text-slate-950">
-            {totalOrders.toLocaleString("es-CR")}
-          </p>
-        </article>
-        <article className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Revenue visible
-          </p>
-          <p className="mt-2 text-2xl font-semibold text-slate-950">
-            {formatCurrencyCRC(totalRevenueCrc)}
-          </p>
-        </article>
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        {topCards.map((card) => (
+          <article
+            key={card.label}
+            className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]"
+          >
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              {card.label}
+            </p>
+            <p className="mt-2 text-2xl font-semibold text-slate-950">{card.value}</p>
+            <p className="mt-2 text-sm text-muted-foreground">Resultado global del filtro actual</p>
+          </article>
+        ))}
       </section>
 
       <section className="rounded-[28px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
@@ -164,6 +165,12 @@ export function CampaignsPageClient() {
             </Button>
           </div>
         </form>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.95fr)_minmax(320px,1fr)]">
+        <CampaignLeadQualityCard overview={data.overview} />
+        <CampaignEfficiencyCard overview={data.overview} />
+        <CampaignAlertsCard overview={data.overview} />
       </section>
 
       <CampaignsTable campaigns={data.items} />

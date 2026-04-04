@@ -18,6 +18,31 @@ export interface CampaignPerformanceSummary {
   revenuePerLeadCrc: number;
 }
 
+export interface CampaignLeadQualitySummary {
+  totalLeads: number;
+  progressedLeads: number;
+  qualifiedLeads: number;
+  quotedLeads: number;
+  wonLeads: number;
+  progressRate: number;
+  qualificationRate: number;
+  quoteRate: number;
+  winRate: number;
+}
+
+export interface CampaignAlertSummary {
+  spendWithoutRevenueCount: number;
+  highLeadNoOrderCount: number;
+  highRoasCount: number;
+}
+
+export interface CampaignsOverviewSummary
+  extends CampaignPerformanceSummary,
+    CampaignLeadQualitySummary,
+    CampaignAlertSummary {
+  totalCampaigns: number;
+}
+
 export interface CampaignListItem {
   id: string;
   name: string;
@@ -29,9 +54,13 @@ export interface CampaignListItem {
   leads: number;
   orders: number;
   revenueCrc: number;
+  roas: number;
+  conversionRate: number;
 }
 
-export type CampaignsListResponse = PagedResponse<CampaignListItem>;
+export interface CampaignsListResponse extends PagedResponse<CampaignListItem> {
+  overview: CampaignsOverviewSummary;
+}
 
 export interface CampaignSpendPoint {
   date: string;

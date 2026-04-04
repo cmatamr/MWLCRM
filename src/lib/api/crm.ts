@@ -10,13 +10,17 @@ import type {
   ListCustomersParams,
   UpdateCustomerInput,
 } from "@/server/services/customers/types";
-import type { CampaignKpis, CampaignsListResponse, ListCampaignsParams } from "@/server/services/campaigns/types";
+import type {
+  CampaignDetail,
+  CampaignsListResponse,
+  ListCampaignsParams,
+} from "@/server/services/campaigns/types";
 import type {
   ConversationDetail,
   ConversationsListResponse,
   ListConversationsParams,
 } from "@/server/services/conversations/types";
-import type { FunnelSummary } from "@/server/services/funnel/types";
+import type { FunnelSummary, FunnelSummaryParams } from "@/server/services/funnel/types";
 import type {
   CreateOrderActivityInput,
   CreatePaymentReceiptInput,
@@ -323,10 +327,10 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
       return get<CampaignsListResponse>("/api/campaigns", params, init);
     },
     getCampaign(id: string, init?: RequestInit) {
-      return get<CampaignKpis>(`/api/campaigns/${id}`, undefined, init);
+      return get<CampaignDetail>(`/api/campaigns/${id}`, undefined, init);
     },
-    getFunnelSummary(init?: RequestInit) {
-      return get<FunnelSummary>("/api/funnel/summary", undefined, init);
+    getFunnelSummary(params?: FunnelSummaryParams, init?: RequestInit) {
+      return get<FunnelSummary>("/api/funnel/summary", params, init);
     },
     listConversations(params?: ListConversationsParams, init?: RequestInit) {
       return get<ConversationsListResponse>("/api/conversations", params, init);

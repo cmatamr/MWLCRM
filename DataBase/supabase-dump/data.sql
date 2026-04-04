@@ -4,7 +4,7 @@ SET session_replication_role = replica;
 -- PostgreSQL database dump
 --
 
--- \restrict 8C0oRCtAZaxl200kbRn5Y7OlNEq53jGgfP9zb8ELVVsPsYJKmAca9asxKErmMdR
+-- \restrict tMWt94PnClgl4ljuPDIeOhbaSHUhqJ5gc1m1eN25sJpNnbQycWt9nsd3Th5jCg8
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.6
@@ -212,9 +212,9 @@ COPY "public"."contacts" ("id", "primary_channel", "external_id", "display_name"
 -- Data for Name: lead_threads; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY "public"."lead_threads" ("id", "lead_thread_key", "channel", "mode", "owner", "ai_lock_until", "last_customer_ts", "last_human_ts", "last_ai_ts", "lead_stage", "lead_score", "created_at", "updated_at", "contact_id") FROM stdin;
-68f01174-621c-4a28-9401-98e1e14b631a	+50688928728	wa	ai	karol	\N	2026-03-31 04:20:51+00	\N	\N	new	0	2026-03-26 03:39:49.016827+00	2026-03-31 04:21:03.323927+00	380b34f3-8a87-4455-8dec-1e31570403fa
-ca6e26a1-147c-498a-8bf5-b0f83c4df99f	+50684732111	wa	ai	karol	\N	2026-03-28 22:07:04+00	\N	\N	new	0	2026-03-26 04:29:45.569294+00	2026-03-28 22:07:11.48014+00	28c8f937-9baa-4bc0-9e68-fa11031eb9fe
+COPY "public"."lead_threads" ("id", "lead_thread_key", "channel", "mode", "owner", "ai_lock_until", "last_customer_ts", "last_human_ts", "last_ai_ts", "lead_stage", "lead_score", "created_at", "updated_at", "contact_id", "stage_confidence", "stage_source", "stage_locked", "stage_lock_reason", "last_agent_assessment_at", "last_human_override_at", "intent_level", "requirement_clarity", "quote_readiness", "abandonment_risk", "budget_status", "urgency_level", "stage_reason", "stage_evidence") FROM stdin;
+68f01174-621c-4a28-9401-98e1e14b631a	+50688928728	wa	ai	karol	\N	2026-03-31 04:20:51+00	\N	\N	new	0	2026-03-26 03:39:49.016827+00	2026-03-31 04:21:03.323927+00	380b34f3-8a87-4455-8dec-1e31570403fa	\N	system	f	\N	\N	\N	\N	\N	\N	\N	\N	\N	\N	{}
+ca6e26a1-147c-498a-8bf5-b0f83c4df99f	+50684732111	wa	ai	karol	\N	2026-03-28 22:07:04+00	\N	\N	new	0	2026-03-26 04:29:45.569294+00	2026-03-28 22:07:11.48014+00	28c8f937-9baa-4bc0-9e68-fa11031eb9fe	\N	system	f	\N	\N	\N	\N	\N	\N	\N	\N	\N	\N	{}
 \.
 
 
@@ -247,7 +247,7 @@ fbfdc154-9e2f-417c-bb37-9f20771e748f	Banco Promerica	PROMERICA	t	2026-04-02 08:5
 -- Data for Name: campaigns; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY "public"."campaigns" ("id", "name", "platform", "objective", "start_date", "end_date", "created_at") FROM stdin;
+COPY "public"."campaigns" ("id", "name", "platform", "objective", "start_date", "end_date", "created_at", "meta_campaign_id", "status", "updated_at") FROM stdin;
 \.
 
 
@@ -263,7 +263,7 @@ COPY "public"."campaign_attribution" ("id", "lead_thread_id", "source", "campaig
 -- Data for Name: campaign_spend; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY "public"."campaign_spend" ("id", "campaign_id", "date", "amount_crc", "created_at") FROM stdin;
+COPY "public"."campaign_spend" ("id", "campaign_id", "date", "amount_crc", "created_at", "impressions", "clicks", "cpc", "ctr") FROM stdin;
 \.
 
 
@@ -279,7 +279,7 @@ COPY "public"."messages" ("id", "lead_thread_id", "sender_type", "text", "attach
 -- Data for Name: conversation_objections; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY "public"."conversation_objections" ("id", "lead_thread_id", "message_id", "objection_type", "objection_subtype", "detected_from", "confidence", "created_at", "resolved_at") FROM stdin;
+COPY "public"."conversation_objections" ("id", "lead_thread_id", "message_id", "objection_type", "objection_subtype", "detected_from", "confidence", "created_at", "resolved_at", "status", "severity", "detected_by", "evidence_excerpt", "evidence_json", "resolved_by", "resolution_notes") FROM stdin;
 \.
 
 
@@ -308,10 +308,18 @@ COPY "public"."followups" ("id", "lead_thread_id", "due_at", "status", "attempt"
 
 
 --
+-- Data for Name: lead_agent_assessments; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY "public"."lead_agent_assessments" ("id", "lead_thread_id", "message_id", "proposed_stage", "confidence", "lead_score", "intent_level", "requirement_clarity", "quote_readiness", "abandonment_risk", "budget_status", "urgency_level", "should_advance", "should_hold", "should_fallback", "rationale_text", "evidence_excerpt", "rationale_json", "evidence_json", "model_name", "created_at") FROM stdin;
+\.
+
+
+--
 -- Data for Name: funnel_stage_history; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY "public"."funnel_stage_history" ("id", "lead_thread_id", "stage", "entered_at", "exited_at", "duration_seconds", "reason", "created_at") FROM stdin;
+COPY "public"."funnel_stage_history" ("id", "lead_thread_id", "stage", "entered_at", "exited_at", "duration_seconds", "reason", "created_at", "from_stage", "to_stage", "source", "confidence", "changed_by", "message_id", "assessment_id", "evidence_excerpt", "evidence_json") FROM stdin;
 \.
 
 
@@ -330,6 +338,7 @@ payment_methods	\N	["SINPE Móvil", "transferencia bancaria"]	2026-03-07 21:53:3
 delivery_methods	\N	["retiro", "Correos de Costa Rica"]	2026-03-07 21:53:30.778634
 bag_name_personalization_policy	Se puede incluir nombre individual por invitado sin costo adicional en la línea de bolsos actualizada.	{"free_individual_name": true}	2026-03-07 21:53:30.778634
 bag_design_adjustment_policy	Incluye 1 ajuste de diseño sin costo. Cambios adicionales pueden generar costo extra.	{"included_adjustments": 1, "additional_changes_may_have_cost": true}	2026-03-07 21:53:30.778634
+funnel_rules	\N	{"stale_hours_new": 24, "stale_hours_quote": 72, "allow_agent_auto_won": false, "allow_agent_auto_lost": false, "stale_hours_qualified": 48, "min_confidence_auto_lost": 0.90, "min_confidence_auto_stage": 0.75, "allow_agent_move_if_stage_locked": false}	2026-04-03 05:29:10.880142
 \.
 
 
@@ -713,9 +722,9 @@ COPY "public"."n8n_chat_histories" ("id", "session_id", "message") FROM stdin;
 
 COPY "public"."orders" ("id", "lead_thread_id", "status_legacy", "payment_status", "currency", "subtotal_crc", "total_crc", "source", "notes", "created_at", "updated_at", "contact_id", "status", "delivery_date") FROM stdin;
 8a49360d-9a47-46bf-b045-3e75c68644b7	68f01174-621c-4a28-9401-98e1e14b631a	pending_payment	pending_validation	CRC	19650	19650	CRM	\N	2026-04-01 04:20:24.604+00	2026-04-01 15:10:40.835311+00	380b34f3-8a87-4455-8dec-1e31570403fa	pending_payment	\N
-5ecf3af5-bf0d-40d6-b9bc-77cf8cec5a11	68f01174-621c-4a28-9401-98e1e14b631a	draft	pending_validation	CRC	22000	22000	nova	\N	2026-03-31 02:33:10.07105+00	2026-04-01 21:17:08.531514+00	380b34f3-8a87-4455-8dec-1e31570403fa	draft	2026-04-20
 d96a8f38-c38b-489e-80b3-b63f8bcb4560	68f01174-621c-4a28-9401-98e1e14b631a	draft	validated	CRC	36900	36900	nova	null	2026-03-26 03:47:39.162961+00	2026-04-01 21:20:23.300855+00	380b34f3-8a87-4455-8dec-1e31570403fa	in_production	2026-04-20
 8e5e6151-04fc-4c84-a566-e396580ec032	68f01174-621c-4a28-9401-98e1e14b631a	pending_payment	pending_validation	CRC	3200	3200	CRM	\N	2026-04-02 02:39:52.327+00	2026-04-02 02:40:29.064738+00	380b34f3-8a87-4455-8dec-1e31570403fa	pending_payment	\N
+5ecf3af5-bf0d-40d6-b9bc-77cf8cec5a11	68f01174-621c-4a28-9401-98e1e14b631a	draft	validated	CRC	22000	22000	nova	\N	2026-03-31 02:33:10.07105+00	2026-04-03 03:44:28.42556+00	380b34f3-8a87-4455-8dec-1e31570403fa	in_production	2026-04-20
 \.
 
 
@@ -725,6 +734,7 @@ d96a8f38-c38b-489e-80b3-b63f8bcb4560	68f01174-621c-4a28-9401-98e1e14b631a	draft	
 
 COPY "public"."order_activity" ("id", "order_id", "type", "content", "metadata", "created_at", "created_by") FROM stdin;
 5d3eb719-aee7-4de1-b1eb-06dd1b7264d3	8a49360d-9a47-46bf-b045-3e75c68644b7	note	nota de prueba ahora editada	\N	2026-04-02 06:43:24.6+00	\N
+f9607221-e710-42ad-a62f-3696b3bc4540	5ecf3af5-bf0d-40d6-b9bc-77cf8cec5a11	payment_validation	Payment receipt validated.	{"status": "validated", "receiptId": "4f88d614-b2d7-419e-b4ab-3fec933284dc", "validatedBy": "CRM"}	2026-04-03 03:44:28.535+00	CRM
 \.
 
 
@@ -750,7 +760,7 @@ COPY "public"."order_items" ("id", "order_id", "product_id", "quantity", "unit_p
 --
 
 COPY "public"."payment_receipts" ("id", "order_id", "message_id", "receipt_key", "status", "bank", "transfer_type", "amount_text", "currency", "reference", "sender_name", "recipient_name", "destination_phone", "receipt_date", "receipt_time", "created_at", "updated_at", "raw_payload", "amount_crc", "source", "internal_notes", "validated_at", "validated_by", "deleted_at", "deleted_by", "bank_id") FROM stdin;
-4f88d614-b2d7-419e-b4ab-3fec933284dc	5ecf3af5-bf0d-40d6-b9bc-77cf8cec5a11	\N	ycloud:69cb4ba53a48151462cda978	pending_validation	BAC	SINPE Móvil	₡9,000.00	CRC	\N	SANDRA VERONICA AGUILAR GALDAMEZ	KAROL ANDREA BOLAÑOS MENESES	88131053	2026-02-27	14:17	2026-03-31 04:34:01.546918+00	2026-04-02 07:46:31.996394+00	{}	9000	automation	\N	\N	\N	\N	\N	\N
+4f88d614-b2d7-419e-b4ab-3fec933284dc	5ecf3af5-bf0d-40d6-b9bc-77cf8cec5a11	\N	ycloud:69cb4ba53a48151462cda978	validated	BAC	SINPE Móvil	₡9,000.00	CRC	\N	SANDRA VERONICA AGUILAR GALDAMEZ	KAROL ANDREA BOLAÑOS MENESES	88131053	2026-02-27	14:17	2026-03-31 04:34:01.546918+00	2026-04-03 03:44:28.42556+00	{}	9000	automation	\N	2026-04-03 03:44:28.442+00	CRM	\N	\N	\N
 \.
 
 
@@ -897,6 +907,6 @@ SELECT pg_catalog.setval('"public"."order_items_id_seq"', 13, true);
 -- PostgreSQL database dump complete
 --
 
--- \unrestrict 8C0oRCtAZaxl200kbRn5Y7OlNEq53jGgfP9zb8ELVVsPsYJKmAca9asxKErmMdR
+-- \unrestrict tMWt94PnClgl4ljuPDIeOhbaSHUhqJ5gc1m1eN25sJpNnbQycWt9nsd3Th5jCg8
 
 RESET ALL;

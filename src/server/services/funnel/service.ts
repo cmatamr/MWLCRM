@@ -8,6 +8,7 @@ import {
 } from "@/server/services/shared";
 
 import type {
+  FunnelSummaryParams,
   FunnelObjectionSummary,
   FunnelStageSummary,
   FunnelSummary,
@@ -100,12 +101,86 @@ function resolveLastActivityAt(input: {
   return dates.sort((left, right) => right.getTime() - left.getTime())[0] ?? input.updatedAt;
 }
 
-export async function getFunnelSummary(options?: ServiceOptions): Promise<FunnelSummary> {
+function isServiceOptions(value: FunnelSummaryParams | ServiceOptions): value is ServiceOptions {
+  return "db" in value;
+}
+
+function createEmptyFunnelSummary(now: Date): FunnelSummary {
+  return {
+    generatedAt: now.toISOString(),
+    hasData: false,
+    totalLeads: 0,
+    activeLeads: 0,
+    wonLeads: 0,
+    lostLeads: 0,
+    totalRevenueCrc: 0,
+    totalObjections: 0,
+    uniqueObjectionTypes: 0,
+    stages: ORDERED_STAGES.map((stage) => ({
+      stage,
+      threadCount: 0,
+      sharePercent: 0,
+      averageDurationHours: 0,
+      durationSampleSize: 0,
+      orderCount: 0,
+      revenueCrc: 0,
+      topObjections: [],
+    })),
+    topObjections: [],
+    stalledConversations: [],
+    stalledComparableCount: 0,
+  };
+}
+
+export async function getFunnelSummary(
+  paramsOrOptions: FunnelSummaryParams | ServiceOptions = {},
+  maybeOptions?: ServiceOptions,
+): Promise<FunnelSummary> {
+  const params: FunnelSummaryParams =
+    isServiceOptions(paramsOrOptions) ? {} : paramsOrOptions;
+  const options: ServiceOptions | undefined =
+    isServiceOptions(paramsOrOptions) ? paramsOrOptions : maybeOptions;
   const db = resolveDb(options);
   const now = new Date();
+  const campaignLeadThreadIds = params.campaignId
+    ? [
+        ...new Set(
+          (
+            await db.campaignAttribution.findMany({
+              where: {
+                OR: [{ campaignUuid: params.campaignId }, { campaignId: params.campaignId }],
+              },
+              select: {
+                leadThreadId: true,
+              },
+            })
+          ).map((row) => row.leadThreadId),
+        ),
+      ]
+    : null;
+
+  if (campaignLeadThreadIds && campaignLeadThreadIds.length === 0) {
+    return createEmptyFunnelSummary(now);
+  }
+
+  const leadThreadWhere = campaignLeadThreadIds
+    ? {
+        id: {
+          in: campaignLeadThreadIds,
+        },
+      }
+    : undefined;
+  const relatedLeadThreadWhere = campaignLeadThreadIds
+    ? {
+        leadThreadId: {
+          in: campaignLeadThreadIds,
+        },
+      }
+    : undefined;
 
   const [threads, stageHistory, objections, orders] = await db.$transaction([
     db.leadThread.findMany({
+      where: leadThreadWhere,
       select: {
         id: true,
         leadThreadKey: true,
@@ -123,6 +198,7 @@ export async function getFunnelSummary(options?: ServiceOptions): Promise<Funnel
       },
     }),
     db.funnelStageHistory.findMany({
+      where: relatedLeadThreadWhere,
       select: {
         leadThreadId: true,
         stage: true,
@@ -132,6 +208,7 @@ export async function getFunnelSummary(options?: ServiceOptions): Promise<Funnel
       },
     }),
     db.conversationObjection.findMany({
+      where: relatedLeadThreadWhere,
       select: {
         leadThreadId: true,
         objectionType: true,
@@ -139,6 +216,7 @@ export async function getFunnelSummary(options?: ServiceOptions): Promise<Funnel
       },
     }),
     db.order.findMany({
+      where: relatedLeadThreadWhere,
       select: {
         totalCrc: true,
         leadThread: {

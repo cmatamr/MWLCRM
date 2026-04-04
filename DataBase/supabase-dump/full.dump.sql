@@ -4,7 +4,7 @@ SET session_replication_role = replica;
 -- PostgreSQL database dump
 --
 
--- \restrict 8C0oRCtAZaxl200kbRn5Y7OlNEq53jGgfP9zb8ELVVsPsYJKmAca9asxKErmMdR
+-- \restrict tMWt94PnClgl4ljuPDIeOhbaSHUhqJ5gc1m1eN25sJpNnbQycWt9nsd3Th5jCg8
 
 -- Dumped from database version 17.6
 -- Dumped by pg_dump version 17.6
@@ -212,9 +212,9 @@ COPY "public"."contacts" ("id", "primary_channel", "external_id", "display_name"
 -- Data for Name: lead_threads; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY "public"."lead_threads" ("id", "lead_thread_key", "channel", "mode", "owner", "ai_lock_until", "last_customer_ts", "last_human_ts", "last_ai_ts", "lead_stage", "lead_score", "created_at", "updated_at", "contact_id") FROM stdin;
-68f01174-621c-4a28-9401-98e1e14b631a	+50688928728	wa	ai	karol	\N	2026-03-31 04:20:51+00	\N	\N	new	0	2026-03-26 03:39:49.016827+00	2026-03-31 04:21:03.323927+00	380b34f3-8a87-4455-8dec-1e31570403fa
-ca6e26a1-147c-498a-8bf5-b0f83c4df99f	+50684732111	wa	ai	karol	\N	2026-03-28 22:07:04+00	\N	\N	new	0	2026-03-26 04:29:45.569294+00	2026-03-28 22:07:11.48014+00	28c8f937-9baa-4bc0-9e68-fa11031eb9fe
+COPY "public"."lead_threads" ("id", "lead_thread_key", "channel", "mode", "owner", "ai_lock_until", "last_customer_ts", "last_human_ts", "last_ai_ts", "lead_stage", "lead_score", "created_at", "updated_at", "contact_id", "stage_confidence", "stage_source", "stage_locked", "stage_lock_reason", "last_agent_assessment_at", "last_human_override_at", "intent_level", "requirement_clarity", "quote_readiness", "abandonment_risk", "budget_status", "urgency_level", "stage_reason", "stage_evidence") FROM stdin;
+68f01174-621c-4a28-9401-98e1e14b631a	+50688928728	wa	ai	karol	\N	2026-03-31 04:20:51+00	\N	\N	new	0	2026-03-26 03:39:49.016827+00	2026-03-31 04:21:03.323927+00	380b34f3-8a87-4455-8dec-1e31570403fa	\N	system	f	\N	\N	\N	\N	\N	\N	\N	\N	\N	\N	{}
+ca6e26a1-147c-498a-8bf5-b0f83c4df99f	+50684732111	wa	ai	karol	\N	2026-03-28 22:07:04+00	\N	\N	new	0	2026-03-26 04:29:45.569294+00	2026-03-28 22:07:11.48014+00	28c8f937-9baa-4bc0-9e68-fa11031eb9fe	\N	system	f	\N	\N	\N	\N	\N	\N	\N	\N	\N	\N	{}
 \.
 
 
@@ -247,7 +247,7 @@ fbfdc154-9e2f-417c-bb37-9f20771e748f	Banco Promerica	PROMERICA	t	2026-04-02 08:5
 -- Data for Name: campaigns; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY "public"."campaigns" ("id", "name", "platform", "objective", "start_date", "end_date", "created_at") FROM stdin;
+COPY "public"."campaigns" ("id", "name", "platform", "objective", "start_date", "end_date", "created_at", "meta_campaign_id", "status", "updated_at") FROM stdin;
 \.
 
 
@@ -263,7 +263,7 @@ COPY "public"."campaign_attribution" ("id", "lead_thread_id", "source", "campaig
 -- Data for Name: campaign_spend; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY "public"."campaign_spend" ("id", "campaign_id", "date", "amount_crc", "created_at") FROM stdin;
+COPY "public"."campaign_spend" ("id", "campaign_id", "date", "amount_crc", "created_at", "impressions", "clicks", "cpc", "ctr") FROM stdin;
 \.
 
 
@@ -279,7 +279,7 @@ COPY "public"."messages" ("id", "lead_thread_id", "sender_type", "text", "attach
 -- Data for Name: conversation_objections; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY "public"."conversation_objections" ("id", "lead_thread_id", "message_id", "objection_type", "objection_subtype", "detected_from", "confidence", "created_at", "resolved_at") FROM stdin;
+COPY "public"."conversation_objections" ("id", "lead_thread_id", "message_id", "objection_type", "objection_subtype", "detected_from", "confidence", "created_at", "resolved_at", "status", "severity", "detected_by", "evidence_excerpt", "evidence_json", "resolved_by", "resolution_notes") FROM stdin;
 \.
 
 
@@ -308,10 +308,18 @@ COPY "public"."followups" ("id", "lead_thread_id", "due_at", "status", "attempt"
 
 
 --
+-- Data for Name: lead_agent_assessments; Type: TABLE DATA; Schema: public; Owner: postgres
+--
+
+COPY "public"."lead_agent_assessments" ("id", "lead_thread_id", "message_id", "proposed_stage", "confidence", "lead_score", "intent_level", "requirement_clarity", "quote_readiness", "abandonment_risk", "budget_status", "urgency_level", "should_advance", "should_hold", "should_fallback", "rationale_text", "evidence_excerpt", "rationale_json", "evidence_json", "model_name", "created_at") FROM stdin;
+\.
+
+
+--
 -- Data for Name: funnel_stage_history; Type: TABLE DATA; Schema: public; Owner: postgres
 --
 
-COPY "public"."funnel_stage_history" ("id", "lead_thread_id", "stage", "entered_at", "exited_at", "duration_seconds", "reason", "created_at") FROM stdin;
+COPY "public"."funnel_stage_history" ("id", "lead_thread_id", "stage", "entered_at", "exited_at", "duration_seconds", "reason", "created_at", "from_stage", "to_stage", "source", "confidence", "changed_by", "message_id", "assessment_id", "evidence_excerpt", "evidence_json") FROM stdin;
 \.
 
 
@@ -330,6 +338,7 @@ payment_methods	\N	["SINPE Móvil", "transferencia bancaria"]	2026-03-07 21:53:3
 delivery_methods	\N	["retiro", "Correos de Costa Rica"]	2026-03-07 21:53:30.778634
 bag_name_personalization_policy	Se puede incluir nombre individual por invitado sin costo adicional en la línea de bolsos actualizada.	{"free_individual_name": true}	2026-03-07 21:53:30.778634
 bag_design_adjustment_policy	Incluye 1 ajuste de diseño sin costo. Cambios adicionales pueden generar costo extra.	{"included_adjustments": 1, "additional_changes_may_have_cost": true}	2026-03-07 21:53:30.778634
+funnel_rules	\N	{"stale_hours_new": 24, "stale_hours_quote": 72, "allow_agent_auto_won": false, "allow_agent_auto_lost": false, "stale_hours_qualified": 48, "min_confidence_auto_lost": 0.90, "min_confidence_auto_stage": 0.75, "allow_agent_move_if_stage_locked": false}	2026-04-03 05:29:10.880142
 \.
 
 
@@ -713,9 +722,9 @@ COPY "public"."n8n_chat_histories" ("id", "session_id", "message") FROM stdin;
 
 COPY "public"."orders" ("id", "lead_thread_id", "status_legacy", "payment_status", "currency", "subtotal_crc", "total_crc", "source", "notes", "created_at", "updated_at", "contact_id", "status", "delivery_date") FROM stdin;
 8a49360d-9a47-46bf-b045-3e75c68644b7	68f01174-621c-4a28-9401-98e1e14b631a	pending_payment	pending_validation	CRC	19650	19650	CRM	\N	2026-04-01 04:20:24.604+00	2026-04-01 15:10:40.835311+00	380b34f3-8a87-4455-8dec-1e31570403fa	pending_payment	\N
-5ecf3af5-bf0d-40d6-b9bc-77cf8cec5a11	68f01174-621c-4a28-9401-98e1e14b631a	draft	pending_validation	CRC	22000	22000	nova	\N	2026-03-31 02:33:10.07105+00	2026-04-01 21:17:08.531514+00	380b34f3-8a87-4455-8dec-1e31570403fa	draft	2026-04-20
 d96a8f38-c38b-489e-80b3-b63f8bcb4560	68f01174-621c-4a28-9401-98e1e14b631a	draft	validated	CRC	36900	36900	nova	null	2026-03-26 03:47:39.162961+00	2026-04-01 21:20:23.300855+00	380b34f3-8a87-4455-8dec-1e31570403fa	in_production	2026-04-20
 8e5e6151-04fc-4c84-a566-e396580ec032	68f01174-621c-4a28-9401-98e1e14b631a	pending_payment	pending_validation	CRC	3200	3200	CRM	\N	2026-04-02 02:39:52.327+00	2026-04-02 02:40:29.064738+00	380b34f3-8a87-4455-8dec-1e31570403fa	pending_payment	\N
+5ecf3af5-bf0d-40d6-b9bc-77cf8cec5a11	68f01174-621c-4a28-9401-98e1e14b631a	draft	validated	CRC	22000	22000	nova	\N	2026-03-31 02:33:10.07105+00	2026-04-03 03:44:28.42556+00	380b34f3-8a87-4455-8dec-1e31570403fa	in_production	2026-04-20
 \.
 
 
@@ -725,6 +734,7 @@ d96a8f38-c38b-489e-80b3-b63f8bcb4560	68f01174-621c-4a28-9401-98e1e14b631a	draft	
 
 COPY "public"."order_activity" ("id", "order_id", "type", "content", "metadata", "created_at", "created_by") FROM stdin;
 5d3eb719-aee7-4de1-b1eb-06dd1b7264d3	8a49360d-9a47-46bf-b045-3e75c68644b7	note	nota de prueba ahora editada	\N	2026-04-02 06:43:24.6+00	\N
+f9607221-e710-42ad-a62f-3696b3bc4540	5ecf3af5-bf0d-40d6-b9bc-77cf8cec5a11	payment_validation	Payment receipt validated.	{"status": "validated", "receiptId": "4f88d614-b2d7-419e-b4ab-3fec933284dc", "validatedBy": "CRM"}	2026-04-03 03:44:28.535+00	CRM
 \.
 
 
@@ -750,7 +760,7 @@ COPY "public"."order_items" ("id", "order_id", "product_id", "quantity", "unit_p
 --
 
 COPY "public"."payment_receipts" ("id", "order_id", "message_id", "receipt_key", "status", "bank", "transfer_type", "amount_text", "currency", "reference", "sender_name", "recipient_name", "destination_phone", "receipt_date", "receipt_time", "created_at", "updated_at", "raw_payload", "amount_crc", "source", "internal_notes", "validated_at", "validated_by", "deleted_at", "deleted_by", "bank_id") FROM stdin;
-4f88d614-b2d7-419e-b4ab-3fec933284dc	5ecf3af5-bf0d-40d6-b9bc-77cf8cec5a11	\N	ycloud:69cb4ba53a48151462cda978	pending_validation	BAC	SINPE Móvil	₡9,000.00	CRC	\N	SANDRA VERONICA AGUILAR GALDAMEZ	KAROL ANDREA BOLAÑOS MENESES	88131053	2026-02-27	14:17	2026-03-31 04:34:01.546918+00	2026-04-02 07:46:31.996394+00	{}	9000	automation	\N	\N	\N	\N	\N	\N
+4f88d614-b2d7-419e-b4ab-3fec933284dc	5ecf3af5-bf0d-40d6-b9bc-77cf8cec5a11	\N	ycloud:69cb4ba53a48151462cda978	validated	BAC	SINPE Móvil	₡9,000.00	CRC	\N	SANDRA VERONICA AGUILAR GALDAMEZ	KAROL ANDREA BOLAÑOS MENESES	88131053	2026-02-27	14:17	2026-03-31 04:34:01.546918+00	2026-04-03 03:44:28.42556+00	{}	9000	automation	\N	2026-04-03 03:44:28.442+00	CRM	\N	\N	\N
 \.
 
 
@@ -897,7 +907,7 @@ SELECT pg_catalog.setval('"public"."order_items_id_seq"', 13, true);
 -- PostgreSQL database dump complete
 --
 
--- \unrestrict 8C0oRCtAZaxl200kbRn5Y7OlNEq53jGgfP9zb8ELVVsPsYJKmAca9asxKErmMdR
+-- \unrestrict tMWt94PnClgl4ljuPDIeOhbaSHUhqJ5gc1m1eN25sJpNnbQycWt9nsd3Th5jCg8
 
 RESET ALL;
 
@@ -994,6 +1004,17 @@ CREATE TYPE "public"."alert_status_type" AS ENUM (
 ALTER TYPE "public"."alert_status_type" OWNER TO "postgres";
 
 
+CREATE TYPE "public"."budget_status_enum" AS ENUM (
+    'unknown',
+    'mentioned',
+    'constrained',
+    'aligned'
+);
+
+
+ALTER TYPE "public"."budget_status_enum" OWNER TO "postgres";
+
+
 CREATE TYPE "public"."channel_type" AS ENUM (
     'wa',
     'ig',
@@ -1002,6 +1023,16 @@ CREATE TYPE "public"."channel_type" AS ENUM (
 
 
 ALTER TYPE "public"."channel_type" OWNER TO "postgres";
+
+
+CREATE TYPE "public"."clarity_level_enum" AS ENUM (
+    'none',
+    'partial',
+    'clear'
+);
+
+
+ALTER TYPE "public"."clarity_level_enum" OWNER TO "postgres";
 
 
 CREATE TYPE "public"."followup_status_type" AS ENUM (
@@ -1015,6 +1046,16 @@ CREATE TYPE "public"."followup_status_type" AS ENUM (
 ALTER TYPE "public"."followup_status_type" OWNER TO "postgres";
 
 
+CREATE TYPE "public"."funnel_stage_source_enum" AS ENUM (
+    'agent',
+    'human',
+    'system'
+);
+
+
+ALTER TYPE "public"."funnel_stage_source_enum" OWNER TO "postgres";
+
+
 CREATE TYPE "public"."lead_stage_type" AS ENUM (
     'new',
     'qualified',
@@ -1025,6 +1066,26 @@ CREATE TYPE "public"."lead_stage_type" AS ENUM (
 
 
 ALTER TYPE "public"."lead_stage_type" OWNER TO "postgres";
+
+
+CREATE TYPE "public"."objection_severity_enum" AS ENUM (
+    'low',
+    'medium',
+    'high'
+);
+
+
+ALTER TYPE "public"."objection_severity_enum" OWNER TO "postgres";
+
+
+CREATE TYPE "public"."objection_status_enum" AS ENUM (
+    'active',
+    'resolved',
+    'ignored'
+);
+
+
+ALTER TYPE "public"."objection_status_enum" OWNER TO "postgres";
 
 
 CREATE TYPE "public"."order_status_enum" AS ENUM (
@@ -1075,6 +1136,37 @@ CREATE TYPE "public"."provider_type" AS ENUM (
 ALTER TYPE "public"."provider_type" OWNER TO "postgres";
 
 
+CREATE TYPE "public"."qualification_level_enum" AS ENUM (
+    'none',
+    'low',
+    'medium',
+    'high'
+);
+
+
+ALTER TYPE "public"."qualification_level_enum" OWNER TO "postgres";
+
+
+CREATE TYPE "public"."quote_readiness_enum" AS ENUM (
+    'no',
+    'partial',
+    'yes'
+);
+
+
+ALTER TYPE "public"."quote_readiness_enum" OWNER TO "postgres";
+
+
+CREATE TYPE "public"."risk_level_enum" AS ENUM (
+    'low',
+    'medium',
+    'high'
+);
+
+
+ALTER TYPE "public"."risk_level_enum" OWNER TO "postgres";
+
+
 CREATE TYPE "public"."sender_type" AS ENUM (
     'customer',
     'human',
@@ -1084,6 +1176,105 @@ CREATE TYPE "public"."sender_type" AS ENUM (
 
 
 ALTER TYPE "public"."sender_type" OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."apply_funnel_stage_transition"("p_lead_thread_id" "uuid", "p_to_stage" "public"."lead_stage_type", "p_source" "public"."funnel_stage_source_enum", "p_confidence" numeric, "p_reason" "text", "p_changed_by" "text" DEFAULT NULL::"text", "p_message_id" "uuid" DEFAULT NULL::"uuid", "p_assessment_id" "uuid" DEFAULT NULL::"uuid", "p_evidence_excerpt" "text" DEFAULT NULL::"text", "p_evidence_json" "jsonb" DEFAULT '{}'::"jsonb") RETURNS "void"
+    LANGUAGE "plpgsql"
+    AS $$
+DECLARE
+  v_current_stage public.lead_stage_type;
+  v_stage_locked boolean;
+BEGIN
+  SELECT lead_stage, stage_locked
+  INTO v_current_stage, v_stage_locked
+  FROM public.lead_threads
+  WHERE id = p_lead_thread_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'lead_thread % no existe', p_lead_thread_id;
+  END IF;
+
+  IF v_stage_locked = true AND p_source <> 'human' THEN
+    RAISE EXCEPTION 'lead_thread % tiene la etapa bloqueada manualmente', p_lead_thread_id;
+  END IF;
+
+  IF v_current_stage = p_to_stage THEN
+    RETURN;
+  END IF;
+
+  UPDATE public.funnel_stage_history
+  SET
+    exited_at = now(),
+    duration_seconds = EXTRACT(EPOCH FROM (now() - entered_at))::integer
+  WHERE lead_thread_id = p_lead_thread_id
+    AND exited_at IS NULL;
+
+  UPDATE public.lead_threads
+  SET
+    lead_stage = p_to_stage,
+    stage_source = p_source,
+    stage_confidence = p_confidence,
+    stage_reason = p_reason,
+    stage_evidence = COALESCE(p_evidence_json, '{}'::jsonb),
+    updated_at = now(),
+    last_agent_assessment_at = CASE WHEN p_source = 'agent' THEN now() ELSE last_agent_assessment_at END,
+    last_human_override_at = CASE WHEN p_source = 'human' THEN now() ELSE last_human_override_at END
+  WHERE id = p_lead_thread_id;
+
+  INSERT INTO public.funnel_stage_history (
+    lead_thread_id,
+    stage,
+    from_stage,
+    to_stage,
+    entered_at,
+    reason,
+    source,
+    confidence,
+    changed_by,
+    message_id,
+    assessment_id,
+    evidence_excerpt,
+    evidence_json
+  )
+  VALUES (
+    p_lead_thread_id,
+    p_to_stage::text,
+    v_current_stage,
+    p_to_stage,
+    now(),
+    p_reason,
+    p_source,
+    p_confidence,
+    p_changed_by,
+    p_message_id,
+    p_assessment_id,
+    p_evidence_excerpt,
+    COALESCE(p_evidence_json, '{}'::jsonb)
+  );
+END;
+$$;
+
+
+ALTER FUNCTION "public"."apply_funnel_stage_transition"("p_lead_thread_id" "uuid", "p_to_stage" "public"."lead_stage_type", "p_source" "public"."funnel_stage_source_enum", "p_confidence" numeric, "p_reason" "text", "p_changed_by" "text", "p_message_id" "uuid", "p_assessment_id" "uuid", "p_evidence_excerpt" "text", "p_evidence_json" "jsonb") OWNER TO "postgres";
+
+
+CREATE OR REPLACE FUNCTION "public"."is_funnel_transition_allowed"("p_from_stage" "public"."lead_stage_type", "p_to_stage" "public"."lead_stage_type") RETURNS boolean
+    LANGUAGE "sql" IMMUTABLE
+    AS $$
+  SELECT CASE
+    WHEN p_from_stage = p_to_stage THEN true
+    WHEN p_from_stage = 'new' AND p_to_stage IN ('qualified', 'lost') THEN true
+    WHEN p_from_stage = 'qualified' AND p_to_stage IN ('new', 'quote', 'lost') THEN true
+    WHEN p_from_stage = 'quote' AND p_to_stage IN ('qualified', 'won', 'lost') THEN true
+    WHEN p_from_stage = 'won' AND p_to_stage IN ('quote') THEN true
+    WHEN p_from_stage = 'lost' AND p_to_stage IN ('new', 'qualified') THEN true
+    ELSE false
+  END;
+$$;
+
+
+ALTER FUNCTION "public"."is_funnel_transition_allowed"("p_from_stage" "public"."lead_stage_type", "p_to_stage" "public"."lead_stage_type") OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."mwl_normalize_search_text"("input_text" "text") RETURNS "text"
@@ -1318,6 +1509,24 @@ $$;
 
 ALTER FUNCTION "public"."set_updated_at"() OWNER TO "postgres";
 
+
+CREATE OR REPLACE FUNCTION "public"."validate_lead_stage_transition"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.lead_stage IS DISTINCT FROM OLD.lead_stage THEN
+    IF NOT public.is_funnel_transition_allowed(OLD.lead_stage, NEW.lead_stage) THEN
+      RAISE EXCEPTION 'Transicion no permitida de % a %', OLD.lead_stage, NEW.lead_stage;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."validate_lead_stage_transition"() OWNER TO "postgres";
+
 SET default_tablespace = '';
 
 SET default_table_access_method = "heap";
@@ -1372,7 +1581,11 @@ CREATE TABLE IF NOT EXISTS "public"."campaign_spend" (
     "campaign_id" "uuid",
     "date" "date" NOT NULL,
     "amount_crc" numeric(12,2) NOT NULL,
-    "created_at" timestamp with time zone DEFAULT "now"()
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "impressions" integer,
+    "clicks" integer,
+    "cpc" numeric(10,2),
+    "ctr" numeric(5,2)
 );
 
 
@@ -1386,7 +1599,10 @@ CREATE TABLE IF NOT EXISTS "public"."campaigns" (
     "objective" "text",
     "start_date" "date",
     "end_date" "date",
-    "created_at" timestamp with time zone DEFAULT "now"()
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "meta_campaign_id" "text",
+    "status" "text" DEFAULT 'active'::"text",
+    "updated_at" timestamp with time zone DEFAULT "now"()
 );
 
 
@@ -1450,6 +1666,94 @@ CREATE OR REPLACE VIEW "public"."campaign_kpi" WITH ("security_invoker"='on') AS
 ALTER VIEW "public"."campaign_kpi" OWNER TO "postgres";
 
 
+CREATE OR REPLACE VIEW "public"."campaign_kpi_extended" AS
+ SELECT "c"."id",
+    "c"."name",
+    "k"."total_spend",
+    "k"."leads",
+    "k"."orders",
+    "k"."revenue",
+        CASE
+            WHEN ("k"."total_spend" > (0)::numeric) THEN (("k"."revenue")::numeric / "k"."total_spend")
+            ELSE (0)::numeric
+        END AS "roas",
+        CASE
+            WHEN ("k"."leads" > 0) THEN (("k"."orders")::numeric / ("k"."leads")::numeric)
+            ELSE (0)::numeric
+        END AS "conversion_rate",
+        CASE
+            WHEN ("k"."orders" > 0) THEN ("k"."revenue" / "k"."orders")
+            ELSE (0)::bigint
+        END AS "avg_ticket"
+   FROM ("public"."campaigns" "c"
+     LEFT JOIN "public"."campaign_kpi" "k" ON (("k"."id" = "c"."id")));
+
+
+ALTER VIEW "public"."campaign_kpi_extended" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."lead_threads" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "lead_thread_key" "text" NOT NULL,
+    "channel" "public"."channel_type" NOT NULL,
+    "mode" "text" DEFAULT 'ai'::"text" NOT NULL,
+    "owner" "text" DEFAULT 'karol'::"text" NOT NULL,
+    "ai_lock_until" timestamp with time zone,
+    "last_customer_ts" timestamp with time zone,
+    "last_human_ts" timestamp with time zone,
+    "last_ai_ts" timestamp with time zone,
+    "lead_stage" "public"."lead_stage_type" DEFAULT 'new'::"public"."lead_stage_type" NOT NULL,
+    "lead_score" integer DEFAULT 0 NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "contact_id" "uuid",
+    "stage_confidence" numeric(4,3),
+    "stage_source" "public"."funnel_stage_source_enum" DEFAULT 'system'::"public"."funnel_stage_source_enum" NOT NULL,
+    "stage_locked" boolean DEFAULT false NOT NULL,
+    "stage_lock_reason" "text",
+    "last_agent_assessment_at" timestamp with time zone,
+    "last_human_override_at" timestamp with time zone,
+    "intent_level" "public"."qualification_level_enum",
+    "requirement_clarity" "public"."clarity_level_enum",
+    "quote_readiness" "public"."quote_readiness_enum",
+    "abandonment_risk" "public"."risk_level_enum",
+    "budget_status" "public"."budget_status_enum",
+    "urgency_level" "public"."qualification_level_enum",
+    "stage_reason" "text",
+    "stage_evidence" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    CONSTRAINT "lead_threads_stage_confidence_chk" CHECK ((("stage_confidence" IS NULL) OR (("stage_confidence" >= (0)::numeric) AND ("stage_confidence" <= (1)::numeric))))
+);
+
+
+ALTER TABLE "public"."lead_threads" OWNER TO "postgres";
+
+
+CREATE OR REPLACE VIEW "public"."campaign_lead_quality" AS
+ SELECT "ca"."campaign_uuid" AS "campaign_id",
+    "count"(DISTINCT "lt"."id") AS "total_leads",
+    "count"(DISTINCT
+        CASE
+            WHEN ("lt"."lead_stage" <> 'new'::"public"."lead_stage_type") THEN "lt"."id"
+            ELSE NULL::"uuid"
+        END) AS "progressed_leads",
+    "count"(DISTINCT
+        CASE
+            WHEN ("lt"."lead_stage" = 'qualified'::"public"."lead_stage_type") THEN "lt"."id"
+            ELSE NULL::"uuid"
+        END) AS "qualified_leads",
+    "count"(DISTINCT
+        CASE
+            WHEN ("lt"."lead_stage" = 'won'::"public"."lead_stage_type") THEN "lt"."id"
+            ELSE NULL::"uuid"
+        END) AS "won_leads"
+   FROM ("public"."campaign_attribution" "ca"
+     JOIN "public"."lead_threads" "lt" ON (("lt"."id" = "ca"."lead_thread_id")))
+  GROUP BY "ca"."campaign_uuid";
+
+
+ALTER VIEW "public"."campaign_lead_quality" OWNER TO "postgres";
+
+
 CREATE TABLE IF NOT EXISTS "public"."contacts" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "primary_channel" "public"."channel_type" NOT NULL,
@@ -1477,7 +1781,15 @@ CREATE TABLE IF NOT EXISTS "public"."conversation_objections" (
     "detected_from" "text",
     "confidence" numeric(3,2),
     "created_at" timestamp with time zone DEFAULT "now"(),
-    "resolved_at" timestamp with time zone
+    "resolved_at" timestamp with time zone,
+    "status" "public"."objection_status_enum" DEFAULT 'active'::"public"."objection_status_enum" NOT NULL,
+    "severity" "public"."objection_severity_enum" DEFAULT 'medium'::"public"."objection_severity_enum" NOT NULL,
+    "detected_by" "public"."funnel_stage_source_enum" DEFAULT 'agent'::"public"."funnel_stage_source_enum" NOT NULL,
+    "evidence_excerpt" "text",
+    "evidence_json" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "resolved_by" "text",
+    "resolution_notes" "text",
+    CONSTRAINT "conversation_objections_confidence_chk" CHECK ((("confidence" IS NULL) OR (("confidence" >= (0)::numeric) AND ("confidence" <= (1)::numeric))))
 );
 
 
@@ -1492,27 +1804,6 @@ CREATE TABLE IF NOT EXISTS "public"."conversation_state" (
 
 
 ALTER TABLE "public"."conversation_state" OWNER TO "postgres";
-
-
-CREATE TABLE IF NOT EXISTS "public"."lead_threads" (
-    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
-    "lead_thread_key" "text" NOT NULL,
-    "channel" "public"."channel_type" NOT NULL,
-    "mode" "text" DEFAULT 'ai'::"text" NOT NULL,
-    "owner" "text" DEFAULT 'karol'::"text" NOT NULL,
-    "ai_lock_until" timestamp with time zone,
-    "last_customer_ts" timestamp with time zone,
-    "last_human_ts" timestamp with time zone,
-    "last_ai_ts" timestamp with time zone,
-    "lead_stage" "public"."lead_stage_type" DEFAULT 'new'::"public"."lead_stage_type" NOT NULL,
-    "lead_score" integer DEFAULT 0 NOT NULL,
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL,
-    "contact_id" "uuid"
-);
-
-
-ALTER TABLE "public"."lead_threads" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."messages" (
@@ -1611,11 +1902,51 @@ CREATE TABLE IF NOT EXISTS "public"."funnel_stage_history" (
     "exited_at" timestamp with time zone,
     "duration_seconds" integer,
     "reason" "text",
-    "created_at" timestamp with time zone DEFAULT "now"()
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "from_stage" "public"."lead_stage_type",
+    "to_stage" "public"."lead_stage_type",
+    "source" "public"."funnel_stage_source_enum" DEFAULT 'system'::"public"."funnel_stage_source_enum" NOT NULL,
+    "confidence" numeric(4,3),
+    "changed_by" "text",
+    "message_id" "uuid",
+    "assessment_id" "uuid",
+    "evidence_excerpt" "text",
+    "evidence_json" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    CONSTRAINT "funnel_stage_history_confidence_chk" CHECK ((("confidence" IS NULL) OR (("confidence" >= (0)::numeric) AND ("confidence" <= (1)::numeric))))
 );
 
 
 ALTER TABLE "public"."funnel_stage_history" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."lead_agent_assessments" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "lead_thread_id" "uuid" NOT NULL,
+    "message_id" "uuid",
+    "proposed_stage" "public"."lead_stage_type" NOT NULL,
+    "confidence" numeric(4,3) NOT NULL,
+    "lead_score" integer DEFAULT 0 NOT NULL,
+    "intent_level" "public"."qualification_level_enum",
+    "requirement_clarity" "public"."clarity_level_enum",
+    "quote_readiness" "public"."quote_readiness_enum",
+    "abandonment_risk" "public"."risk_level_enum",
+    "budget_status" "public"."budget_status_enum",
+    "urgency_level" "public"."qualification_level_enum",
+    "should_advance" boolean DEFAULT false NOT NULL,
+    "should_hold" boolean DEFAULT true NOT NULL,
+    "should_fallback" boolean DEFAULT false NOT NULL,
+    "rationale_text" "text",
+    "evidence_excerpt" "text",
+    "rationale_json" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "evidence_json" "jsonb" DEFAULT '{}'::"jsonb" NOT NULL,
+    "model_name" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    CONSTRAINT "lead_agent_assessments_confidence_chk" CHECK ((("confidence" >= (0)::numeric) AND ("confidence" <= (1)::numeric))),
+    CONSTRAINT "lead_agent_assessments_score_chk" CHECK ((("lead_score" >= 0) AND ("lead_score" <= 100)))
+);
+
+
+ALTER TABLE "public"."lead_agent_assessments" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."mwl_business_policies" (
@@ -2265,6 +2596,11 @@ ALTER TABLE ONLY "public"."funnel_stage_history"
 
 
 
+ALTER TABLE ONLY "public"."lead_agent_assessments"
+    ADD CONSTRAINT "lead_agent_assessments_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."lead_threads"
     ADD CONSTRAINT "lead_threads_lead_thread_key_key" UNIQUE ("lead_thread_key");
 
@@ -2430,6 +2766,58 @@ CREATE INDEX "followups_conversation_idx" ON "public"."followups" USING "btree" 
 
 
 CREATE INDEX "followups_due_idx" ON "public"."followups" USING "btree" ("status", "due_at");
+
+
+
+CREATE INDEX "idx_conversation_objections_severity" ON "public"."conversation_objections" USING "btree" ("severity", "status");
+
+
+
+CREATE INDEX "idx_conversation_objections_thread_status" ON "public"."conversation_objections" USING "btree" ("lead_thread_id", "status", "created_at" DESC);
+
+
+
+CREATE INDEX "idx_conversation_objections_type" ON "public"."conversation_objections" USING "btree" ("objection_type", "objection_subtype");
+
+
+
+CREATE INDEX "idx_funnel_stage_history_assessment" ON "public"."funnel_stage_history" USING "btree" ("assessment_id");
+
+
+
+CREATE INDEX "idx_funnel_stage_history_thread_entered" ON "public"."funnel_stage_history" USING "btree" ("lead_thread_id", "entered_at" DESC);
+
+
+
+CREATE INDEX "idx_funnel_stage_history_to_stage" ON "public"."funnel_stage_history" USING "btree" ("to_stage", "entered_at" DESC);
+
+
+
+CREATE INDEX "idx_lead_agent_assessments_message" ON "public"."lead_agent_assessments" USING "btree" ("message_id");
+
+
+
+CREATE INDEX "idx_lead_agent_assessments_stage" ON "public"."lead_agent_assessments" USING "btree" ("proposed_stage", "created_at" DESC);
+
+
+
+CREATE INDEX "idx_lead_agent_assessments_thread_created" ON "public"."lead_agent_assessments" USING "btree" ("lead_thread_id", "created_at" DESC);
+
+
+
+CREATE INDEX "idx_lead_threads_abandonment_risk" ON "public"."lead_threads" USING "btree" ("abandonment_risk");
+
+
+
+CREATE INDEX "idx_lead_threads_quote_readiness" ON "public"."lead_threads" USING "btree" ("quote_readiness");
+
+
+
+CREATE INDEX "idx_lead_threads_stage_locked" ON "public"."lead_threads" USING "btree" ("stage_locked");
+
+
+
+CREATE INDEX "idx_lead_threads_stage_source" ON "public"."lead_threads" USING "btree" ("stage_source");
 
 
 
@@ -2661,6 +3049,10 @@ CREATE OR REPLACE TRIGGER "trg_payment_receipts_updated_at" BEFORE UPDATE ON "pu
 
 
 
+CREATE OR REPLACE TRIGGER "trg_validate_lead_stage_transition" BEFORE UPDATE ON "public"."lead_threads" FOR EACH ROW EXECUTE FUNCTION "public"."validate_lead_stage_transition"();
+
+
+
 ALTER TABLE ONLY "public"."alerts"
     ADD CONSTRAINT "alerts_lead_thread_id_fkey" FOREIGN KEY ("lead_thread_id") REFERENCES "public"."lead_threads"("id") ON DELETE SET NULL;
 
@@ -2702,7 +3094,27 @@ ALTER TABLE ONLY "public"."followups"
 
 
 ALTER TABLE ONLY "public"."funnel_stage_history"
+    ADD CONSTRAINT "funnel_stage_history_assessment_id_fkey" FOREIGN KEY ("assessment_id") REFERENCES "public"."lead_agent_assessments"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."funnel_stage_history"
     ADD CONSTRAINT "funnel_stage_history_lead_thread_id_fkey" FOREIGN KEY ("lead_thread_id") REFERENCES "public"."lead_threads"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."funnel_stage_history"
+    ADD CONSTRAINT "funnel_stage_history_message_id_fkey" FOREIGN KEY ("message_id") REFERENCES "public"."messages"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."lead_agent_assessments"
+    ADD CONSTRAINT "lead_agent_assessments_lead_thread_id_fkey" FOREIGN KEY ("lead_thread_id") REFERENCES "public"."lead_threads"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE ONLY "public"."lead_agent_assessments"
+    ADD CONSTRAINT "lead_agent_assessments_message_id_fkey" FOREIGN KEY ("message_id") REFERENCES "public"."messages"("id") ON DELETE SET NULL;
 
 
 
@@ -2812,6 +3224,9 @@ ALTER TABLE "public"."followups" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."funnel_stage_history" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."lead_agent_assessments" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."lead_threads" ENABLE ROW LEVEL SECURITY;
@@ -3047,6 +3462,12 @@ GRANT ALL ON FUNCTION "public"."gtrgm_out"("public"."gtrgm") TO "service_role";
 
 
 
+GRANT ALL ON FUNCTION "public"."apply_funnel_stage_transition"("p_lead_thread_id" "uuid", "p_to_stage" "public"."lead_stage_type", "p_source" "public"."funnel_stage_source_enum", "p_confidence" numeric, "p_reason" "text", "p_changed_by" "text", "p_message_id" "uuid", "p_assessment_id" "uuid", "p_evidence_excerpt" "text", "p_evidence_json" "jsonb") TO "anon";
+GRANT ALL ON FUNCTION "public"."apply_funnel_stage_transition"("p_lead_thread_id" "uuid", "p_to_stage" "public"."lead_stage_type", "p_source" "public"."funnel_stage_source_enum", "p_confidence" numeric, "p_reason" "text", "p_changed_by" "text", "p_message_id" "uuid", "p_assessment_id" "uuid", "p_evidence_excerpt" "text", "p_evidence_json" "jsonb") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."apply_funnel_stage_transition"("p_lead_thread_id" "uuid", "p_to_stage" "public"."lead_stage_type", "p_source" "public"."funnel_stage_source_enum", "p_confidence" numeric, "p_reason" "text", "p_changed_by" "text", "p_message_id" "uuid", "p_assessment_id" "uuid", "p_evidence_excerpt" "text", "p_evidence_json" "jsonb") TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."gin_extract_query_trgm"("text", "internal", smallint, "internal", "internal", "internal", "internal") TO "postgres";
 GRANT ALL ON FUNCTION "public"."gin_extract_query_trgm"("text", "internal", smallint, "internal", "internal", "internal", "internal") TO "anon";
 GRANT ALL ON FUNCTION "public"."gin_extract_query_trgm"("text", "internal", smallint, "internal", "internal", "internal", "internal") TO "authenticated";
@@ -3135,6 +3556,12 @@ GRANT ALL ON FUNCTION "public"."gtrgm_union"("internal", "internal") TO "postgre
 GRANT ALL ON FUNCTION "public"."gtrgm_union"("internal", "internal") TO "anon";
 GRANT ALL ON FUNCTION "public"."gtrgm_union"("internal", "internal") TO "authenticated";
 GRANT ALL ON FUNCTION "public"."gtrgm_union"("internal", "internal") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."is_funnel_transition_allowed"("p_from_stage" "public"."lead_stage_type", "p_to_stage" "public"."lead_stage_type") TO "anon";
+GRANT ALL ON FUNCTION "public"."is_funnel_transition_allowed"("p_from_stage" "public"."lead_stage_type", "p_to_stage" "public"."lead_stage_type") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."is_funnel_transition_allowed"("p_from_stage" "public"."lead_stage_type", "p_to_stage" "public"."lead_stage_type") TO "service_role";
 
 
 
@@ -3251,6 +3678,12 @@ GRANT ALL ON FUNCTION "public"."strict_word_similarity_op"("text", "text") TO "s
 
 
 
+GRANT ALL ON FUNCTION "public"."validate_lead_stage_transition"() TO "anon";
+GRANT ALL ON FUNCTION "public"."validate_lead_stage_transition"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."validate_lead_stage_transition"() TO "service_role";
+
+
+
 GRANT ALL ON FUNCTION "public"."word_similarity"("text", "text") TO "postgres";
 GRANT ALL ON FUNCTION "public"."word_similarity"("text", "text") TO "anon";
 GRANT ALL ON FUNCTION "public"."word_similarity"("text", "text") TO "authenticated";
@@ -3343,6 +3776,24 @@ GRANT ALL ON TABLE "public"."campaign_kpi" TO "service_role";
 
 
 
+GRANT ALL ON TABLE "public"."campaign_kpi_extended" TO "anon";
+GRANT ALL ON TABLE "public"."campaign_kpi_extended" TO "authenticated";
+GRANT ALL ON TABLE "public"."campaign_kpi_extended" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."lead_threads" TO "anon";
+GRANT ALL ON TABLE "public"."lead_threads" TO "authenticated";
+GRANT ALL ON TABLE "public"."lead_threads" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."campaign_lead_quality" TO "anon";
+GRANT ALL ON TABLE "public"."campaign_lead_quality" TO "authenticated";
+GRANT ALL ON TABLE "public"."campaign_lead_quality" TO "service_role";
+
+
+
 GRANT ALL ON TABLE "public"."contacts" TO "anon";
 GRANT ALL ON TABLE "public"."contacts" TO "authenticated";
 GRANT ALL ON TABLE "public"."contacts" TO "service_role";
@@ -3358,12 +3809,6 @@ GRANT ALL ON TABLE "public"."conversation_objections" TO "service_role";
 GRANT ALL ON TABLE "public"."conversation_state" TO "anon";
 GRANT ALL ON TABLE "public"."conversation_state" TO "authenticated";
 GRANT ALL ON TABLE "public"."conversation_state" TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."lead_threads" TO "anon";
-GRANT ALL ON TABLE "public"."lead_threads" TO "authenticated";
-GRANT ALL ON TABLE "public"."lead_threads" TO "service_role";
 
 
 
@@ -3400,6 +3845,12 @@ GRANT ALL ON TABLE "public"."followups" TO "service_role";
 GRANT ALL ON TABLE "public"."funnel_stage_history" TO "anon";
 GRANT ALL ON TABLE "public"."funnel_stage_history" TO "authenticated";
 GRANT ALL ON TABLE "public"."funnel_stage_history" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."lead_agent_assessments" TO "anon";
+GRANT ALL ON TABLE "public"."lead_agent_assessments" TO "authenticated";
+GRANT ALL ON TABLE "public"."lead_agent_assessments" TO "service_role";
 
 
 

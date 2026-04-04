@@ -1,5 +1,9 @@
 import type { LeadStageType } from "@prisma/client";
 
+export interface FunnelSummaryParams {
+  campaignId?: string;
+}
+
 export interface FunnelObjectionSummary {
   key: string;
   objectionType: string;

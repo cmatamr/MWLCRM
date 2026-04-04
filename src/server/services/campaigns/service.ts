@@ -13,6 +13,7 @@ import {
   mapCampaignDetail,
   mapCampaignKpis,
   mapCampaignListItem,
+  mapCampaignsOverview,
   mapCampaignPerformanceSummary,
   mapCampaignSpendSeries,
 } from "./mappers";
@@ -54,35 +55,102 @@ type OrderMetric = {
   revenueCrc: number;
 };
 
-function buildCampaignWhere(params: ListCampaignsParams): Prisma.CampaignWhereInput {
-  const search = params.search?.trim();
+type CampaignMetricsRow = {
+  id: string;
+  name: string;
+  platform: string | null;
+  objective: string | null;
+  startDate: Date | null;
+  endDate: Date | null;
+  totalSpendCrc: number | null;
+  attributedLeads: number | bigint | null;
+  attributedOrders: number | bigint | null;
+  attributedRevenueCrc: number | null;
+  totalLeads: number | bigint | null;
+  progressedLeads: number | bigint | null;
+  qualifiedLeads: number | bigint | null;
+  quotedLeads: number | bigint | null;
+  wonLeads: number | bigint | null;
+};
 
-  if (!search) {
-    return {};
+type CampaignOverviewRow = {
+  totalCampaigns: number | bigint | null;
+  totalSpendCrc: number | null;
+  attributedLeads: number | bigint | null;
+  attributedOrders: number | bigint | null;
+  attributedRevenueCrc: number | null;
+  totalLeads: number | bigint | null;
+  progressedLeads: number | bigint | null;
+  qualifiedLeads: number | bigint | null;
+  quotedLeads: number | bigint | null;
+  wonLeads: number | bigint | null;
+  spendWithoutRevenueCount: number | bigint | null;
+  highLeadNoOrderCount: number | bigint | null;
+  highRoasCount: number | bigint | null;
+};
+
+function buildCampaignSearchClause(search?: string): Prisma.Sql {
+  const normalizedSearch = search?.trim();
+
+  if (!normalizedSearch) {
+    return Prisma.empty;
   }
 
-  return {
-    OR: [
-      {
-        name: {
-          contains: search,
-          mode: "insensitive",
-        },
-      },
-      {
-        platform: {
-          contains: search,
-          mode: "insensitive",
-        },
-      },
-      {
-        objective: {
-          contains: search,
-          mode: "insensitive",
-        },
-      },
-    ],
-  };
+  const likeQuery = `%${normalizedSearch}%`;
+
+  return Prisma.sql`
+    WHERE (
+      c.name ILIKE ${likeQuery}
+      OR COALESCE(c.platform, '') ILIKE ${likeQuery}
+      OR COALESCE(c.objective, '') ILIKE ${likeQuery}
+    )
+  `;
+}
+
+function buildCampaignMetricsCte(search?: string): Prisma.Sql {
+  return Prisma.sql`
+    WITH filtered_campaigns AS (
+      SELECT
+        c.id,
+        c.name,
+        c.platform,
+        c.objective,
+        c.start_date,
+        c.end_date,
+        c.created_at
+      FROM campaigns c
+      ${buildCampaignSearchClause(search)}
+    ),
+    campaign_quality AS (
+      SELECT
+        ca.campaign_uuid AS campaign_id,
+        COUNT(DISTINCT lt.id)::integer AS total_leads,
+        COUNT(DISTINCT CASE WHEN lt.lead_stage <> 'new' THEN lt.id END)::integer AS progressed_leads,
+        COUNT(DISTINCT CASE WHEN lt.lead_stage = 'qualified' THEN lt.id END)::integer AS qualified_leads,
+        COUNT(DISTINCT CASE WHEN lt.lead_stage = 'quote' THEN lt.id END)::integer AS quoted_leads,
+        COUNT(DISTINCT CASE WHEN lt.lead_stage = 'won' THEN lt.id END)::integer AS won_leads
+      FROM campaign_attribution ca
+      JOIN lead_threads lt ON lt.id = ca.lead_thread_id
+      WHERE ca.campaign_uuid IS NOT NULL
+      GROUP BY ca.campaign_uuid
+    )
+  `;
+}
+
+function normalizeMetricValue(value: Prisma.Decimal | number | bigint | null | undefined): number {
+  if (value == null) {
+    return 0;
+  }
+
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+
+  if (typeof value === "number") {
+    return value;
+  }
+
+  return value.toNumber();
 }
 
 function resolveCampaignKeys(
@@ -212,104 +280,105 @@ export async function listCampaigns(
 ): Promise<CampaignsListResponse> {
   const db = resolveDb(options);
   const pagination = normalizePagination(params);
-  const where = buildCampaignWhere(params);
+  const metricsCte = buildCampaignMetricsCte(params.search);
 
-  const [total, campaigns] = await db.$transaction([
-    db.campaign.count({ where }),
-    db.campaign.findMany({
-      where,
-      orderBy: {
-        createdAt: "desc",
-      },
-      skip: pagination.skip,
-      take: pagination.take,
-      select: {
-        id: true,
-        name: true,
-        platform: true,
-        objective: true,
-        startDate: true,
-        endDate: true,
-      },
-    }),
+  const [overviewRows, campaignRows] = await Promise.all([
+    db.$queryRaw<CampaignOverviewRow[]>(Prisma.sql`
+      ${metricsCte}
+      SELECT
+        COUNT(*)::integer AS "totalCampaigns",
+        COALESCE(SUM(COALESCE(k.total_spend, 0)), 0)::double precision AS "totalSpendCrc",
+        COALESCE(SUM(COALESCE(k.leads, 0)), 0)::integer AS "attributedLeads",
+        COALESCE(SUM(COALESCE(k.orders, 0)), 0)::integer AS "attributedOrders",
+        COALESCE(SUM(COALESCE(k.revenue, 0)), 0)::double precision AS "attributedRevenueCrc",
+        COALESCE(SUM(COALESCE(q.total_leads, 0)), 0)::integer AS "totalLeads",
+        COALESCE(SUM(COALESCE(q.progressed_leads, 0)), 0)::integer AS "progressedLeads",
+        COALESCE(SUM(COALESCE(q.qualified_leads, 0)), 0)::integer AS "qualifiedLeads",
+        COALESCE(SUM(COALESCE(q.quoted_leads, 0)), 0)::integer AS "quotedLeads",
+        COALESCE(SUM(COALESCE(q.won_leads, 0)), 0)::integer AS "wonLeads",
+        COUNT(*) FILTER (
+          WHERE COALESCE(k.total_spend, 0) > 0 AND COALESCE(k.revenue, 0) = 0
+        )::integer AS "spendWithoutRevenueCount",
+        COUNT(*) FILTER (
+          WHERE COALESCE(k.leads, 0) > 10 AND COALESCE(k.orders, 0) = 0
+        )::integer AS "highLeadNoOrderCount",
+        COUNT(*) FILTER (
+          WHERE COALESCE(k.total_spend, 0) > 0
+            AND (COALESCE(k.revenue, 0)::numeric / NULLIF(COALESCE(k.total_spend, 0), 0)) > 3
+        )::integer AS "highRoasCount"
+      FROM filtered_campaigns fc
+      LEFT JOIN campaign_kpi k ON k.id = fc.id
+      LEFT JOIN campaign_quality q ON q.campaign_id = fc.id
+    `),
+    db.$queryRaw<CampaignMetricsRow[]>(Prisma.sql`
+      ${metricsCte}
+      SELECT
+        fc.id::text AS "id",
+        fc.name AS "name",
+        fc.platform AS "platform",
+        fc.objective AS "objective",
+        fc.start_date AS "startDate",
+        fc.end_date AS "endDate",
+        COALESCE(k.total_spend, 0)::double precision AS "totalSpendCrc",
+        COALESCE(k.leads, 0)::integer AS "attributedLeads",
+        COALESCE(k.orders, 0)::integer AS "attributedOrders",
+        COALESCE(k.revenue, 0)::double precision AS "attributedRevenueCrc",
+        COALESCE(q.total_leads, 0)::integer AS "totalLeads",
+        COALESCE(q.progressed_leads, 0)::integer AS "progressedLeads",
+        COALESCE(q.qualified_leads, 0)::integer AS "qualifiedLeads",
+        COALESCE(q.quoted_leads, 0)::integer AS "quotedLeads",
+        COALESCE(q.won_leads, 0)::integer AS "wonLeads"
+      FROM filtered_campaigns fc
+      LEFT JOIN campaign_kpi k ON k.id = fc.id
+      LEFT JOIN campaign_quality q ON q.campaign_id = fc.id
+      ORDER BY fc.created_at DESC NULLS LAST, fc.name ASC
+      LIMIT ${pagination.take}
+      OFFSET ${pagination.skip}
+    `),
   ]);
 
-  if (campaigns.length === 0) {
-    return {
-      items: [],
-      pagination: createPaginationMeta({
-        page: pagination.page,
-        pageSize: pagination.pageSize,
-        total,
-      }),
-    };
-  }
-
-  const campaignIds = campaigns.map((campaign) => campaign.id);
-
-  const [spendRows, attributions] = await Promise.all([
-    db.campaignSpend.groupBy({
-      by: ["campaignId"],
-      where: {
-        campaignId: {
-          in: campaignIds,
-        },
-      },
-      _sum: {
-        amountCrc: true,
-      },
-    }),
-    db.campaignAttribution.findMany({
-      where: {
-        OR: [{ campaignUuid: { in: campaignIds } }, { campaignId: { in: campaignIds } }],
-      },
-      select: {
-        campaignUuid: true,
-        campaignId: true,
-        leadThreadId: true,
-      },
-    }),
-  ]);
-
-  const spendByCampaignId = new Map(
-    spendRows.map((row) => [row.campaignId ?? "", row._sum.amountCrc?.toNumber() ?? 0]),
-  );
-  const leadSetMap = buildCampaignLeadSetMap(campaignIds, attributions);
-  const uniqueLeadThreadIds = [...new Set(attributions.map((attribution) => attribution.leadThreadId))];
-
-  const attributedOrders =
-    uniqueLeadThreadIds.length > 0
-      ? await db.order.findMany({
-          where: {
-            leadThreadId: {
-              in: uniqueLeadThreadIds,
-            },
-          },
-          select: {
-            id: true,
-            leadThreadId: true,
-            totalCrc: true,
-          },
-        })
-      : [];
-
-  const orderMetricByLead = buildOrderMetricByLead(attributedOrders);
+  const overviewRow = overviewRows[0];
+  const totalCampaigns = normalizeMetricValue(overviewRow?.totalCampaigns);
+  const overview = mapCampaignsOverview({
+    totalCampaigns,
+    totalSpendCrc: normalizeMetricValue(overviewRow?.totalSpendCrc),
+    attributedLeads: normalizeMetricValue(overviewRow?.attributedLeads),
+    attributedOrders: normalizeMetricValue(overviewRow?.attributedOrders),
+    attributedRevenueCrc: normalizeMetricValue(overviewRow?.attributedRevenueCrc),
+    totalLeads: normalizeMetricValue(overviewRow?.totalLeads),
+    progressedLeads: normalizeMetricValue(overviewRow?.progressedLeads),
+    qualifiedLeads: normalizeMetricValue(overviewRow?.qualifiedLeads),
+    quotedLeads: normalizeMetricValue(overviewRow?.quotedLeads),
+    wonLeads: normalizeMetricValue(overviewRow?.wonLeads),
+    spendWithoutRevenueCount: normalizeMetricValue(overviewRow?.spendWithoutRevenueCount),
+    highLeadNoOrderCount: normalizeMetricValue(overviewRow?.highLeadNoOrderCount),
+    highRoasCount: normalizeMetricValue(overviewRow?.highRoasCount),
+  });
 
   return {
-    items: campaigns.map((campaign) =>
+    items: campaignRows.map((campaign) =>
       mapCampaignListItem({
-        campaign,
-        summary: buildCampaignSummary({
-          totalSpendCrc: spendByCampaignId.get(campaign.id) ?? 0,
-          leadThreadIds: leadSetMap.get(campaign.id) ?? [],
-          orderMetricByLead,
+        campaign: {
+          id: campaign.id,
+          name: campaign.name,
+          platform: campaign.platform,
+          objective: campaign.objective,
+          startDate: campaign.startDate,
+          endDate: campaign.endDate,
+        },
+        summary: mapCampaignPerformanceSummary({
+          totalSpendCrc: normalizeMetricValue(campaign.totalSpendCrc),
+          attributedLeads: normalizeMetricValue(campaign.attributedLeads),
+          attributedOrders: normalizeMetricValue(campaign.attributedOrders),
+          attributedRevenueCrc: normalizeMetricValue(campaign.attributedRevenueCrc),
         }),
       }),
     ),
+    overview,
     pagination: createPaginationMeta({
       page: pagination.page,
       pageSize: pagination.pageSize,
-      total,
+      total: totalCampaigns,
     }),
   };
 }
