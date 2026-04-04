@@ -1,6 +1,6 @@
 import { campaignSyncConfig } from "@/config/campaignSync";
 import { fail, handleRouteError, ok } from "@/server/api/http";
-import { runMetaCampaignSync } from "@/server/services/meta-campaign-sync";
+import { MetaApiError, runMetaCampaignSync } from "@/server/services/meta-campaign-sync";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +34,17 @@ export async function GET(request: Request) {
       routePath: campaignSyncConfig.cron.routePath,
     });
   } catch (error) {
+    if (error instanceof MetaApiError) {
+      return fail(
+        {
+          code: "META_API_ERROR",
+          message: error.message,
+          details: error.payload,
+        },
+        { status: error.status },
+      );
+    }
+
     return handleRouteError(error);
   }
 }

@@ -173,7 +173,7 @@ export function CampaignsPageClient() {
         <CampaignAlertsCard overview={data.overview} />
       </section>
 
-      <CampaignsTable campaigns={data.items} />
+      <CampaignsTable campaigns={data.items} params={params} />
 
       <section className="flex flex-col gap-4 rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm text-muted-foreground">

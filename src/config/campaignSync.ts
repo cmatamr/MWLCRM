@@ -3,9 +3,9 @@ const DEFAULT_META_API_VERSION = "v23.0";
 export const campaignSyncConfig = {
   cron: {
     // Vercel triggers every minute; this value controls the effective sync cadence.
-    intervalMinutes: 30,
+    intervalMinutes: 1_440,
     routePath: "/api/internal/cron/meta-campaign-sync",
-    baseSchedule: "* * * * *",
+    baseSchedule: "0 3 * * *",
   },
   spend: {
     lookbackDays: 7,
@@ -17,16 +17,8 @@ export const campaignSyncConfig = {
     platform: "meta",
     expectedAccountCurrency: "CRC",
     allowNonCrcSpendAmount: false,
-    relevantEffectiveStatuses: [
-      "ACTIVE",
-      "PAUSED",
-      "ARCHIVED",
-      "DELETED",
-      "IN_PROCESS",
-      "WITH_ISSUES",
-      "CAMPAIGN_PAUSED",
-      "ADSET_PAUSED",
-    ],
+    // Leave empty to avoid Meta 400 caused by invalid enum combinations.
+    relevantEffectiveStatuses: [],
     requestTimeoutMs: 20_000,
   },
 } as const;
@@ -34,9 +26,10 @@ export const campaignSyncConfig = {
 export type CampaignSyncConfig = typeof campaignSyncConfig;
 
 export function shouldRunCampaignSyncAt(date: Date, intervalMinutes: number): boolean {
-  if (!Number.isInteger(intervalMinutes) || intervalMinutes <= 0 || intervalMinutes > 60) {
+  if (!Number.isInteger(intervalMinutes) || intervalMinutes <= 0) {
     return false;
   }
 
-  return date.getUTCMinutes() % intervalMinutes === 0;
+  const epochMinutes = Math.floor(date.getTime() / 60_000);
+  return epochMinutes % intervalMinutes === 0;
 }

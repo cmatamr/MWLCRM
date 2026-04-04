@@ -69,19 +69,26 @@ export function TableEmptyStateRow({
   colSpan,
   title,
   description,
+  helper,
 }: {
   colSpan: number;
   title: string;
   description: string;
+  helper?: string;
 }) {
   return (
     <tr>
       <td colSpan={colSpan} className="px-4 py-8">
-        <InlineStateDisplay
-          title={title}
-          description={description}
-          className="border-dashed border-border bg-slate-50/70 shadow-none"
-        />
+        <div className="space-y-2">
+          <InlineStateDisplay
+            title={title}
+            description={description}
+            className="border-dashed border-border bg-slate-50/70 shadow-none"
+          />
+          {helper ? (
+            <p className="px-2 text-center text-sm text-muted-foreground">{helper}</p>
+          ) : null}
+        </div>
       </td>
     </tr>
   );

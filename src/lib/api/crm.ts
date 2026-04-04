@@ -15,6 +15,7 @@ import type {
   CampaignsListResponse,
   ListCampaignsParams,
 } from "@/server/services/campaigns/types";
+import type { CampaignSyncResult } from "@/server/services/meta-campaign-sync";
 import type {
   ConversationDetail,
   ConversationsListResponse,
@@ -325,6 +326,12 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     },
     listCampaigns(params?: ListCampaignsParams, init?: RequestInit) {
       return get<CampaignsListResponse>("/api/campaigns", params, init);
+    },
+    syncCampaigns(init?: RequestInit) {
+      return get<CampaignSyncResult>("/api/campaigns/sync", undefined, {
+        method: "POST",
+        ...init,
+      });
     },
     getCampaign(id: string, init?: RequestInit) {
       return get<CampaignDetail>(`/api/campaigns/${id}`, undefined, init);

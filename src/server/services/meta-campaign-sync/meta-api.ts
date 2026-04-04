@@ -15,6 +15,16 @@ type MetaApiListResponse<T> = {
   };
 };
 
+type MetaApiErrorPayload = {
+  error?: {
+    message?: string;
+    code?: number;
+    error_subcode?: number;
+    type?: string;
+    fbtrace_id?: string;
+  };
+};
+
 export class MetaApiError extends Error {
   status: number;
   payload?: unknown;
@@ -66,9 +76,15 @@ export class MetaApiClient {
     const params = new URLSearchParams({
       fields,
       limit: String(pageSize),
-      effective_status: JSON.stringify(campaignSyncConfig.meta.relevantEffectiveStatuses),
       access_token: this.accessToken,
     });
+
+    if (campaignSyncConfig.meta.relevantEffectiveStatuses.length > 0) {
+      params.set(
+        "effective_status",
+        JSON.stringify(campaignSyncConfig.meta.relevantEffectiveStatuses),
+      );
+    }
 
     const url = `https://graph.facebook.com/${this.apiVersion}/${this.adAccountId}/campaigns?${params.toString()}`;
 
@@ -148,7 +164,18 @@ export class MetaApiClient {
       const payload = (await response.json()) as T;
 
       if (!response.ok) {
-        throw new MetaApiError(`Meta API request failed with status ${response.status}.`, response.status, payload);
+        const typedPayload = payload as MetaApiErrorPayload;
+        const metaErrorMessage = typedPayload?.error?.message;
+        const metaErrorCode = typedPayload?.error?.code;
+        const message = metaErrorMessage
+          ? `Meta API request failed (${response.status}): ${metaErrorMessage}`
+          : `Meta API request failed with status ${response.status}.`;
+
+        throw new MetaApiError(
+          metaErrorCode ? `${message} [code=${metaErrorCode}]` : message,
+          response.status,
+          payload,
+        );
       }
 
       return payload;
