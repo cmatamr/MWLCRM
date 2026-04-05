@@ -10,6 +10,7 @@ export * from "./use-funnel-summary";
 export * from "./use-orders";
 export * from "./use-create-product";
 export * from "./use-products-catalog";
+export * from "./use-products-performance";
 export * from "./use-product-detail";
 export * from "./use-product-search-media";
 export * from "./use-update-product";

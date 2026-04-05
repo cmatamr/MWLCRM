@@ -13,6 +13,23 @@ export const paymentReceiptTransferTypeValues = [
   "Sinpe",
   "Efectivo",
 ] as const;
+
+export const orderStatusesRequiringValidatedReceipt = [
+  "confirmed",
+  "in_design",
+  "in_production",
+  "ready",
+  "shipped",
+  "completed",
+] as const satisfies readonly OrderStatusEnum[];
+
+export const orderStatusesAllowedWithoutValidatedReceipt = [
+  "draft",
+  "quoted",
+  "pending_payment",
+  "payment_review",
+  "cancelled",
+] as const satisfies readonly OrderStatusEnum[];
 type PaymentReceiptTransferType = (typeof paymentReceiptTransferTypeValues)[number];
 
 export type OrderSort = (typeof orderSortValues)[number];
@@ -108,6 +125,11 @@ export interface CreateOrderActivityInput {
 
 export interface UpdateOrderActivityInput {
   content: string;
+}
+
+export interface UpdateOrderInput {
+  status?: OrderStatusEnum;
+  deliveryDate?: string | null;
 }
 
 export interface CreatePaymentReceiptInput {

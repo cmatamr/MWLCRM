@@ -163,6 +163,80 @@ export interface ListCatalogProductsParams extends PaginationParams {
   exactProductId?: string;
 }
 
+export type ProductsPerformanceRange = "7d" | "30d" | "90d" | "all";
+
+export interface GetProductsPerformanceParams
+  extends Omit<ListCatalogProductsParams, "page" | "pageSize"> {
+  range: ProductsPerformanceRange;
+}
+
+export interface ProductPerformanceTrendPoint {
+  bucket_start: string;
+  label: string;
+  units_sold: number;
+  revenue_crc: number;
+}
+
+export interface ProductTopPerformanceEntry {
+  product_id: string;
+  name: string;
+  units_sold: number;
+  revenue_crc: number;
+}
+
+export interface ProductPerformanceInsights {
+  top_performer_product_id: string | null;
+  highest_growth_product_id: string | null;
+  strongest_drop_product_id: string | null;
+  product_without_sales_id: string | null;
+}
+
+export interface ProductPerformanceRow {
+  id: string;
+  sku: string;
+  name: string;
+  category: string;
+  family: string;
+  variant_label: string | null;
+  size_label: string | null;
+  updated_at: string;
+  is_active: boolean;
+  is_agent_visible: boolean;
+  units_sold: number;
+  revenue_crc: number;
+  units_previous_period: number;
+  revenue_previous_period: number;
+  growth_percent: number | null;
+  commercial_alert: boolean;
+  margin_percent: number | null;
+  stock: number | null;
+}
+
+export interface ProductsPerformanceSummary {
+  units_sold_total: number;
+  revenue_total_crc: number;
+  products_without_sales: number;
+  products_with_commercial_alerts: number;
+}
+
+export interface ProductsPerformanceResponse {
+  range: ProductsPerformanceRange;
+  date_anchor: "orders.created_at";
+  trend_granularity: "day" | "week";
+  included_order_statuses: string[];
+  excluded_order_statuses: string[];
+  margin_available: boolean;
+  stock_available: boolean;
+  summary: ProductsPerformanceSummary;
+  rows: ProductPerformanceRow[];
+  top_products: {
+    units: ProductTopPerformanceEntry[];
+    revenue: ProductTopPerformanceEntry[];
+  };
+  sales_trend: ProductPerformanceTrendPoint[];
+  insights: ProductPerformanceInsights;
+}
+
 export interface ProductsCatalogResponse {
   items: CatalogProductRow[];
   pagination: PaginationMeta;

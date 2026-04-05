@@ -1,4 +1,4 @@
-import { crmEntityIdParamsSchema } from "@/domain/crm/schemas";
+import { crmEntityIdParamsSchema, orderPaymentActionSchema, updateOrderSchema } from "@/domain/crm/schemas";
 import {
   badRequest,
   handleRouteError,
@@ -12,6 +12,8 @@ import {
   DeleteOrderError,
   getOrderDetail,
   PaymentReceiptError,
+  updateOrder,
+  UpdateOrderError,
 } from "@/server/services/orders";
 
 export async function GET(_request: Request, context: RouteContext<{ id: string }>) {
@@ -32,13 +34,42 @@ export async function GET(_request: Request, context: RouteContext<{ id: string 
 export async function PATCH(request: Request, context: RouteContext<{ id: string }>) {
   try {
     const orderId = crmEntityIdParamsSchema.parse(await context.params).id;
-    await request.text();
-    await confirmOrderPayment(orderId);
-    throw badRequest(
-      "Order-level payment confirmation is deprecated. Use payment receipt validation endpoints instead.",
-      { orderId, deprecated: true },
-    );
+    const body = await request.json();
+    const paymentActionParse = orderPaymentActionSchema.safeParse(body);
+
+    if (paymentActionParse.success) {
+      await confirmOrderPayment(orderId);
+      throw badRequest(
+        "Order-level payment confirmation is deprecated. Use payment receipt validation endpoints instead.",
+        { orderId, deprecated: true },
+      );
+    }
+
+    const patch = updateOrderSchema.parse(body);
+    const order = await updateOrder({
+      orderId,
+      patch: {
+        status: patch.status,
+        deliveryDate: patch.deliveryDate,
+      },
+    });
+
+    return ok(order);
   } catch (error) {
+    if (error instanceof SyntaxError) {
+      return handleRouteError(badRequest("Invalid JSON body."));
+    }
+
+    if (error instanceof UpdateOrderError) {
+      if (error.code === "ORDER_NOT_FOUND") {
+        return handleRouteError(notFound(error.message, error.details));
+      }
+
+      if (error.code === "STATUS_REQUIRES_VALID_RECEIPT") {
+        return handleRouteError(badRequest(error.message, error.details));
+      }
+    }
+
     if (error instanceof PaymentReceiptError) {
       return handleRouteError(badRequest(error.message, error.details));
     }

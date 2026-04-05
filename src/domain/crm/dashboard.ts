@@ -26,6 +26,10 @@ export interface DashboardDailyRevenuePoint {
   label: string;
   revenueCrc: number;
   orders: number;
+  orderBreakdown: Array<{
+    orderId: string;
+    amountCrc: number;
+  }>;
 }
 
 export interface DashboardRecentOrder {
@@ -34,6 +38,7 @@ export interface DashboardRecentOrder {
   paymentStatus: string;
   totalCrc: number;
   createdAt: string;
+  deliveryDate: string | null;
   customer: CustomerReference;
 }
 

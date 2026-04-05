@@ -12,7 +12,7 @@ import type { DashboardRecentOrder } from "@/server/services/dashboard/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadgeFromViewModel } from "@/components/ui/status-badge";
 import { TableEmptyStateRow } from "@/components/ui/state-display";
-import { formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
+import { formatCalendarDate, formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
 import {
   formatCustomerDisplayName,
   formatOrderShortId,
@@ -29,6 +29,10 @@ type RecentOrdersTableProps = {
   isApplyingFilter?: boolean;
 };
 
+type DeliveryDateSortDirection = "asc" | "desc";
+type CreatedAtSortDirection = "asc" | "desc";
+type RecentOrdersSortKey = "deliveryDate" | "createdAt";
+
 export function RecentOrdersTable({
   orders,
   statusFilter,
@@ -40,6 +44,11 @@ export function RecentOrdersTable({
     "hover:text-primary hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-2 focus-visible:ring-offset-white",
   );
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [activeSortKey, setActiveSortKey] = useState<RecentOrdersSortKey>("deliveryDate");
+  const [deliveryDateSortDirection, setDeliveryDateSortDirection] =
+    useState<DeliveryDateSortDirection>("desc");
+  const [createdAtSortDirection, setCreatedAtSortDirection] =
+    useState<CreatedAtSortDirection>("desc");
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -47,13 +56,73 @@ export function RecentOrdersTable({
   const menuId = useId();
   const statusOptions = useMemo(() => Object.values(OrderStatusEnum), []);
   const hasActiveFilter = statusFilter != null;
-  const visibleOrders = useMemo(() => {
+  const filteredOrders = useMemo(() => {
     if (statusFilter) {
       return orders.filter((order) => order.status === statusFilter);
     }
 
     return orders.filter((order) => order.status !== OrderStatusEnum.draft);
   }, [orders, statusFilter]);
+
+  const visibleOrders = useMemo(() => {
+    function toDeliveryTimestamp(value: string | null) {
+      if (!value) {
+        return null;
+      }
+
+      const parsed = new Date(value).getTime();
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    function toCreatedAtTimestamp(value: string) {
+      const parsed = new Date(value).getTime();
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    if (activeSortKey === "createdAt") {
+      return [...filteredOrders].sort((left, right) => {
+        const leftTimestamp = toCreatedAtTimestamp(left.createdAt);
+        const rightTimestamp = toCreatedAtTimestamp(right.createdAt);
+
+        if (leftTimestamp == null && rightTimestamp == null) {
+          return 0;
+        }
+
+        if (leftTimestamp == null) {
+          return 1;
+        }
+
+        if (rightTimestamp == null) {
+          return -1;
+        }
+
+        return createdAtSortDirection === "asc"
+          ? leftTimestamp - rightTimestamp
+          : rightTimestamp - leftTimestamp;
+      });
+    }
+
+    return [...filteredOrders].sort((left, right) => {
+      const leftTimestamp = toDeliveryTimestamp(left.deliveryDate);
+      const rightTimestamp = toDeliveryTimestamp(right.deliveryDate);
+
+      if (leftTimestamp == null && rightTimestamp == null) {
+        return 0;
+      }
+
+      if (leftTimestamp == null) {
+        return 1;
+      }
+
+      if (rightTimestamp == null) {
+        return -1;
+      }
+
+      return deliveryDateSortDirection === "asc"
+        ? leftTimestamp - rightTimestamp
+        : rightTimestamp - leftTimestamp;
+    });
+  }, [filteredOrders, activeSortKey, createdAtSortDirection, deliveryDateSortDirection]);
 
   useEffect(() => {
     setIsMounted(true);
@@ -148,6 +217,24 @@ export function RecentOrdersTable({
     setIsMenuOpen(false);
   }
 
+  function toggleDeliveryDateSortDirection() {
+    if (activeSortKey !== "deliveryDate") {
+      setActiveSortKey("deliveryDate");
+      return;
+    }
+
+    setDeliveryDateSortDirection((current) => (current === "desc" ? "asc" : "desc"));
+  }
+
+  function toggleCreatedAtSortDirection() {
+    if (activeSortKey !== "createdAt") {
+      setActiveSortKey("createdAt");
+      return;
+    }
+
+    setCreatedAtSortDirection((current) => (current === "desc" ? "asc" : "desc"));
+  }
+
   const menuPortal =
     isMounted && isMenuOpen && menuPosition
       ? createPortal(
@@ -217,16 +304,16 @@ export function RecentOrdersTable({
 
         <div className="mt-6 overflow-hidden rounded-[24px] border border-border/70">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-border/70 text-left">
+            <table className="min-w-full divide-y divide-border/70 text-center">
               <caption className="sr-only">
-                Órdenes recientes con cliente, monto, estado y condición de pago.
+                Órdenes recientes con cliente, monto, estado, condición de pago y fecha de entrega.
               </caption>
               <thead className="bg-muted/40 text-xs uppercase tracking-[0.16em] text-muted-foreground">
                 <tr>
-                  <th scope="col" className="px-4 py-3 font-medium">Orden</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Cliente</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Monto</th>
-                  <th scope="col" className="px-4 py-3 font-medium">
+                  <th scope="col" className="px-4 py-3 font-medium text-center">Orden</th>
+                  <th scope="col" className="px-4 py-3 font-medium text-center">Cliente</th>
+                  <th scope="col" className="px-4 py-3 font-medium text-center">Monto</th>
+                  <th scope="col" className="px-4 py-3 font-medium text-center">
                     <button
                       type="button"
                       ref={triggerRef}
@@ -247,14 +334,57 @@ export function RecentOrdersTable({
                       <ChevronDown className="h-3.5 w-3.5" />
                     </button>
                   </th>
-                  <th scope="col" className="px-4 py-3 font-medium">Pago</th>
-                  <th scope="col" className="px-4 py-3 font-medium">Creada</th>
+                  <th scope="col" className="px-4 py-3 font-medium text-center">Pago</th>
+                  <th scope="col" className="px-4 py-3 font-medium text-center">
+                    <button
+                      type="button"
+                      className="inline-flex items-center justify-center gap-1 font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                      onClick={toggleDeliveryDateSortDirection}
+                      aria-label={`Ordenar por fecha de entrega ${
+                        deliveryDateSortDirection === "desc" ? "ascendente" : "descendente"
+                      }`}
+                    >
+                      Fecha entrega
+                      <ChevronDown
+                        className={cn(
+                          "h-3.5 w-3.5 transition-transform",
+                          activeSortKey === "deliveryDate" && deliveryDateSortDirection === "asc"
+                            ? "rotate-180"
+                            : "",
+                          activeSortKey === "deliveryDate" ? "opacity-100" : "opacity-45",
+                        )}
+                      />
+                    </button>
+                  </th>
+                  <th scope="col" className="px-4 py-3 font-medium text-center">
+                    <button
+                      type="button"
+                      className="inline-flex items-center justify-center gap-1 font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                      onClick={toggleCreatedAtSortDirection}
+                      aria-label={`Ordenar por fecha de creación ${
+                        activeSortKey !== "createdAt" || createdAtSortDirection === "desc"
+                          ? "ascendente"
+                          : "descendente"
+                      }`}
+                    >
+                      Creada
+                      <ChevronDown
+                        className={cn(
+                          "h-3.5 w-3.5 transition-transform",
+                          activeSortKey === "createdAt" && createdAtSortDirection === "asc"
+                            ? "rotate-180"
+                            : "",
+                          activeSortKey === "createdAt" ? "opacity-100" : "opacity-45",
+                        )}
+                      />
+                    </button>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60 bg-white">
                 {isApplyingFilter ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-10">
+                    <td colSpan={7} className="px-4 py-10">
                       <div className="flex flex-col items-center justify-center gap-3 text-center">
                         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                         <p className="text-sm font-medium text-slate-700">Aplicando filtro...</p>
@@ -271,7 +401,7 @@ export function RecentOrdersTable({
 
                     return (
                       <tr key={order.id} className="text-sm text-slate-700">
-                        <td className="px-4 py-4 font-medium text-slate-950">
+                        <td className="px-4 py-4 font-medium text-slate-950 text-center">
                           <Link
                             href={`/orders/${order.id}`}
                             className={interactiveLinkClassName}
@@ -280,7 +410,7 @@ export function RecentOrdersTable({
                             {formatOrderShortId(order.id)}
                           </Link>
                         </td>
-                        <td className="px-4 py-4">
+                        <td className="px-4 py-4 text-center">
                           {order.customer.id ? (
                             <Link
                               href={`/customers/${order.customer.id}`}
@@ -295,26 +425,29 @@ export function RecentOrdersTable({
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-4 font-medium text-slate-950">
+                        <td className="px-4 py-4 font-medium text-slate-950 text-center">
                           {formatCurrencyCRC(order.totalCrc)}
                         </td>
-                        <td className="px-4 py-4">
+                        <td className="px-4 py-4 text-center">
                           <StatusBadgeFromViewModel badge={orderBadge} />
                         </td>
-                        <td className="px-4 py-4">
+                        <td className="px-4 py-4 text-center">
                           <RecentOrderPaymentCell
                             orderId={order.id}
                             orderStatus={order.status}
                             paymentStatus={order.paymentStatus}
                           />
                         </td>
-                        <td className="px-4 py-4">{formatDateTime(order.createdAt)}</td>
+                        <td className="px-4 py-4 text-center">
+                          {order.deliveryDate ? formatCalendarDate(order.deliveryDate) : "Sin fecha"}
+                        </td>
+                        <td className="px-4 py-4 text-center">{formatDateTime(order.createdAt)}</td>
                       </tr>
                     );
                   })
                 ) : (
                   <TableEmptyStateRow
-                    colSpan={6}
+                    colSpan={7}
                     title={
                       statusFilter
                         ? `No hay órdenes en estado ${formatOrderStatusLabel(statusFilter)}`

@@ -1,6 +1,5 @@
 import type {
   ProductDetail,
-  ProductPerformanceMetricMock,
   ProductSearchMeta,
   ProductSearchTermMeta,
 } from "@/components/products/types";
@@ -487,87 +486,3 @@ export const initialProductDetailsMock: ProductDetail[] = [
     ui_created_locally: false,
   },
 ];
-
-export const productPerformanceMetricsMock: ProductPerformanceMetricMock[] = [
-  {
-    product_id: "bag_caminata_20x25_full",
-    units_sold_mock: 146,
-    revenue_crc_mock: 365000,
-    margin_percent_mock: 38,
-    stock_mock: 9,
-    growth_percent_mock: 14.6,
-  },
-  {
-    product_id: "bag_confitero_20x25_std",
-    units_sold_mock: 221,
-    revenue_crc_mock: 221000,
-    margin_percent_mock: 32,
-    stock_mock: 18,
-    growth_percent_mock: 9.4,
-  },
-  {
-    product_id: "kit_creativo_std",
-    units_sold_mock: 47,
-    revenue_crc_mock: 244000,
-    margin_percent_mock: 41,
-    stock_mock: null,
-    growth_percent_mock: -3.1,
-  },
-  {
-    product_id: "cups_vinyl_std",
-    units_sold_mock: 189,
-    revenue_crc_mock: 416000,
-    margin_percent_mock: 35,
-    stock_mock: 6,
-    growth_percent_mock: 4.7,
-  },
-  {
-    product_id: "book_coloring_std",
-    units_sold_mock: 0,
-    revenue_crc_mock: 0,
-    margin_percent_mock: 0,
-    stock_mock: 2,
-    growth_percent_mock: -11.5,
-  },
-  {
-    product_id: "banner_flags_std",
-    units_sold_mock: 0,
-    revenue_crc_mock: 0,
-    margin_percent_mock: 0,
-    stock_mock: null,
-    growth_percent_mock: -22.4,
-  },
-];
-
-export const salesTrendMock = [
-  {
-    label: "Sem 1",
-    units_sold_mock: 96,
-    revenue_crc_mock: 198000,
-  },
-  {
-    label: "Sem 2",
-    units_sold_mock: 131,
-    revenue_crc_mock: 262000,
-  },
-  {
-    label: "Sem 3",
-    units_sold_mock: 142,
-    revenue_crc_mock: 301000,
-  },
-  {
-    label: "Sem 4",
-    units_sold_mock: 118,
-    revenue_crc_mock: 239000,
-  },
-  {
-    label: "Sem 5",
-    units_sold_mock: 155,
-    revenue_crc_mock: 337000,
-  },
-  {
-    label: "Sem 6",
-    units_sold_mock: 173,
-    revenue_crc_mock: 361000,
-  },
-] as const;

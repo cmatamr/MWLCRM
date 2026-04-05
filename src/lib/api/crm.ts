@@ -34,6 +34,7 @@ import type {
   OrdersListResponse,
   PaymentReceiptReviewActionInput,
   UpdatePaymentReceiptInput,
+  UpdateOrderInput,
   UpdateOrderActivityInput,
 } from "@/server/services/orders/types";
 import type {
@@ -45,7 +46,9 @@ import type {
   UpdateProductImageInput,
   UpdateProductSearchTermInput,
   AddProductSearchTermInput,
+  GetProductsPerformanceParams,
   ProductsCatalogResponse,
+  ProductsPerformanceResponse,
   UpdateProductInput,
 } from "@/server/services/products";
 import { buildApiUrl, fetcher, FetcherError, type QueryParams } from "@/lib/fetcher";
@@ -112,6 +115,17 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     getOrder(id: string, init?: RequestInit) {
       return get<OrderDetail>(`/api/orders/${id}`, undefined, init);
     },
+    updateOrder(id: string, input: UpdateOrderInput, init?: RequestInit) {
+      return get<OrderDetail>(`/api/orders/${id}`, undefined, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
     deleteOrder(id: string, init?: RequestInit) {
       return get<DeleteOrderResult>(`/api/orders/${id}`, undefined, {
         method: "DELETE",
@@ -150,6 +164,20 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
         max_price_crc: params?.maxPriceCrc,
         min_qty: params?.minQty,
         exact_product_id: params?.exactProductId,
+      }, init);
+    },
+    getProductsPerformance(params: GetProductsPerformanceParams, init?: RequestInit) {
+      return get<ProductsPerformanceResponse>("/api/products/performance", {
+        range: params.range,
+        search: params.search,
+        category: params.category,
+        family: params.family,
+        is_active: params.isActive,
+        is_agent_visible: params.isAgentVisible,
+        pricing_mode: params.pricingMode,
+        max_price_crc: params.maxPriceCrc,
+        min_qty: params.minQty,
+        exact_product_id: params.exactProductId,
       }, init);
     },
     getProductDetail(id: string, init?: RequestInit) {

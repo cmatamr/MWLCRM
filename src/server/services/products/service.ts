@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { OrderStatusEnum, Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
 import { badRequest, notFound } from "@/server/api/http";
@@ -15,12 +15,17 @@ import type {
   AddProductSearchTermInput,
   CatalogProductRow,
   CreateProductInput,
+  GetProductsPerformanceParams,
   ListCatalogProductsParams,
   ProductAliasMeta,
   ProductDetail,
   ProductDiscountRuleMeta,
   ProductImageMeta,
+  ProductPerformanceRow,
   ProductSearchTermMeta,
+  ProductTopPerformanceEntry,
+  ProductPerformanceTrendPoint,
+  ProductsPerformanceResponse,
   ProductsCatalogResponse,
   UpdateProductInput,
   UpdateProductImageInput,
@@ -389,6 +394,153 @@ const baseFrom = Prisma.sql`
   LEFT JOIN public.mwl_products p ON p.id = v.id
   LEFT JOIN public.mwl_products_agent_view av ON av.id = v.id
 `;
+
+const PERFORMANCE_ALWAYS_INCLUDED_ORDER_STATUSES: OrderStatusEnum[] = [
+  OrderStatusEnum.confirmed,
+  OrderStatusEnum.ready,
+  OrderStatusEnum.shipped,
+  OrderStatusEnum.completed,
+];
+
+const PERFORMANCE_CONDITIONAL_ORDER_STATUSES: OrderStatusEnum[] = [
+  OrderStatusEnum.pending_payment,
+  OrderStatusEnum.payment_review,
+  OrderStatusEnum.in_design,
+  OrderStatusEnum.in_production,
+];
+
+const PERFORMANCE_EXCLUDED_ORDER_STATUSES: OrderStatusEnum[] = [
+  OrderStatusEnum.draft,
+  OrderStatusEnum.quoted,
+  OrderStatusEnum.cancelled,
+];
+
+const PERFORMANCE_VALID_PAYMENT_STATUS = "validated";
+
+type PerformanceRowRaw = {
+  id: string;
+  sku: string;
+  name: string;
+  category: string;
+  family: string;
+  variant_label: string | null;
+  size_label: string | null;
+  updated_at: Date | string;
+  is_active: boolean;
+  is_agent_visible: boolean;
+  units_sold: bigint | number | null;
+  revenue_crc: bigint | number | null;
+  units_previous_period: bigint | number | null;
+  revenue_previous_period: bigint | number | null;
+};
+
+type PerformanceTrendRaw = {
+  bucket_start: Date | string;
+  units_sold: bigint | number | null;
+  revenue_crc: bigint | number | null;
+};
+
+function resolvePerformanceRangeWindow(range: GetProductsPerformanceParams["range"]): {
+  range: GetProductsPerformanceParams["range"];
+  start: Date | null;
+  end: Date;
+  previousStart: Date | null;
+  previousEnd: Date | null;
+  trendGranularity: "day" | "week";
+} {
+  const end = new Date();
+
+  if (range === "all") {
+    return {
+      range,
+      start: null,
+      end,
+      previousStart: null,
+      previousEnd: null,
+      trendGranularity: "week",
+    };
+  }
+
+  const days = Number.parseInt(range.replace("d", ""), 10);
+  const start = new Date(end);
+  start.setUTCHours(0, 0, 0, 0);
+  start.setUTCDate(start.getUTCDate() - (days - 1));
+
+  const previousEnd = new Date(start);
+  const previousStart = new Date(start);
+  previousStart.setUTCDate(previousStart.getUTCDate() - days);
+
+  return {
+    range,
+    start,
+    end,
+    previousStart,
+    previousEnd,
+    trendGranularity: "day",
+  };
+}
+
+function getGrowthPercent(currentValue: number, previousValue: number): number | null {
+  if (previousValue <= 0) {
+    return null;
+  }
+
+  return Number((((currentValue - previousValue) / previousValue) * 100).toFixed(2));
+}
+
+function formatTrendLabel(input: { bucketStart: Date; granularity: "day" | "week" }): string {
+  if (input.granularity === "week") {
+    const weekStart = new Date(input.bucketStart);
+    const weekEnd = new Date(input.bucketStart);
+    weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
+    return `${weekStart.toLocaleDateString("es-CR", {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    })} - ${weekEnd.toLocaleDateString("es-CR", {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    })}`;
+  }
+
+  return input.bucketStart.toLocaleDateString("es-CR", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function mapPerformanceRow(row: PerformanceRowRaw): ProductPerformanceRow {
+  const unitsSold = toCount(row.units_sold);
+  const revenueCrc = toCount(row.revenue_crc);
+  const unitsPrevious = toCount(row.units_previous_period);
+  const revenuePrevious = toCount(row.revenue_previous_period);
+  const growthPercent = getGrowthPercent(unitsSold, unitsPrevious);
+  const hasDropAlert = unitsPrevious > 0 && unitsSold < unitsPrevious;
+  const hasNoSalesAlert = row.is_active && unitsSold === 0;
+
+  return {
+    id: row.id,
+    sku: row.sku,
+    name: row.name,
+    category: row.category,
+    family: row.family,
+    variant_label: row.variant_label,
+    size_label: row.size_label,
+    updated_at: toIsoString(row.updated_at),
+    is_active: row.is_active,
+    is_agent_visible: row.is_agent_visible,
+    units_sold: unitsSold,
+    revenue_crc: revenueCrc,
+    units_previous_period: unitsPrevious,
+    revenue_previous_period: revenuePrevious,
+    growth_percent: growthPercent,
+    commercial_alert: hasNoSalesAlert || hasDropAlert,
+    margin_percent: null,
+    stock: null,
+  };
+}
 
 export async function listCatalogProducts(
   params: ListCatalogProductsParams = {},
@@ -1690,4 +1842,257 @@ export async function deleteProductSearchTerm(
 
   await refreshSearchIndexSafely(db, { productId, reason: "search_term_delete" });
   return getProductDetail(productId, options);
+}
+
+export async function getProductsPerformance(
+  params: GetProductsPerformanceParams,
+  options?: ServiceOptions,
+): Promise<ProductsPerformanceResponse> {
+  const db = resolveDb(options);
+  const window = resolvePerformanceRangeWindow(params.range);
+  const whereClause = buildBaseWhere({
+    search: params.search,
+    category: params.category,
+    family: params.family,
+    isActive: params.isActive,
+    isAgentVisible: params.isAgentVisible,
+    pricingMode: params.pricingMode,
+    maxPriceCrc: params.maxPriceCrc,
+    minQty: params.minQty,
+    exactProductId: params.exactProductId,
+  });
+
+  const alwaysIncludedStatusesSql = Prisma.join(
+    PERFORMANCE_ALWAYS_INCLUDED_ORDER_STATUSES.map(
+      (status) => Prisma.sql`${status}::public.order_status_enum`,
+    ),
+    ", ",
+  );
+  const excludedStatusesSql = Prisma.join(
+    PERFORMANCE_EXCLUDED_ORDER_STATUSES.map(
+      (status) => Prisma.sql`${status}::public.order_status_enum`,
+    ),
+    ", ",
+  );
+  const performanceOrderEligibilitySql = Prisma.sql`
+    (
+      o.status IN (${alwaysIncludedStatusesSql})
+      OR (
+        o.status NOT IN (${excludedStatusesSql})
+        AND LOWER(COALESCE(o.payment_status, '')) = ${PERFORMANCE_VALID_PAYMENT_STATUS}
+      )
+    )
+  `;
+
+  const currentPeriodFilter = window.start
+    ? Prisma.sql`AND o.created_at >= ${window.start} AND o.created_at < ${window.end}`
+    : Prisma.empty;
+  const previousPeriodFilter =
+    window.previousStart && window.previousEnd
+      ? Prisma.sql`AND o.created_at >= ${window.previousStart} AND o.created_at < ${window.previousEnd}`
+      : Prisma.sql`AND FALSE`;
+
+  const performanceRowsRaw = await db.$queryRaw<PerformanceRowRaw[]>(Prisma.sql`
+    WITH filtered_products AS (
+      SELECT
+        v.id,
+        v.sku,
+        v.name,
+        v.category,
+        v.family,
+        v.variant_label,
+        v.size_label,
+        v.updated_at,
+        v.is_active,
+        v.is_agent_visible
+      ${baseFrom}
+      ${whereClause}
+    ),
+    current_metrics AS (
+      SELECT
+        oi.product_id,
+        SUM(oi.quantity)::bigint AS units_sold,
+        SUM(COALESCE(oi.total_price_crc, 0))::bigint AS revenue_crc
+      FROM public.order_items oi
+      JOIN public.orders o ON o.id = oi.order_id
+      JOIN filtered_products fp ON fp.id = oi.product_id
+      WHERE oi.product_id IS NOT NULL
+        AND ${performanceOrderEligibilitySql}
+        ${currentPeriodFilter}
+      GROUP BY oi.product_id
+    ),
+    previous_metrics AS (
+      SELECT
+        oi.product_id,
+        SUM(oi.quantity)::bigint AS units_sold,
+        SUM(COALESCE(oi.total_price_crc, 0))::bigint AS revenue_crc
+      FROM public.order_items oi
+      JOIN public.orders o ON o.id = oi.order_id
+      JOIN filtered_products fp ON fp.id = oi.product_id
+      WHERE oi.product_id IS NOT NULL
+        AND ${performanceOrderEligibilitySql}
+        ${previousPeriodFilter}
+      GROUP BY oi.product_id
+    )
+    SELECT
+      fp.id,
+      fp.sku,
+      fp.name,
+      fp.category,
+      fp.family,
+      fp.variant_label,
+      fp.size_label,
+      fp.updated_at,
+      fp.is_active,
+      fp.is_agent_visible,
+      COALESCE(cm.units_sold, 0) AS units_sold,
+      COALESCE(cm.revenue_crc, 0) AS revenue_crc,
+      COALESCE(pm.units_sold, 0) AS units_previous_period,
+      COALESCE(pm.revenue_crc, 0) AS revenue_previous_period
+    FROM filtered_products fp
+    LEFT JOIN current_metrics cm ON cm.product_id = fp.id
+    LEFT JOIN previous_metrics pm ON pm.product_id = fp.id
+    ORDER BY COALESCE(cm.revenue_crc, 0) DESC, COALESCE(cm.units_sold, 0) DESC, fp.name ASC
+  `);
+
+  const trendBucketSql =
+    window.trendGranularity === "day"
+      ? Prisma.sql`DATE_TRUNC('day', o.created_at AT TIME ZONE 'UTC')`
+      : Prisma.sql`DATE_TRUNC('week', o.created_at AT TIME ZONE 'UTC')`;
+
+  const trendPeriodFilter = window.start
+    ? Prisma.sql`AND o.created_at >= ${window.start} AND o.created_at < ${window.end}`
+    : Prisma.empty;
+
+  const trendRaw = await db.$queryRaw<PerformanceTrendRaw[]>(Prisma.sql`
+    WITH filtered_products AS (
+      SELECT v.id
+      ${baseFrom}
+      ${whereClause}
+    )
+    SELECT
+      ${trendBucketSql} AS bucket_start,
+      SUM(oi.quantity)::bigint AS units_sold,
+      SUM(COALESCE(oi.total_price_crc, 0))::bigint AS revenue_crc
+    FROM public.order_items oi
+    JOIN public.orders o ON o.id = oi.order_id
+    JOIN filtered_products fp ON fp.id = oi.product_id
+    WHERE oi.product_id IS NOT NULL
+      AND ${performanceOrderEligibilitySql}
+      ${trendPeriodFilter}
+    GROUP BY ${trendBucketSql}
+    ORDER BY ${trendBucketSql} ASC
+  `);
+
+  const rows = performanceRowsRaw.map(mapPerformanceRow);
+
+  const topUnits = [...rows]
+    .filter((row) => row.units_sold > 0)
+    .sort((left, right) => right.units_sold - left.units_sold)
+    .slice(0, 5)
+    .map<ProductTopPerformanceEntry>((row) => ({
+      product_id: row.id,
+      name: row.name,
+      units_sold: row.units_sold,
+      revenue_crc: row.revenue_crc,
+    }));
+
+  const topRevenue = [...rows]
+    .filter((row) => row.revenue_crc > 0)
+    .sort((left, right) => right.revenue_crc - left.revenue_crc)
+    .slice(0, 5)
+    .map<ProductTopPerformanceEntry>((row) => ({
+      product_id: row.id,
+      name: row.name,
+      units_sold: row.units_sold,
+      revenue_crc: row.revenue_crc,
+    }));
+
+  const trendMap = new Map<string, { units_sold: number; revenue_crc: number }>(
+    trendRaw.map((point) => {
+      const date = new Date(point.bucket_start);
+      const key = date.toISOString();
+      return [
+        key,
+        {
+          units_sold: toCount(point.units_sold),
+          revenue_crc: toCount(point.revenue_crc),
+        },
+      ];
+    }),
+  );
+
+  const trend: ProductPerformanceTrendPoint[] = [];
+  if (window.trendGranularity === "day" && window.start) {
+    const cursor = new Date(window.start);
+    const endDay = new Date(window.end);
+    endDay.setUTCHours(0, 0, 0, 0);
+
+    while (cursor <= endDay) {
+      const key = cursor.toISOString();
+      const point = trendMap.get(key) ?? { units_sold: 0, revenue_crc: 0 };
+      trend.push({
+        bucket_start: key,
+        label: formatTrendLabel({
+          bucketStart: new Date(cursor),
+          granularity: "day",
+        }),
+        units_sold: point.units_sold,
+        revenue_crc: point.revenue_crc,
+      });
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+  } else {
+    for (const point of trendRaw) {
+      const bucketStart = new Date(point.bucket_start);
+      trend.push({
+        bucket_start: bucketStart.toISOString(),
+        label: formatTrendLabel({
+          bucketStart,
+          granularity: window.trendGranularity,
+        }),
+        units_sold: toCount(point.units_sold),
+        revenue_crc: toCount(point.revenue_crc),
+      });
+    }
+  }
+
+  const rowsByGrowth = rows
+    .filter((row) => row.growth_percent != null)
+    .sort((left, right) => (right.growth_percent ?? 0) - (left.growth_percent ?? 0));
+  const rowsWithDrop = rowsByGrowth.filter((row) => (row.growth_percent ?? 0) < 0);
+  const rowsWithNoSales = rows
+    .filter((row) => row.is_active && row.units_sold === 0)
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  return {
+    range: params.range,
+    date_anchor: "orders.created_at",
+    trend_granularity: window.trendGranularity,
+    included_order_statuses: [
+      ...PERFORMANCE_ALWAYS_INCLUDED_ORDER_STATUSES,
+      ...PERFORMANCE_CONDITIONAL_ORDER_STATUSES,
+    ],
+    excluded_order_statuses: PERFORMANCE_EXCLUDED_ORDER_STATUSES,
+    margin_available: false,
+    stock_available: false,
+    summary: {
+      units_sold_total: rows.reduce((sum, row) => sum + row.units_sold, 0),
+      revenue_total_crc: rows.reduce((sum, row) => sum + row.revenue_crc, 0),
+      products_without_sales: rowsWithNoSales.length,
+      products_with_commercial_alerts: rows.filter((row) => row.commercial_alert).length,
+    },
+    rows,
+    top_products: {
+      units: topUnits,
+      revenue: topRevenue,
+    },
+    sales_trend: trend,
+    insights: {
+      top_performer_product_id: topRevenue[0]?.product_id ?? null,
+      highest_growth_product_id: rowsByGrowth[0]?.id ?? null,
+      strongest_drop_product_id: rowsWithDrop.at(-1)?.id ?? null,
+      product_without_sales_id: rowsWithNoSales[0]?.id ?? null,
+    },
+  };
 }

@@ -22,6 +22,7 @@ export type {
   OrderSort,
   PaymentReceiptReviewActionInput,
   UpdatePaymentReceiptInput,
+  UpdateOrderInput,
   UpdateOrderActivityInput,
 } from "@/domain/crm/orders";
 

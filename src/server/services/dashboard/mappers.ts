@@ -4,7 +4,6 @@ import type {
   Contact,
   LeadThread,
   Order,
-  OrderStatusEnum,
 } from "@prisma/client";
 
 import { calculatePercentage, toNullableIsoDate, toNumber } from "@/server/services/shared";
@@ -24,6 +23,8 @@ type OrderWithContact = Order & {
   contact: Pick<Contact, "id" | "displayName"> | null;
 };
 
+type RevenueOrderRecord = Pick<Order, "id" | "createdAt" | "totalCrc">;
+
 type CampaignWithSpend = Pick<
   Campaign,
   "id" | "name" | "platform" | "objective" | "startDate" | "endDate"
@@ -31,10 +32,46 @@ type CampaignWithSpend = Pick<
   campaignSpends: Pick<CampaignSpend, "amountCrc">[];
 };
 
-const SHORT_DATE_FORMATTER = new Intl.DateTimeFormat("es-CR", {
-  month: "short",
-  day: "numeric",
-});
+function getTimeZoneDayParts(input: { date: Date; timeZone: string }) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: input.timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(input.date);
+
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return {
+    year,
+    month,
+    day,
+  };
+}
+
+function getTimeZoneDayKey(input: { date: Date; timeZone: string }) {
+  const parts = getTimeZoneDayParts(input);
+
+  if (!parts) {
+    return null;
+  }
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function formatTimeZoneDayLabel(input: { date: Date; timeZone: string }) {
+  return new Intl.DateTimeFormat("es-CR", {
+    month: "short",
+    day: "numeric",
+    timeZone: input.timeZone,
+  }).format(input.date);
+}
 
 export function mapDashboardMetric(input: {
   key: DashboardMetric["key"];
@@ -52,6 +89,7 @@ export function mapDashboardRecentOrder(order: OrderWithContact): DashboardRecen
     paymentStatus: order.paymentStatus,
     totalCrc: order.totalCrc,
     createdAt: order.createdAt.toISOString(),
+    deliveryDate: toNullableIsoDate(order.deliveryDate),
     customer: mapCustomerReference({
       id: order.contact?.id,
       name: order.contact?.displayName,
@@ -60,32 +98,47 @@ export function mapDashboardRecentOrder(order: OrderWithContact): DashboardRecen
 }
 
 export function mapDashboardRevenueSeries(input: {
-  startDate: Date;
   days: number;
-  orders: Pick<Order, "createdAt" | "totalCrc" | "status">[];
-  successfulStatuses: OrderStatusEnum[];
+  orders: RevenueOrderRecord[];
+  timeZone: string;
+  now: Date;
 }): DashboardDailyRevenuePoint[] {
   const buckets = new Map<string, DashboardDailyRevenuePoint>();
 
   for (let index = 0; index < input.days; index += 1) {
-    const date = new Date(input.startDate);
-    date.setUTCDate(input.startDate.getUTCDate() + index);
-    const key = date.toISOString().slice(0, 10);
+    const date = new Date(input.now);
+    date.setUTCDate(input.now.getUTCDate() - (input.days - 1 - index));
+    const key = getTimeZoneDayKey({
+      date,
+      timeZone: input.timeZone,
+    });
+
+    if (!key) {
+      continue;
+    }
 
     buckets.set(key, {
       date: key,
-      label: SHORT_DATE_FORMATTER.format(date),
+      label: formatTimeZoneDayLabel({
+        date,
+        timeZone: input.timeZone,
+      }),
       revenueCrc: 0,
       orders: 0,
+      orderBreakdown: [],
     });
   }
 
   for (const order of input.orders) {
-    if (!input.successfulStatuses.includes(order.status)) {
+    const key = getTimeZoneDayKey({
+      date: order.createdAt,
+      timeZone: input.timeZone,
+    });
+
+    if (!key) {
       continue;
     }
 
-    const key = order.createdAt.toISOString().slice(0, 10);
     const bucket = buckets.get(key);
 
     if (!bucket) {
@@ -94,6 +147,10 @@ export function mapDashboardRevenueSeries(input: {
 
     bucket.revenueCrc += order.totalCrc;
     bucket.orders += 1;
+    bucket.orderBreakdown.push({
+      orderId: order.id,
+      amountCrc: order.totalCrc,
+    });
   }
 
   return [...buckets.values()];

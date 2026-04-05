@@ -13,22 +13,21 @@ import {
 } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
-import { salesTrendMock, productPerformanceMetricsMock } from "@/components/products/mock-data";
 import type {
   CatalogProductRow,
   PerformanceMetric,
-  ProductAnalyticsSummary,
   ProductDetail,
   ProductMode,
-  ProductPerformanceMetricMock,
-  ProductPerformanceRow,
+  ProductPerformanceTrendPoint,
   ProductPricingMode,
+  ProductsPerformanceRange,
 } from "@/components/products/types";
 import {
   useCreateProduct,
   useProductDetail,
   useProductSearchMedia,
   useProductsCatalog,
+  useProductsPerformance,
   useUpdateProduct,
 } from "@/hooks";
 import { Button } from "@/components/ui/button";
@@ -37,6 +36,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
 import type {
   CreateProductInput,
+  GetProductsPerformanceParams,
   ListCatalogProductsParams,
   ProductDiscountVisibility,
   UpdateProductInput,
@@ -414,33 +414,6 @@ function validateProductPayloadForSave(payload: UpdateProductInput): string | nu
   return null;
 }
 
-function buildPerformanceRow(
-  product: ProductDetail,
-  metricsMap: Map<string, ProductPerformanceMetricMock>,
-): ProductPerformanceRow {
-  const metric = metricsMap.get(product.id);
-
-  return {
-    id: product.id,
-    sku: product.sku,
-    name: product.name,
-    category: product.category,
-    family: product.family,
-    variant_label: product.variant_label,
-    size_label: product.size_label,
-    updated_at: product.updated_at,
-    units_sold_mock: metric?.units_sold_mock ?? 0,
-    revenue_crc_mock: metric?.revenue_crc_mock ?? 0,
-    margin_percent_mock: metric?.margin_percent_mock ?? 0,
-    stock_mock: metric?.stock_mock ?? null,
-    growth_percent_mock: metric?.growth_percent_mock ?? 0,
-    commercial_alert_mock:
-      (metric?.units_sold_mock ?? 0) === 0 ||
-      (metric?.growth_percent_mock ?? 0) < -10 ||
-      (metric?.stock_mock != null && metric.stock_mock <= 3),
-  };
-}
-
 function toNumberOrNull(rawValue: string) {
   const normalized = rawValue.trim();
 
@@ -521,47 +494,15 @@ function buildCreatePayloadFromDraft(draft: CreateProductDraft): CreateProductIn
   };
 }
 
-function mapTrendByPeriod(period: "7d" | "30d" | "90d") {
-  if (period === "7d") {
-    return salesTrendMock.map((point) => ({
-      label: point.label,
-      units_sold_mock: Math.round(point.units_sold_mock * 0.35),
-      revenue_crc_mock: Math.round(point.revenue_crc_mock * 0.36),
-    }));
-  }
-
-  if (period === "90d") {
-    return salesTrendMock.map((point) => ({
-      label: point.label,
-      units_sold_mock: Math.round(point.units_sold_mock * 2.2),
-      revenue_crc_mock: Math.round(point.revenue_crc_mock * 2.25),
-    }));
-  }
-
-  return salesTrendMock.map((point) => ({ ...point }));
-}
-
-function getMetricPeriodMultiplier(period: "7d" | "30d" | "90d") {
-  if (period === "7d") {
-    return 0.3;
-  }
-
-  if (period === "90d") {
-    return 2.8;
-  }
-
-  return 1;
-}
-
 function TrendChart({
   points,
   metric,
 }: {
-  points: ProductAnalyticsSummary["sales_trend_mock"];
+  points: ProductPerformanceTrendPoint[];
   metric: PerformanceMetric;
 }) {
   const values = points.map((point) =>
-    metric === "units" ? point.units_sold_mock : point.revenue_crc_mock,
+    metric === "units" ? point.units_sold : point.revenue_crc,
   );
   const maxValue = Math.max(...values, 1);
 
@@ -607,7 +548,7 @@ export function ProductsPageClient() {
   const [createDraft, setCreateDraft] = useState<CreateProductDraft>(defaultCreateDraft);
   const [skuControlEnabled, setSkuControlEnabled] = useState(false);
   const [skuDraft, setSkuDraft] = useState("");
-  const [topPeriod, setTopPeriod] = useState<"7d" | "30d" | "90d">("30d");
+  const [topPeriod, setTopPeriod] = useState<ProductsPerformanceRange>("30d");
   const [saveStatusMessage, setSaveStatusMessage] = useState<string | null>(null);
   const [createStatusMessage, setCreateStatusMessage] = useState<string | null>(null);
   const [newAlias, setNewAlias] = useState("");
@@ -630,11 +571,6 @@ export function ProductsPageClient() {
   const { createProduct, isPending: isCreatingProduct } = useCreateProduct();
   const { addImage, updateImage, deleteImage, addAlias, deleteAlias, addSearchTerm, updateSearchTerm, deleteSearchTerm, isPending: isUpdatingSearchMedia } =
     useProductSearchMedia();
-
-  const metricsMap = useMemo(
-    () => new Map(productPerformanceMetricsMock.map((metric) => [metric.product_id, metric])),
-    [],
-  );
 
   const catalogQueryParams = useMemo<ListCatalogProductsParams>(() => {
     return {
@@ -675,6 +611,29 @@ export function ProductsPageClient() {
     isLoading: isSelectedProductLoading,
     isError: isSelectedProductError,
   } = useProductDetail(selectedProductId);
+
+  const performanceQueryParams = useMemo<GetProductsPerformanceParams>(
+    () => ({
+      range: topPeriod,
+      search: catalogQueryParams.search,
+      category: catalogQueryParams.category,
+      family: catalogQueryParams.family,
+      isActive: catalogQueryParams.isActive,
+      isAgentVisible: catalogQueryParams.isAgentVisible,
+      pricingMode: catalogQueryParams.pricingMode,
+      maxPriceCrc: catalogQueryParams.maxPriceCrc,
+      minQty: catalogQueryParams.minQty,
+      exactProductId: catalogQueryParams.exactProductId,
+    }),
+    [catalogQueryParams, topPeriod],
+  );
+
+  const {
+    data: performanceData,
+    isLoading: isPerformanceLoading,
+    isError: isPerformanceError,
+    error: performanceError,
+  } = useProductsPerformance(performanceQueryParams);
 
   useEffect(() => {
     if (!catalogData) {
@@ -813,10 +772,7 @@ export function ProductsPageClient() {
   }, [selectedProduct]);
 
   const catalogRows = useMemo(() => filteredProducts.map(toCatalogRow), [filteredProducts]);
-  const performanceRows = useMemo(
-    () => filteredProducts.map((product) => buildPerformanceRow(product, metricsMap)),
-    [filteredProducts, metricsMap],
-  );
+  const performanceRows = performanceData?.rows ?? [];
 
   const catalogKpis = catalogData?.kpis ?? {
     activeProducts: 0,
@@ -825,71 +781,20 @@ export function ProductsPageClient() {
     withoutPrimaryImage: 0,
   };
 
-  const performanceSummary = useMemo<ProductAnalyticsSummary>(() => {
-    const totalUnits = performanceRows.reduce((sum, row) => sum + row.units_sold_mock, 0);
-    const totalRevenue = performanceRows.reduce((sum, row) => sum + row.revenue_crc_mock, 0);
-    const withoutSales = performanceRows.filter((row) => row.units_sold_mock === 0).length;
-    const withCommercialAlerts = performanceRows.filter((row) => row.commercial_alert_mock).length;
-
-    const sortedByUnits = [...performanceRows].sort(
-      (left, right) => right.units_sold_mock - left.units_sold_mock,
-    );
-    const sortedByRevenue = [...performanceRows].sort(
-      (left, right) => right.revenue_crc_mock - left.revenue_crc_mock,
-    );
-    const sortedByGrowth = [...performanceRows].sort(
-      (left, right) => right.growth_percent_mock - left.growth_percent_mock,
-    );
-    const sortedByMargin = [...performanceRows].sort(
-      (left, right) => right.margin_percent_mock - left.margin_percent_mock,
-    );
-
-    const topProducts = sortedByRevenue.slice(0, 5).map((row) => ({
-      product_id: row.id,
-      name: row.name,
-      units_sold_mock: row.units_sold_mock,
-      revenue_crc_mock: row.revenue_crc_mock,
-    }));
-
-    const trend = mapTrendByPeriod(topPeriod);
-
-    return {
-      units_sold_total_mock: totalUnits,
-      revenue_total_crc_mock: totalRevenue,
-      products_without_sales_mock: withoutSales,
-      products_with_commercial_alerts_mock: withCommercialAlerts,
-      top_products: topProducts,
-      sales_trend_mock: trend,
-      insights_mock: {
-        highest_growth_product_id: sortedByGrowth[0]?.id ?? null,
-        strongest_drop_product_id: sortedByGrowth.at(-1)?.id ?? null,
-        best_margin_product_id: sortedByMargin[0]?.id ?? null,
-        product_without_sales_id: sortedByUnits.find((row) => row.units_sold_mock === 0)?.id ?? null,
-      },
-    };
-  }, [performanceRows, topPeriod]);
-
   const topProductsByPeriod = useMemo(() => {
-    const multiplier = getMetricPeriodMultiplier(topPeriod);
+    if (!performanceData) {
+      return [];
+    }
 
-    return performanceRows
-      .map((row) => ({
-        ...row,
-        units_period: Math.round(row.units_sold_mock * multiplier),
-        revenue_period: Math.round(row.revenue_crc_mock * multiplier),
-      }))
-      .sort((left, right) =>
-        performanceMetric === "units"
-          ? right.units_period - left.units_period
-          : right.revenue_period - left.revenue_period,
-      )
-      .slice(0, 5);
-  }, [performanceMetric, performanceRows, topPeriod]);
+    return performanceMetric === "units"
+      ? performanceData.top_products.units
+      : performanceData.top_products.revenue;
+  }, [performanceData, performanceMetric]);
 
   const topReferenceValue = useMemo(() => {
     return Math.max(
       ...topProductsByPeriod.map((row) =>
-        performanceMetric === "units" ? row.units_period : row.revenue_period,
+        performanceMetric === "units" ? row.units_sold : row.revenue_crc,
       ),
       1,
     );
@@ -910,8 +815,17 @@ export function ProductsPageClient() {
     return `MWL-${createPreviewId.replaceAll("_", "-").toUpperCase()}`.replace(/-+/g, "-");
   }, [createPreviewId]);
 
-  const resolveProductName = (productId: string | null) =>
-    productId ? products.find((product) => product.id === productId)?.name ?? "Sin producto" : "Sin producto";
+  const resolveProductName = (productId: string | null) => {
+    if (!productId) {
+      return "Sin producto";
+    }
+
+    return (
+      performanceRows.find((product) => product.id === productId)?.name ??
+      products.find((product) => product.id === productId)?.name ??
+      "Sin producto"
+    );
+  };
 
   function updateSelectedProductField<K extends keyof ProductDetail>(
     field: K,
@@ -1472,6 +1386,14 @@ export function ProductsPageClient() {
           description={catalogError?.message ?? "Error inesperado consultando productos."}
         />
       ) : null}
+      {currentMode === "performance" && isPerformanceError ? (
+        <StateDisplay
+          compact
+          tone="error"
+          title="No se pudo cargar performance"
+          description={performanceError?.message ?? "Error inesperado consultando metricas reales."}
+        />
+      ) : null}
 
       {currentMode === "catalog" ? (
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -1507,7 +1429,7 @@ export function ProductsPageClient() {
               Unidades vendidas
             </p>
             <p className="mt-2 text-3xl font-semibold text-slate-950">
-              {performanceSummary.units_sold_total_mock.toLocaleString("es-CR")}
+              {(performanceData?.summary.units_sold_total ?? 0).toLocaleString("es-CR")}
             </p>
           </article>
           <article className="rounded-[24px] border border-white/70 bg-white/90 p-5 shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
@@ -1515,7 +1437,7 @@ export function ProductsPageClient() {
               Ingresos
             </p>
             <p className="mt-2 text-3xl font-semibold text-slate-950">
-              {formatCurrencyCRC(performanceSummary.revenue_total_crc_mock)}
+              {formatCurrencyCRC(performanceData?.summary.revenue_total_crc ?? 0)}
             </p>
           </article>
           <article className="rounded-[24px] border border-amber-200/80 bg-amber-50/80 p-5 shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
@@ -1523,7 +1445,7 @@ export function ProductsPageClient() {
               Productos sin ventas
             </p>
             <p className="mt-2 text-3xl font-semibold text-amber-900">
-              {performanceSummary.products_without_sales_mock}
+              {performanceData?.summary.products_without_sales ?? 0}
             </p>
           </article>
           <article className="rounded-[24px] border border-rose-200/80 bg-rose-50/80 p-5 shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
@@ -1531,7 +1453,7 @@ export function ProductsPageClient() {
               Alertas comerciales
             </p>
             <p className="mt-2 text-3xl font-semibold text-rose-800">
-              {performanceSummary.products_with_commercial_alerts_mock}
+              {performanceData?.summary.products_with_commercial_alerts ?? 0}
             </p>
           </article>
         </section>
@@ -1645,12 +1567,19 @@ export function ProductsPageClient() {
                       <th className="px-3 py-3">Unidades vendidas</th>
                       <th className="px-3 py-3">Ingresos</th>
                       <th className="px-3 py-3">Margen</th>
-                      <th className="px-3 py-3">Stock (mock)</th>
+                      <th className="px-3 py-3">Stock</th>
                       <th className="px-3 py-3">Ultima actualizacion</th>
                       <th className="px-3 py-3 text-right">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/60">
+                    {isPerformanceLoading ? (
+                      <TableEmptyStateRow
+                        colSpan={8}
+                        title="Cargando performance real"
+                        description="Agregando ventas validas por product_id..."
+                      />
+                    ) : null}
                     {performanceRows.map((row) => (
                       <tr
                         key={row.id}
@@ -1668,27 +1597,31 @@ export function ProductsPageClient() {
                           )}
                         </td>
                         <td className="px-3 py-4 font-medium text-slate-950">{row.sku}</td>
-                        <td className="px-3 py-4">{row.units_sold_mock.toLocaleString("es-CR")}</td>
-                        <td className="px-3 py-4">{formatCurrencyCRC(row.revenue_crc_mock)}</td>
+                        <td className="px-3 py-4">{row.units_sold.toLocaleString("es-CR")}</td>
+                        <td className="px-3 py-4">{formatCurrencyCRC(row.revenue_crc)}</td>
                         <td className="px-3 py-4">
-                          <div className="inline-flex items-center gap-2">
-                            <CircleDot
-                              className={`h-3.5 w-3.5 ${
-                                row.margin_percent_mock >= 35
-                                  ? "text-emerald-600"
-                                  : row.margin_percent_mock >= 20
-                                    ? "text-amber-500"
-                                    : "text-rose-500"
-                              }`}
-                            />
-                            <span>{row.margin_percent_mock}%</span>
-                          </div>
+                          {row.margin_percent == null ? (
+                            <span className="text-xs text-muted-foreground">N/D</span>
+                          ) : (
+                            <div className="inline-flex items-center gap-2">
+                              <CircleDot
+                                className={`h-3.5 w-3.5 ${
+                                  row.margin_percent >= 35
+                                    ? "text-emerald-600"
+                                    : row.margin_percent >= 20
+                                      ? "text-amber-500"
+                                      : "text-rose-500"
+                                }`}
+                              />
+                              <span>{row.margin_percent}%</span>
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-4">
-                          {row.stock_mock == null ? (
-                            <span className="text-xs text-muted-foreground">Sin fuente real</span>
+                          {row.stock == null ? (
+                            <span className="text-xs text-muted-foreground">N/D</span>
                           ) : (
-                            <span>{row.stock_mock}</span>
+                            <span>{row.stock}</span>
                           )}
                         </td>
                         <td className="px-3 py-4">{formatDateTime(row.updated_at)}</td>
@@ -1699,11 +1632,11 @@ export function ProductsPageClient() {
                         </td>
                       </tr>
                     ))}
-                    {performanceRows.length === 0 ? (
+                    {!isPerformanceLoading && performanceRows.length === 0 ? (
                       <TableEmptyStateRow
                         colSpan={8}
                         title="No hay datos para performance"
-                        description="El set mock derivado queda vacio con los filtros actuales."
+                        description="No hay ventas validas o productos visibles para los filtros actuales."
                       />
                     ) : null}
                   </tbody>
@@ -2611,16 +2544,17 @@ export function ProductsPageClient() {
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary/70">
                       Top productos vendidos
                     </p>
-                    <p className="text-sm text-muted-foreground">Top 5 · solo lectura mock</p>
+                    <p className="text-sm text-muted-foreground">Top 5 real por rango seleccionado</p>
                   </div>
                   <select
                     value={topPeriod}
-                    onChange={(event) => setTopPeriod(event.target.value as "7d" | "30d" | "90d")}
+                    onChange={(event) => setTopPeriod(event.target.value as ProductsPerformanceRange)}
                     className="h-9 rounded-xl border border-border bg-white px-3 text-xs text-slate-950 outline-none transition focus:border-primary"
                   >
                     <option value="7d">7 dias</option>
                     <option value="30d">30 dias</option>
                     <option value="90d">90 dias</option>
+                    <option value="all">Todo el tiempo</option>
                   </select>
                 </div>
                 <div className="mt-3 inline-flex rounded-xl border border-border bg-white p-1">
@@ -2650,11 +2584,11 @@ export function ProductsPageClient() {
                 <div className="mt-4 space-y-3">
                   {topProductsByPeriod.map((row) => {
                     const value =
-                      performanceMetric === "units" ? row.units_period : row.revenue_period;
+                      performanceMetric === "units" ? row.units_sold : row.revenue_crc;
                     const widthPercent = (value / topReferenceValue) * 100;
 
                     return (
-                      <div key={row.id} className="space-y-1">
+                      <div key={row.product_id} className="space-y-1">
                         <div className="flex items-center justify-between gap-3 text-sm">
                           <p className="truncate font-medium text-slate-900">{row.name}</p>
                           <p className="shrink-0 text-xs text-muted-foreground">
@@ -2680,10 +2614,11 @@ export function ProductsPageClient() {
                   Tendencia de ventas
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Serie mock derivada para UI, sin persistencia de metrica en mwl_products.
+                  Serie real por {performanceData?.date_anchor ?? "orders.created_at"} con
+                  granularidad {performanceData?.trend_granularity === "week" ? " semanal" : " diaria"}.
                 </p>
                 <div className="mt-4">
-                  <TrendChart points={performanceSummary.sales_trend_mock} metric={performanceMetric} />
+                  <TrendChart points={performanceData?.sales_trend ?? []} metric={performanceMetric} />
                 </div>
               </section>
 
@@ -2697,7 +2632,7 @@ export function ProductsPageClient() {
                       Mayor crecimiento
                     </p>
                     <p className="mt-1 font-medium">
-                      {resolveProductName(performanceSummary.insights_mock.highest_growth_product_id)}
+                      {resolveProductName(performanceData?.insights.highest_growth_product_id ?? null)}
                     </p>
                   </div>
                   <div className="rounded-xl border border-border/70 bg-slate-50 p-3">
@@ -2705,15 +2640,15 @@ export function ProductsPageClient() {
                       Caida mas fuerte
                     </p>
                     <p className="mt-1 font-medium">
-                      {resolveProductName(performanceSummary.insights_mock.strongest_drop_product_id)}
+                      {resolveProductName(performanceData?.insights.strongest_drop_product_id ?? null)}
                     </p>
                   </div>
                   <div className="rounded-xl border border-border/70 bg-slate-50 p-3">
                     <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">
-                      Mejor margen
+                      Top performer
                     </p>
                     <p className="mt-1 font-medium">
-                      {resolveProductName(performanceSummary.insights_mock.best_margin_product_id)}
+                      {resolveProductName(performanceData?.insights.top_performer_product_id ?? null)}
                     </p>
                   </div>
                   <div className="rounded-xl border border-border/70 bg-slate-50 p-3">
@@ -2721,7 +2656,7 @@ export function ProductsPageClient() {
                       Producto sin ventas
                     </p>
                     <p className="mt-1 font-medium">
-                      {resolveProductName(performanceSummary.insights_mock.product_without_sales_id)}
+                      {resolveProductName(performanceData?.insights.product_without_sales_id ?? null)}
                     </p>
                   </div>
                 </div>
@@ -3013,8 +2948,8 @@ export function ProductsPageClient() {
         <div className="flex items-start gap-2">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <p>
-            Las metricas de Performance (unidades, ingresos, margen, stock, tendencia e insights) son
-            mock derivado de solo lectura para UI. No representan columnas persistidas de `mwl_products`.
+            Performance ahora usa datos reales agregados por `order_items.product_id` y estados
+            vendibles de `orders`. Margen y stock se muestran como N/D mientras no exista fuente real.
           </p>
         </div>
       </section>

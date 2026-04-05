@@ -6,7 +6,10 @@ import type { ListCustomersParams } from "@/server/services/customers/types";
 import type { DashboardDailySalesRangeDays } from "@/server/services/dashboard/types";
 import type { FunnelSummaryParams } from "@/server/services/funnel/types";
 import type { ListOrdersParams } from "@/server/services/orders/types";
-import type { ListCatalogProductsParams } from "@/server/services/products";
+import type {
+  GetProductsPerformanceParams,
+  ListCatalogProductsParams,
+} from "@/server/services/products";
 
 function normalizeQueryKeyParams<TParams extends object | undefined>(params?: TParams) {
   return Object.fromEntries(
@@ -25,6 +28,7 @@ export const queryEndpoints = {
   funnel: "/api/funnel/summary",
   conversations: "/api/conversations",
   products: "/api/products",
+  productsPerformance: "/api/products/performance",
 } as const;
 
 export const queryRefetchIntervals = {
@@ -37,6 +41,7 @@ export const queryRefetchIntervals = {
   funnel: 20000,
   conversations: 8000,
   products: 30000,
+  productsPerformance: 30000,
   productDetail: 30000,
 } as const;
 
@@ -59,5 +64,7 @@ export const queryKeys = {
     ["conversations", normalizeQueryKeyParams(params)] as const,
   products: (params?: ListCatalogProductsParams) =>
     ["products", normalizeQueryKeyParams(params)] as const,
+  productsPerformance: (params: GetProductsPerformanceParams) =>
+    ["products", "performance", normalizeQueryKeyParams(params)] as const,
   productDetail: (id: string | null) => ["products", "detail", id] as const,
 } as const;

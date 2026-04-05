@@ -37,12 +37,14 @@ function toListParams(
   const rawStatus = searchParams.get("status");
   const rawPaymentStatus = searchParams.get("paymentStatus");
   const rawSearch = searchParams.get("search")?.trim();
+  const rawOrderId = searchParams.get("orderId")?.trim();
+  const effectiveSearch = rawSearch || rawOrderId || undefined;
   const rawSort = searchParams.get("sort");
 
   return {
     page: parsePositiveInteger(searchParams.get("page")) ?? 1,
     pageSize: 12,
-    search: rawSearch ? rawSearch : undefined,
+    search: effectiveSearch,
     status:
       rawStatus && orderStatusOptions.includes(rawStatus)
         ? (rawStatus as ListOrdersParams["status"])

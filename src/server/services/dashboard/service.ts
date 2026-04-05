@@ -27,12 +27,21 @@ const ACTIVE_LEAD_STAGES: LeadStageType[] = [
   LeadStageType.quote,
 ];
 
-const SUCCESSFUL_ORDER_STATUSES: OrderStatusEnum[] = [
+const SALES_ALWAYS_INCLUDED_ORDER_STATUSES: OrderStatusEnum[] = [
   OrderStatusEnum.confirmed,
   OrderStatusEnum.ready,
   OrderStatusEnum.shipped,
   OrderStatusEnum.completed,
 ];
+
+const SALES_EXCLUDED_ORDER_STATUSES: OrderStatusEnum[] = [
+  OrderStatusEnum.draft,
+  OrderStatusEnum.quoted,
+  OrderStatusEnum.cancelled,
+];
+
+const SALES_VALID_PAYMENT_STATUS = "validated";
+const DASHBOARD_REVENUE_TIME_ZONE = "America/Costa_Rica";
 
 const LEGACY_DASHBOARD_REVENUE_WINDOW_DAYS = 14;
 const RECENT_ORDERS_LIMIT = 6;
@@ -107,6 +116,33 @@ export async function getDashboardSummary(
   const now = new Date();
   const revenueWindowDays = resolveRevenueWindowDays(options?.revenueWindowDays);
   const revenueWindowStart = getRevenueWindowStart(revenueWindowDays);
+  const revenueWindowQueryStart = new Date(revenueWindowStart);
+  revenueWindowQueryStart.setUTCDate(revenueWindowQueryStart.getUTCDate() - 2);
+
+  const salesEligibilityWhere = {
+    OR: [
+      {
+        status: {
+          in: SALES_ALWAYS_INCLUDED_ORDER_STATUSES,
+        },
+      },
+      {
+        AND: [
+          {
+            status: {
+              notIn: SALES_EXCLUDED_ORDER_STATUSES,
+            },
+          },
+          {
+            paymentStatus: {
+              equals: SALES_VALID_PAYMENT_STATUS,
+              mode: "insensitive" as const,
+            },
+          },
+        ],
+      },
+    ],
+  };
 
   const [
     totalOrders,
@@ -138,9 +174,7 @@ export async function getDashboardSummary(
         totalCrc: true,
       },
       where: {
-        status: {
-          in: SUCCESSFUL_ORDER_STATUSES,
-        },
+        ...salesEligibilityWhere,
       },
     }),
     db.order.findMany({
@@ -169,16 +203,15 @@ export async function getDashboardSummary(
     db.order.findMany({
       where: {
         createdAt: {
-          gte: revenueWindowStart,
+          gte: revenueWindowQueryStart,
+          lt: now,
         },
-        status: {
-          in: SUCCESSFUL_ORDER_STATUSES,
-        },
+        ...salesEligibilityWhere,
       },
       select: {
+        id: true,
         createdAt: true,
         totalCrc: true,
-        status: true,
       },
     }),
     db.campaign.findMany({
@@ -273,10 +306,10 @@ export async function getDashboardSummary(
       }),
     ],
     revenueSeries: mapDashboardRevenueSeries({
-      startDate: revenueWindowStart,
       days: revenueWindowDays,
       orders: revenueOrders,
-      successfulStatuses: SUCCESSFUL_ORDER_STATUSES,
+      timeZone: DASHBOARD_REVENUE_TIME_ZONE,
+      now,
     }),
     recentOrders,
     campaignOverview: {

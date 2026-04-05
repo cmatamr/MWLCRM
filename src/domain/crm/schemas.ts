@@ -147,6 +147,20 @@ export const updateOrderDeliveryDateSchema = z
   })
   .strict();
 
+export const updateOrderSchema = z
+  .object({
+    status: z.nativeEnum(OrderStatusEnum).optional(),
+    deliveryDate: z.preprocess(
+      normalizeNullableDateString,
+      z.union([z.string().refine(isValidIsoDateOnly, "Invalid delivery date."), z.null()]),
+    ).optional(),
+  })
+  .strict()
+  .refine(
+    (value) => value.status !== undefined || value.deliveryDate !== undefined,
+    "At least one editable order field must be provided.",
+  );
+
 export const createOrderItemSchema = z
   .object({
     productId: z.string().trim().min(1),

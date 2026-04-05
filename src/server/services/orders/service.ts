@@ -8,6 +8,7 @@ import {
 import {
   calculateOrderItemSubtotalCrc,
   calculateOrderItemsSubtotalCrc,
+  orderStatusesRequiringValidatedReceipt,
 } from "@/domain/crm/orders";
 import {
   createPaginationMeta,
@@ -26,6 +27,7 @@ import type {
   OrderFilterOptions,
   OrderItemProductOption,
   OrdersListResponse,
+  UpdateOrderInput,
   UpdateOrderActivityInput,
 } from "./types";
 
@@ -139,6 +141,24 @@ export class UpdateOrderDeliveryDateError extends Error {
     this.code = code;
   }
 }
+
+export class UpdateOrderError extends Error {
+  code: "ORDER_NOT_FOUND" | "STATUS_REQUIRES_VALID_RECEIPT";
+
+  constructor(
+    code: UpdateOrderError["code"],
+    message: string,
+    readonly details?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "UpdateOrderError";
+    this.code = code;
+  }
+}
+
+const ORDER_STATUSES_REQUIRING_VALIDATED_RECEIPT = new Set<OrderStatusEnum>(
+  orderStatusesRequiringValidatedReceipt,
+);
 
 export class DeleteOrderItemError extends Error {
   code: "ORDER_NOT_FOUND" | "ITEM_NOT_FOUND" | "ITEM_NOT_IN_ORDER" | "LAST_ITEM_BLOCKED";
@@ -279,6 +299,13 @@ function normalizeOptionalText(value: string | null | undefined) {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function formatOrderStatusForValidationMessage(status: OrderStatusEnum) {
+  return status
+    .split("_")
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(" ");
 }
 
 async function resolveBankReference(
@@ -1567,6 +1594,92 @@ export async function updateOrderDeliveryDate(
 
     if (!updatedOrder) {
       throw new UpdateOrderDeliveryDateError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    return mapOrderDetail(updatedOrder);
+  });
+}
+
+export async function updateOrder(
+  input: {
+    orderId: string;
+    patch: UpdateOrderInput;
+  },
+  options?: ServiceOptions,
+): Promise<OrderDetail> {
+  const db = resolveDb(options);
+
+  return db.$transaction(async (tx) => {
+    const order = await tx.order.findUnique({
+      where: {
+        id: input.orderId,
+      },
+      select: {
+        id: true,
+        status: true,
+      },
+    });
+
+    if (!order) {
+      throw new UpdateOrderError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    const nextData: Prisma.OrderUpdateInput = {};
+
+    if (input.patch.status !== undefined) {
+      const isRestrictedTargetStatus = ORDER_STATUSES_REQUIRING_VALIDATED_RECEIPT.has(
+        input.patch.status,
+      );
+
+      if (isRestrictedTargetStatus) {
+        const validReceiptCount = await tx.paymentReceipt.count({
+          where: {
+            orderId: input.orderId,
+            status: PaymentReceiptStatusEnum.validated,
+            deletedAt: null,
+          },
+        });
+
+        if (validReceiptCount === 0) {
+          throw new UpdateOrderError(
+            "STATUS_REQUIRES_VALID_RECEIPT",
+            `No se puede cambiar el estado a ${formatOrderStatusForValidationMessage(input.patch.status)} sin un comprobante de pago válido.`,
+            {
+              orderId: input.orderId,
+              currentStatus: order.status,
+              targetStatus: input.patch.status,
+              requiresValidatedReceipt: true,
+            },
+          );
+        }
+      }
+
+      nextData.status = input.patch.status;
+    }
+
+    if (input.patch.deliveryDate !== undefined) {
+      nextData.deliveryDate = input.patch.deliveryDate
+        ? new Date(`${input.patch.deliveryDate}T00:00:00.000Z`)
+        : null;
+    }
+
+    if (Object.keys(nextData).length > 0) {
+      await tx.order.update({
+        where: {
+          id: input.orderId,
+        },
+        data: nextData,
+      });
+    }
+
+    const updatedOrder = await findOrderDetailRecord(tx, input.orderId);
+
+    if (!updatedOrder) {
+      throw new UpdateOrderError("ORDER_NOT_FOUND", "Order not found.", {
         orderId: input.orderId,
       });
     }

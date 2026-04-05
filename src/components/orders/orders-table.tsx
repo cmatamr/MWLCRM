@@ -2,15 +2,13 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { formatCalendarDate, formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
 import type { OrdersListResponse } from "@/server/services/orders/types";
 import { useDeleteOrder } from "@/hooks/use-delete-order";
-import { useUpdateOrderDeliveryDate } from "@/hooks/use-update-order-delivery-date";
 import { Button } from "@/components/ui/button";
-import { RecentOrderPaymentCell } from "@/components/dashboard/recent-order-payment-cell";
 
 import {
   formatCustomerName,
@@ -20,7 +18,7 @@ import {
 } from "./order-presenters";
 import { StatusBadgeFromViewModel } from "@/components/ui/status-badge";
 import { TableEmptyStateRow } from "@/components/ui/state-display";
-import { validateOrderItemDeliveryDateInput } from "./order-item-form-utils";
+import { OrderEditAction } from "./order-edit-action";
 
 type OrdersTableProps = {
   orders: OrdersListResponse["items"];
@@ -29,63 +27,9 @@ type OrdersTableProps = {
 
 function OrderRow({ order }: { order: OrdersListResponse["items"][number] }) {
   const orderStatusBadge = getOrderStatusBadge(order.status);
-  const deliveryDateMutation = useUpdateOrderDeliveryDate();
   const deleteOrderMutation = useDeleteOrder();
-  const [draftDeliveryDate, setDraftDeliveryDate] = useState(order.deliveryDate ?? "");
-  const [deliveryDateTouched, setDeliveryDateTouched] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-
-  useEffect(() => {
-    setDraftDeliveryDate(order.deliveryDate ?? "");
-    setDeliveryDateTouched(false);
-  }, [order.deliveryDate]);
-
-  const deliveryDateValidationError = useMemo(
-    () => validateOrderItemDeliveryDateInput(draftDeliveryDate),
-    [draftDeliveryDate],
-  );
-  const isDateDirty = draftDeliveryDate.trim() !== (order.deliveryDate ?? "");
-  const isDateSaving = deliveryDateMutation.isPending;
-  const showDeliveryDateValidationError = deliveryDateTouched && deliveryDateValidationError;
-
-  async function handleDeliveryDateSave() {
-    const error = validateOrderItemDeliveryDateInput(draftDeliveryDate);
-
-    setDeliveryDateTouched(true);
-
-    if (error || !isDateDirty || isDateSaving) {
-      return;
-    }
-
-    await deliveryDateMutation.mutateAsync({
-      orderId: order.id,
-      deliveryDate: draftDeliveryDate.trim() || null,
-    });
-  }
-
-  async function handleDeliveryDateBlur() {
-    setDeliveryDateTouched(true);
-
-    if (!isDateDirty || deliveryDateValidationError || isDateSaving) {
-      return;
-    }
-
-    await handleDeliveryDateSave();
-  }
-
-  function handleDeliveryDateKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      void handleDeliveryDateSave();
-      return;
-    }
-
-    if (event.key === "Escape") {
-      setDraftDeliveryDate(order.deliveryDate ?? "");
-      setDeliveryDateTouched(false);
-    }
-  }
 
   async function handleDelete() {
     setDeleteError(null);
@@ -150,48 +94,12 @@ function OrderRow({ order }: { order: OrdersListResponse["items"][number] }) {
           {formatCurrencyCRC(order.totalCrc)}
         </td>
         <td className="px-4 py-4">{formatDateTime(order.createdAt)}</td>
-        <td className="px-4 py-4 align-middle text-muted-foreground">
-          <div className="flex w-full flex-col items-start gap-2 overflow-hidden">
-            <input
-              type="date"
-              value={draftDeliveryDate}
-              onChange={(event) => setDraftDeliveryDate(event.target.value)}
-              onBlur={() => void handleDeliveryDateBlur()}
-              onKeyDown={handleDeliveryDateKeyDown}
-              disabled={isDateSaving}
-              aria-label={`Fecha de entrega para la orden ${order.id}`}
-              aria-invalid={showDeliveryDateValidationError ? true : undefined}
-              lang="en-GB"
-              style={{
-                width: "140px",
-                minWidth: "140px",
-                maxWidth: "140px",
-                textAlign: "center",
-              }}
-              className="h-[40px] w-[160px] min-w-0 max-w-full appearance-none rounded-full border border-border bg-white px-3 text-center text-[12px] text-slate-950 outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-muted [&::-webkit-calendar-picker-indicator]:ml-1 [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-70 [&::-webkit-datetime-edit]:flex [&::-webkit-datetime-edit]:w-full [&::-webkit-datetime-edit]:items-center [&::-webkit-datetime-edit]:justify-center [&::-webkit-datetime-edit]:p-0 [&::-webkit-datetime-edit]:text-center [&::-webkit-datetime-edit-fields-wrapper]:flex [&::-webkit-datetime-edit-fields-wrapper]:w-full [&::-webkit-datetime-edit-fields-wrapper]:items-center [&::-webkit-datetime-edit-fields-wrapper]:justify-center"
-            />
-            {isDateSaving ? (
-              <p className="text-center text-xs font-medium text-muted-foreground">Guardando...</p>
-            ) : null}
-            {showDeliveryDateValidationError ? (
-              <p className="text-center text-xs font-medium text-rose-700">{deliveryDateValidationError}</p>
-            ) : null}
-            {deliveryDateMutation.isError ? (
-              <p className="text-center text-xs font-medium text-rose-700">{deliveryDateMutation.error.message}</p>
-            ) : null}
-            {!draftDeliveryDate && order.deliveryDate ? (
-              <p className="text-center text-xs text-muted-foreground">{formatCalendarDate(order.deliveryDate)}</p>
-            ) : null}
-          </div>
+        <td className="px-4 py-4 text-center text-sm text-muted-foreground">
+          {order.deliveryDate ? formatCalendarDate(order.deliveryDate) : "Sin fecha"}
         </td>
         <td className="px-4 py-4 align-middle text-center">
           <div className="flex items-center justify-end gap-2">
-            <RecentOrderPaymentCell
-              orderId={order.id}
-              orderStatus={order.status}
-              paymentStatus={order.paymentStatus}
-              iconOnly
-            />
+            <OrderEditAction order={order} />
             <Button
               type="button"
               variant="ghost"
