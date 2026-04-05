@@ -39,18 +39,18 @@ export function CustomersTable({ customers, action }: CustomersTableProps) {
 
       <div className="mt-6 overflow-hidden rounded-[24px] border border-border/70">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-border/70 text-left">
+          <table className="min-w-full divide-y divide-border/70 text-center">
             <caption className="sr-only">
               Clientes consolidados con canal principal, gasto total, órdenes y estado comercial.
             </caption>
             <thead className="bg-muted/40 text-xs uppercase tracking-[0.16em] text-muted-foreground">
               <tr>
-                <th scope="col" className="px-4 py-3 font-medium">Cliente</th>
-                <th scope="col" className="px-4 py-3 font-medium">Canal</th>
-                <th scope="col" className="px-4 py-3 font-medium">Órdenes</th>
-                <th scope="col" className="px-4 py-3 font-medium">Total gastado</th>
-                <th scope="col" className="px-4 py-3 font-medium">Última orden</th>
-                <th scope="col" className="px-4 py-3 font-medium">Estado</th>
+                <th scope="col" className="px-4 py-3 font-medium text-center">Cliente</th>
+                <th scope="col" className="px-4 py-3 font-medium text-center">Canal</th>
+                <th scope="col" className="px-4 py-3 font-medium text-center">Órdenes</th>
+                <th scope="col" className="px-4 py-3 font-medium text-center">Total Compras</th>
+                <th scope="col" className="px-4 py-3 font-medium text-center">Última orden</th>
+                <th scope="col" className="px-4 py-3 font-medium text-center">Estado</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60 bg-white">
@@ -60,7 +60,7 @@ export function CustomersTable({ customers, action }: CustomersTableProps) {
 
                   return (
                   <tr key={customer.id} className="text-sm text-slate-700">
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-4 text-center">
                       <div className="space-y-1">
                         <Link
                           href={`/customers/${customer.id}`}
@@ -73,15 +73,15 @@ export function CustomersTable({ customers, action }: CustomersTableProps) {
                         </p>
                       </div>
                     </td>
-                    <td className="px-4 py-4">{formatChannelLabel(customer.primaryChannel)}</td>
-                    <td className="px-4 py-4 font-medium text-slate-950">{customer.totalOrders}</td>
-                    <td className="px-4 py-4 font-medium text-slate-950">
+                    <td className="px-4 py-4 text-center">{formatChannelLabel(customer.primaryChannel)}</td>
+                    <td className="px-4 py-4 text-center font-medium text-slate-950">{customer.totalOrders}</td>
+                    <td className="px-4 py-4 text-center font-medium text-slate-950">
                       {formatCurrencyCRC(customer.totalSpentCrc)}
                     </td>
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-4 text-center">
                       {customer.lastOrderAt ? formatDateTime(customer.lastOrderAt) : "Sin compras"}
                     </td>
-                    <td className="px-4 py-4">
+                    <td className="px-4 py-4 text-center">
                       <StatusBadgeFromViewModel badge={customerStatusBadge} />
                     </td>
                   </tr>

@@ -40,17 +40,17 @@ export function CampaignOverviewCard({ overview }: CampaignOverviewCardProps) {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-2xl bg-slate-950 px-4 py-4 text-white">
+          <div className="rounded-2xl bg-slate-950 px-4 py-4 text-center text-white">
             <p className="text-xs uppercase tracking-[0.18em] text-slate-300">Activas</p>
             <p className="mt-2 text-2xl font-semibold">{overview.activeCampaigns}</p>
           </div>
-          <div className="rounded-2xl bg-secondary px-4 py-4 text-secondary-foreground">
+          <div className="rounded-2xl bg-secondary px-4 py-4 text-center text-secondary-foreground">
             <p className="text-xs uppercase tracking-[0.18em]">Spend</p>
             <p className="mt-2 text-2xl font-semibold">
               {formatCurrencyCRC(overview.totalSpendCrc)}
             </p>
           </div>
-          <div className="rounded-2xl bg-muted px-4 py-4 text-slate-900">
+          <div className="rounded-2xl bg-muted px-4 py-4 text-center text-slate-900">
             <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Leads</p>
             <p className="mt-2 text-2xl font-semibold">
               {overview.totalAttributedLeads.toLocaleString("es-CR")}

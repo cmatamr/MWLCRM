@@ -282,15 +282,15 @@ export function RevenueChart({
           </div>
 
           <div className="flex flex-col gap-3">
-            <div className="rounded-2xl bg-slate-950 px-4 py-4 text-white">
+            <div className="rounded-2xl bg-slate-950 px-4 py-4 text-center text-white">
               <p className="text-xs uppercase tracking-[0.18em] text-slate-300">Revenue</p>
               <p className="mt-2 text-xl font-semibold">{formatCurrencyCRC(totalRevenue)}</p>
             </div>
-            <div className="rounded-2xl bg-secondary px-4 py-4 text-secondary-foreground">
+            <div className="rounded-2xl bg-secondary px-4 py-4 text-center text-secondary-foreground">
               <p className="text-xs uppercase tracking-[0.18em]">Orders</p>
               <p className="mt-2 text-xl font-semibold">{totalOrders.toLocaleString("es-CR")}</p>
             </div>
-            <div className="rounded-2xl border border-border/70 bg-muted/40 px-4 py-4">
+            <div className="rounded-2xl border border-border/70 bg-muted/40 px-4 py-4 text-center">
               <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
                 Promedio diario
               </p>
