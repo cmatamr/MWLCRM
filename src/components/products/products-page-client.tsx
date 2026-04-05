@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import {
   AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
   ChevronDown,
   ChevronUp,
   CircleDot,
-  Ellipsis,
   ImageIcon,
   Search,
   ShieldAlert,
@@ -123,6 +125,8 @@ const defaultCreateDraft: CreateProductDraft = {
   sort_order: "0",
 };
 
+const supabaseProjectUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim().replace(/\/+$/g, "");
+
 function normalizeValue(value: string | null | undefined) {
   return value?.trim().toLowerCase() ?? "";
 }
@@ -135,6 +139,26 @@ function toSlugToken(rawValue: string) {
     .replace(/^_+|_+$/g, "");
 
   return normalized || "draft";
+}
+
+function buildStoragePublicUrl(storageBucket: string | null, storagePath: string | null) {
+  if (!supabaseProjectUrl || !storageBucket || !storagePath) {
+    return null;
+  }
+
+  const bucket = storageBucket.trim().replace(/^\/+|\/+$/g, "");
+  const path = storagePath
+    .trim()
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+
+  if (!bucket || !path) {
+    return null;
+  }
+
+  return `${supabaseProjectUrl}/storage/v1/object/public/${bucket}/${path}`;
 }
 
 function getPrimaryImage(product: ProductDetail) {
@@ -536,14 +560,22 @@ function TrendChart({
 }
 
 export function ProductsPageClient() {
+  const pageSize = 7;
   const [products, setProducts] = useState<ProductDetail[]>([]);
   const [currentMode, setCurrentMode] = useState<ProductMode>("catalog");
+  const [currentPage, setCurrentPage] = useState(1);
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [pendingSelectedProductId, setPendingSelectedProductId] = useState<string | null>(null);
+  const [pendingMode, setPendingMode] = useState<ProductMode | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
   const [performanceMetric, setPerformanceMetric] = useState<PerformanceMetric>("units");
   const [filters, setFilters] = useState<GlobalFilters>(defaultFilters);
   const [catalogTab, setCatalogTab] = useState<CatalogSidebarTab>("general");
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editDraft, setEditDraft] = useState<ProductDetail | null>(null);
+  const [editBaseline, setEditBaseline] = useState<ProductDetail | null>(null);
+  const [isDiscardChangesOpen, setIsDiscardChangesOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<CreateProductDraft>(defaultCreateDraft);
   const [skuControlEnabled, setSkuControlEnabled] = useState(false);
@@ -566,6 +598,8 @@ export function ProductsPageClient() {
     notes: "",
   });
   const [searchMetaMessage, setSearchMetaMessage] = useState<string | null>(null);
+  const [thumbnailLoadErrors, setThumbnailLoadErrors] = useState<Record<string, boolean>>({});
+  const [tempIdSeed, setTempIdSeed] = useState(-1);
 
   const { updateProduct, isPending: isSavingProduct } = useUpdateProduct();
   const { createProduct, isPending: isCreatingProduct } = useCreateProduct();
@@ -697,32 +731,71 @@ export function ProductsPageClient() {
   }, [filters.more_filter, products]);
 
   useEffect(() => {
+    setCurrentPage(1);
+  }, [currentMode, filters, searchQuery]);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(filteredProducts.length / pageSize)),
+    [filteredProducts.length, pageSize],
+  );
+
+  useEffect(() => {
+    setCurrentPage((current) => Math.min(current, totalPages));
+  }, [totalPages]);
+
+  const paginatedProducts = useMemo(() => {
+    const page = Math.min(currentPage, totalPages);
+    const start = (page - 1) * pageSize;
+
+    return filteredProducts.slice(start, start + pageSize);
+  }, [currentPage, filteredProducts, pageSize, totalPages]);
+
+  useEffect(() => {
     if (filteredProducts.length === 0) {
       setSelectedProductId(null);
       return;
     }
 
-    const currentIsVisible = selectedProductId
-      ? filteredProducts.some((product) => product.id === selectedProductId)
-      : false;
+    if (!selectedProductId) {
+      setSelectedProductId(filteredProducts[0]?.id ?? null);
+      return;
+    }
+
+    const currentIsVisible = filteredProducts.some((product) => product.id === selectedProductId);
 
     if (!currentIsVisible) {
-      setSelectedProductId(filteredProducts[0]?.id ?? null);
+      setSelectedProductId(null);
     }
   }, [filteredProducts, selectedProductId]);
 
-  const selectedProduct = useMemo(
+  const selectedProductBase = useMemo(
     () => products.find((product) => product.id === selectedProductId) ?? null,
     [products, selectedProductId],
   );
+  const selectedProduct = useMemo(() => {
+    if (isEditOpen && editDraft && selectedProductBase && editDraft.id === selectedProductBase.id) {
+      return editDraft;
+    }
 
-  const selectedProductEditablePayload = useMemo(
-    () => (selectedProduct ? toUpdatePayload(selectedProduct) : null),
+    return selectedProductBase;
+  }, [editDraft, isEditOpen, selectedProductBase]);
+  const selectedPrimaryImage = useMemo(
+    () => (selectedProduct ? getPrimaryImage(selectedProduct) : { storage_bucket: null, storage_path: null, alt_text: null }),
     [selectedProduct],
   );
+  const selectedPrimaryImageSrc = useMemo(
+    () =>
+      buildStoragePublicUrl(selectedPrimaryImage.storage_bucket, selectedPrimaryImage.storage_path),
+    [selectedPrimaryImage.storage_bucket, selectedPrimaryImage.storage_path],
+  );
+
+  const selectedProductEditablePayload = useMemo(
+    () => (editDraft ? toUpdatePayload(editDraft) : null),
+    [editDraft],
+  );
   const originalSelectedEditablePayload = useMemo(
-    () => (selectedProductDetail ? toUpdatePayload(selectedProductDetail) : null),
-    [selectedProductDetail],
+    () => (editBaseline ? toUpdatePayload(editBaseline) : null),
+    [editBaseline],
   );
   const hasPendingChanges = useMemo(() => {
     if (!selectedProductEditablePayload || !originalSelectedEditablePayload) {
@@ -741,9 +814,21 @@ export function ProductsPageClient() {
         : null,
     [selectedProductEditablePayload],
   );
+  const hasDraftFormsPendingChanges = Boolean(
+    newAlias.trim() ||
+      newImageDraft.storage_path.trim() ||
+      newImageDraft.alt_text.trim() ||
+      newImageDraft.sort_order.trim() ||
+      newImageDraft.is_primary ||
+      newSearchTermDraft.term.trim() ||
+      newSearchTermDraft.notes.trim() ||
+      newSearchTermDraft.priority.trim() !== "100" ||
+      !newSearchTermDraft.is_active,
+  );
+  const hasUnsavedChanges = isEditOpen && (hasPendingChanges || hasDraftFormsPendingChanges);
 
   useEffect(() => {
-    if (!selectedProduct) {
+    if (!selectedProductBase) {
       setSkuDraft("");
       setSkuControlEnabled(false);
       setSaveStatusMessage(null);
@@ -751,7 +836,7 @@ export function ProductsPageClient() {
       return;
     }
 
-    setSkuDraft(selectedProduct.sku);
+    setSkuDraft(selectedProductBase.sku);
     setSkuControlEnabled(false);
     setSaveStatusMessage(null);
     setSearchMetaMessage(null);
@@ -769,9 +854,9 @@ export function ProductsPageClient() {
       is_active: true,
       notes: "",
     });
-  }, [selectedProduct]);
+  }, [selectedProductBase]);
 
-  const catalogRows = useMemo(() => filteredProducts.map(toCatalogRow), [filteredProducts]);
+  const catalogRows = useMemo(() => paginatedProducts.map(toCatalogRow), [paginatedProducts]);
   const performanceRows = performanceData?.rows ?? [];
 
   const catalogKpis = catalogData?.kpis ?? {
@@ -827,24 +912,164 @@ export function ProductsPageClient() {
     );
   };
 
+  function cloneProductForDraft(product: ProductDetail): ProductDetail {
+    return JSON.parse(JSON.stringify(product)) as ProductDetail;
+  }
+
+  function openEditModal() {
+    if (!selectedProductBase) {
+      return;
+    }
+
+    const snapshot = cloneProductForDraft(selectedProductBase);
+    setEditBaseline(snapshot);
+    setEditDraft(snapshot);
+    setCatalogTab("general");
+    setSaveStatusMessage(null);
+    setSearchMetaMessage(null);
+    setNewAlias("");
+    setNewImageDraft({
+      storage_bucket: "mwl-products",
+      storage_path: "",
+      alt_text: "",
+      is_primary: false,
+      sort_order: "",
+    });
+    setNewSearchTermDraft({
+      term: "",
+      priority: "100",
+      is_active: true,
+      notes: "",
+    });
+    setIsEditOpen(true);
+  }
+
+  function resetEditModalState() {
+    setIsEditOpen(false);
+    setEditDraft(null);
+    setEditBaseline(null);
+    setPendingSelectedProductId(null);
+    setPendingMode(null);
+    setIsDiscardChangesOpen(false);
+    setSaveStatusMessage(null);
+    setSearchMetaMessage(null);
+    setNewAlias("");
+    setNewImageDraft({
+      storage_bucket: "mwl-products",
+      storage_path: "",
+      alt_text: "",
+      is_primary: false,
+      sort_order: "",
+    });
+    setNewSearchTermDraft({
+      term: "",
+      priority: "100",
+      is_active: true,
+      notes: "",
+    });
+  }
+
+  const requestCloseEditModal = useCallback(() => {
+    if (!hasUnsavedChanges) {
+      resetEditModalState();
+      return;
+    }
+
+    setPendingSelectedProductId(null);
+    setPendingMode(null);
+    setIsDiscardChangesOpen(true);
+  }, [hasUnsavedChanges]);
+
+  function requestSelectProduct(nextProductId: string) {
+    if (nextProductId === selectedProductId) {
+      return;
+    }
+
+    if (isEditOpen && hasUnsavedChanges) {
+      setPendingSelectedProductId(nextProductId);
+      setPendingMode(null);
+      setIsDiscardChangesOpen(true);
+      return;
+    }
+
+    setSelectedProductId(nextProductId);
+  }
+
+  function requestSetCurrentMode(nextMode: ProductMode) {
+    if (nextMode === currentMode) {
+      return;
+    }
+
+    if (isEditOpen && hasUnsavedChanges) {
+      setPendingMode(nextMode);
+      setPendingSelectedProductId(null);
+      setIsDiscardChangesOpen(true);
+      return;
+    }
+
+    setCurrentMode(nextMode);
+  }
+
+  function handleDiscardChangesConfirm() {
+    const nextSelectedProductId = pendingSelectedProductId;
+    const nextMode = pendingMode;
+
+    resetEditModalState();
+
+    if (nextSelectedProductId) {
+      setSelectedProductId(nextSelectedProductId);
+    }
+
+    if (nextMode) {
+      setCurrentMode(nextMode);
+    }
+  }
+
+  function handleContinueEditing() {
+    setPendingSelectedProductId(null);
+    setPendingMode(null);
+    setIsDiscardChangesOpen(false);
+  }
+
+  useEffect(() => {
+    if (!isEditOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        requestCloseEditModal();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isEditOpen, requestCloseEditModal]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) {
+      return;
+    }
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
   function updateSelectedProductField<K extends keyof ProductDetail>(
     field: K,
     value: ProductDetail[K],
   ) {
-    if (!selectedProductId) {
+    if (!editDraft) {
       return;
     }
 
-    setProducts((currentProducts) =>
-      currentProducts.map((product) =>
-        product.id === selectedProductId
-          ? {
-              ...product,
-              [field]: value,
-            }
-          : product,
-      ),
-    );
+    setEditDraft((current) => (current ? { ...current, [field]: value } : current));
     setSaveStatusMessage(null);
   }
 
@@ -884,7 +1109,7 @@ export function ProductsPageClient() {
   }
 
   async function handleSaveChanges() {
-    if (!selectedProductId || !selectedProductEditablePayload || !hasPendingChanges) {
+    if (!selectedProductId || !editDraft || !editBaseline || !selectedProductEditablePayload) {
       return;
     }
 
@@ -896,10 +1121,128 @@ export function ProductsPageClient() {
     setSaveStatusMessage("Guardando...");
 
     try {
-      const updatedProduct = await updateProduct({
+      let updatedProduct = await updateProduct({
         id: selectedProductId,
         input: selectedProductEditablePayload,
       });
+
+      const baselineAliases = editBaseline.search_meta.alias_entries;
+      const draftAliases = editDraft.search_meta.alias_entries;
+
+      for (const baselineAlias of baselineAliases) {
+        const draftAlias = draftAliases.find((entry) => entry.id === baselineAlias.id);
+        if (!draftAlias) {
+          updatedProduct = await deleteAlias(selectedProductId, baselineAlias.id);
+          continue;
+        }
+
+        const nextAlias = draftAlias.alias.trim();
+        if (nextAlias && nextAlias !== baselineAlias.alias) {
+          updatedProduct = await deleteAlias(selectedProductId, baselineAlias.id);
+          updatedProduct = await addAlias(selectedProductId, { alias: nextAlias });
+        }
+      }
+
+      for (const draftAlias of draftAliases.filter((entry) => entry.id < 1)) {
+        const aliasValue = draftAlias.alias.trim();
+        if (aliasValue) {
+          updatedProduct = await addAlias(selectedProductId, { alias: aliasValue });
+        }
+      }
+
+      const baselineTerms = editBaseline.search_meta.search_terms;
+      const draftTerms = editDraft.search_meta.search_terms;
+
+      for (const baselineTerm of baselineTerms) {
+        const draftTerm = draftTerms.find((term) => term.id === baselineTerm.id);
+        if (!draftTerm) {
+          updatedProduct = await deleteSearchTerm(selectedProductId, baselineTerm.id);
+          continue;
+        }
+
+        const termUpdates: {
+          term?: string;
+          priority?: number;
+          is_active?: boolean;
+          notes?: string | null;
+        } = {};
+
+        if (draftTerm.term !== baselineTerm.term) {
+          termUpdates.term = draftTerm.term;
+        }
+        if (draftTerm.priority !== baselineTerm.priority) {
+          termUpdates.priority = draftTerm.priority;
+        }
+        if (draftTerm.is_active !== baselineTerm.is_active) {
+          termUpdates.is_active = draftTerm.is_active;
+        }
+        if ((draftTerm.notes ?? null) !== (baselineTerm.notes ?? null)) {
+          termUpdates.notes = draftTerm.notes ?? null;
+        }
+
+        if (Object.keys(termUpdates).length > 0) {
+          updatedProduct = await updateSearchTerm(selectedProductId, baselineTerm.id, termUpdates);
+        }
+      }
+
+      for (const draftTerm of draftTerms.filter((term) => term.id < 1)) {
+        if (!draftTerm.term.trim()) {
+          continue;
+        }
+
+        updatedProduct = await addSearchTerm(selectedProductId, {
+          term: draftTerm.term.trim(),
+          term_type: "alias",
+          priority: draftTerm.priority,
+          is_active: draftTerm.is_active,
+          notes: draftTerm.notes ?? null,
+        });
+      }
+
+      const baselineImages = editBaseline.images;
+      const draftImages = editDraft.images;
+
+      for (const baselineImage of baselineImages) {
+        const draftImage = draftImages.find((image) => image.id === baselineImage.id);
+        if (!draftImage) {
+          updatedProduct = await deleteImage(selectedProductId, baselineImage.id);
+          continue;
+        }
+
+        const imageUpdates: {
+          alt_text?: string | null;
+          is_primary?: boolean;
+          sort_order?: number;
+        } = {};
+
+        if ((draftImage.alt_text ?? null) !== (baselineImage.alt_text ?? null)) {
+          imageUpdates.alt_text = draftImage.alt_text ?? null;
+        }
+        if (draftImage.is_primary !== baselineImage.is_primary) {
+          imageUpdates.is_primary = draftImage.is_primary;
+        }
+        if (draftImage.sort_order !== baselineImage.sort_order) {
+          imageUpdates.sort_order = draftImage.sort_order;
+        }
+
+        if (Object.keys(imageUpdates).length > 0) {
+          updatedProduct = await updateImage(selectedProductId, baselineImage.id, imageUpdates);
+        }
+      }
+
+      for (const draftImage of draftImages.filter((image) => image.id < 1)) {
+        if (!draftImage.storage_path.trim()) {
+          continue;
+        }
+
+        updatedProduct = await addImage(selectedProductId, {
+          storage_bucket: draftImage.storage_bucket,
+          storage_path: draftImage.storage_path,
+          alt_text: draftImage.alt_text,
+          is_primary: draftImage.is_primary,
+          sort_order: draftImage.sort_order,
+        });
+      }
 
       setProducts((currentProducts) =>
         currentProducts.map((product) =>
@@ -907,6 +1250,7 @@ export function ProductsPageClient() {
         ),
       );
       setSaveStatusMessage("Cambios guardados");
+      resetEditModalState();
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudieron guardar los cambios.";
       setSaveStatusMessage(message);
@@ -914,68 +1258,102 @@ export function ProductsPageClient() {
   }
 
   async function handleAddAlias() {
-    if (!selectedProductId || !newAlias.trim()) {
+    if (!editDraft || !newAlias.trim()) {
       return;
     }
 
-    setSearchMetaMessage("Guardando alias...");
-    try {
-      const updated = await addAlias(selectedProductId, { alias: newAlias });
-      setProducts((currentProducts) =>
-        currentProducts.map((product) => (product.id === updated.id ? updated : product)),
-      );
-      setNewAlias("");
-      setSearchMetaMessage("Alias guardado");
-    } catch (error) {
-      setSearchMetaMessage(error instanceof Error ? error.message : "No se pudo guardar alias.");
+    const nextAlias = newAlias.trim();
+    const alreadyExists = editDraft.search_meta.alias_entries.some(
+      (entry) => entry.alias.trim().toLowerCase() === nextAlias.toLowerCase(),
+    );
+
+    if (alreadyExists) {
+      setSearchMetaMessage("Alias repetido en el draft.");
+      return;
     }
+
+    const nextTempId = tempIdSeed;
+    setTempIdSeed((current) => current - 1);
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            search_meta: {
+              ...current.search_meta,
+              alias_entries: [
+                ...current.search_meta.alias_entries,
+                { id: nextTempId, product_id: current.id, alias: nextAlias },
+              ],
+              aliases: [...current.search_meta.aliases, nextAlias],
+            },
+          }
+        : current,
+    );
+    setNewAlias("");
+    setSearchMetaMessage("Alias agregado al draft");
   }
 
   async function handleDeleteAlias(aliasId: number) {
-    if (!selectedProductId) {
+    if (!editDraft) {
       return;
     }
 
-    setSearchMetaMessage("Eliminando alias...");
-    try {
-      const updated = await deleteAlias(selectedProductId, aliasId);
-      setProducts((currentProducts) =>
-        currentProducts.map((product) => (product.id === updated.id ? updated : product)),
-      );
-      setSearchMetaMessage("Alias eliminado");
-    } catch (error) {
-      setSearchMetaMessage(error instanceof Error ? error.message : "No se pudo eliminar alias.");
-    }
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            search_meta: {
+              ...current.search_meta,
+              alias_entries: current.search_meta.alias_entries.filter((entry) => entry.id !== aliasId),
+              aliases: current.search_meta.alias_entries
+                .filter((entry) => entry.id !== aliasId)
+                .map((entry) => entry.alias),
+            },
+          }
+        : current,
+    );
+    setSearchMetaMessage("Alias eliminado del draft");
   }
 
   async function handleAddSearchTerm() {
-    if (!selectedProductId || !newSearchTermDraft.term.trim()) {
+    if (!editDraft || !newSearchTermDraft.term.trim()) {
       return;
     }
 
-    setSearchMetaMessage("Guardando search term...");
-    try {
-      const updated = await addSearchTerm(selectedProductId, {
-        term: newSearchTermDraft.term,
-        term_type: "alias",
-        priority: toNumberOrNull(newSearchTermDraft.priority) ?? 100,
-        is_active: newSearchTermDraft.is_active,
-        notes: newSearchTermDraft.notes.trim() || null,
-      });
-      setProducts((currentProducts) =>
-        currentProducts.map((product) => (product.id === updated.id ? updated : product)),
-      );
-      setNewSearchTermDraft((current) => ({
-        ...current,
-        term: "",
-        notes: "",
-      }));
-      setSearchMetaMessage("Search term guardado");
-    } catch (error) {
-      setSearchMetaMessage(
-        error instanceof Error ? error.message : "No se pudo guardar search term.",
-      );
-    }
+    const nextTempId = tempIdSeed;
+    setTempIdSeed((current) => current - 1);
+
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            search_meta: {
+              ...current.search_meta,
+              search_terms: [
+                ...current.search_meta.search_terms,
+                {
+                  id: nextTempId,
+                  product_id: current.id,
+                  family: current.family,
+                  category: current.category,
+                  term: newSearchTermDraft.term.trim(),
+                  term_type: "alias",
+                  priority: toNumberOrNull(newSearchTermDraft.priority) ?? 100,
+                  is_active: newSearchTermDraft.is_active,
+                  notes: newSearchTermDraft.notes.trim() || null,
+                  created_at: new Date().toISOString(),
+                },
+              ],
+            },
+          }
+        : current,
+    );
+    setNewSearchTermDraft((current) => ({
+      ...current,
+      term: "",
+      notes: "",
+    }));
+    setSearchMetaMessage("Search term agregado al draft");
   }
 
   async function handleUpdateSearchTerm(
@@ -987,151 +1365,155 @@ export function ProductsPageClient() {
       notes?: string | null;
     },
   ) {
-    if (!selectedProductId) {
+    if (!editDraft) {
       return;
     }
 
-    setSearchMetaMessage("Actualizando search term...");
-    try {
-      const updated = await updateSearchTerm(selectedProductId, termId, updates);
-      setProducts((currentProducts) =>
-        currentProducts.map((product) => (product.id === updated.id ? updated : product)),
-      );
-      setSearchMetaMessage("Search term actualizado");
-    } catch (error) {
-      setSearchMetaMessage(
-        error instanceof Error ? error.message : "No se pudo actualizar search term.",
-      );
-    }
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            search_meta: {
+              ...current.search_meta,
+              search_terms: current.search_meta.search_terms.map((term) =>
+                term.id === termId ? { ...term, ...updates } : term,
+              ),
+            },
+          }
+        : current,
+    );
+    setSearchMetaMessage("Search term actualizado en draft");
   }
 
   async function handleDeleteSearchTerm(termId: number) {
-    if (!selectedProductId) {
+    if (!editDraft) {
       return;
     }
 
-    setSearchMetaMessage("Eliminando search term...");
-    try {
-      const updated = await deleteSearchTerm(selectedProductId, termId);
-      setProducts((currentProducts) =>
-        currentProducts.map((product) => (product.id === updated.id ? updated : product)),
-      );
-      setSearchMetaMessage("Search term eliminado");
-    } catch (error) {
-      setSearchMetaMessage(
-        error instanceof Error ? error.message : "No se pudo eliminar search term.",
-      );
-    }
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            search_meta: {
+              ...current.search_meta,
+              search_terms: current.search_meta.search_terms.filter((term) => term.id !== termId),
+            },
+          }
+        : current,
+    );
+    setSearchMetaMessage("Search term eliminado del draft");
   }
 
   async function handleAddImage() {
-    if (!selectedProductId || !newImageDraft.storage_path.trim()) {
+    if (!editDraft || !newImageDraft.storage_path.trim()) {
       return;
     }
 
-    setSearchMetaMessage("Guardando imagen...");
-    try {
-      const updated = await addImage(selectedProductId, {
-        storage_bucket: newImageDraft.storage_bucket,
-        storage_path: newImageDraft.storage_path,
-        alt_text: newImageDraft.alt_text.trim() || null,
-        is_primary: newImageDraft.is_primary,
-        sort_order: toNumberOrNull(newImageDraft.sort_order) ?? undefined,
-      });
-      setProducts((currentProducts) =>
-        currentProducts.map((product) => (product.id === updated.id ? updated : product)),
-      );
-      setNewImageDraft({
-        storage_bucket: "mwl-products",
-        storage_path: "",
-        alt_text: "",
-        is_primary: false,
-        sort_order: "",
-      });
-      setSearchMetaMessage("Imagen guardada");
-    } catch (error) {
-      setSearchMetaMessage(error instanceof Error ? error.message : "No se pudo guardar imagen.");
-    }
+    const nextTempId = tempIdSeed;
+    const nextSortOrder = toNumberOrNull(newImageDraft.sort_order) ?? editDraft.images.length;
+    setTempIdSeed((current) => current - 1);
+
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            images: [
+              ...current.images.map((image) =>
+                newImageDraft.is_primary ? { ...image, is_primary: false } : image,
+              ),
+              {
+                id: nextTempId,
+                product_id: current.id,
+                storage_bucket: newImageDraft.storage_bucket.trim() || "mwl-products",
+                storage_path: newImageDraft.storage_path.trim(),
+                alt_text: newImageDraft.alt_text.trim() || null,
+                is_primary: newImageDraft.is_primary,
+                sort_order: nextSortOrder,
+                created_at: new Date().toISOString(),
+              },
+            ],
+          }
+        : current,
+    );
+    setNewImageDraft({
+      storage_bucket: "mwl-products",
+      storage_path: "",
+      alt_text: "",
+      is_primary: false,
+      sort_order: "",
+    });
+    setSearchMetaMessage("Imagen agregada al draft");
   }
 
   async function handleTogglePrimaryImage(imageId: number, isPrimary: boolean) {
-    if (!selectedProductId) {
+    if (!editDraft) {
       return;
     }
 
-    setSearchMetaMessage("Actualizando imagen...");
-    try {
-      const updated = await updateImage(selectedProductId, imageId, {
-        is_primary: !isPrimary,
-      });
-      setProducts((currentProducts) =>
-        currentProducts.map((product) => (product.id === updated.id ? updated : product)),
-      );
-      setSearchMetaMessage("Imagen actualizada");
-    } catch (error) {
-      setSearchMetaMessage(
-        error instanceof Error ? error.message : "No se pudo actualizar imagen.",
-      );
-    }
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            images: current.images.map((image) => {
+              if (image.id === imageId) {
+                return { ...image, is_primary: !isPrimary };
+              }
+
+              return !isPrimary ? { ...image, is_primary: false } : image;
+            }),
+          }
+        : current,
+    );
+    setSearchMetaMessage("Imagen actualizada en draft");
   }
 
   async function handleUpdateImageAlt(imageId: number, altText: string) {
-    if (!selectedProductId) {
+    if (!editDraft) {
       return;
     }
 
-    setSearchMetaMessage("Actualizando alt_text...");
-    try {
-      const updated = await updateImage(selectedProductId, imageId, {
-        alt_text: altText || null,
-      });
-      setProducts((currentProducts) =>
-        currentProducts.map((product) => (product.id === updated.id ? updated : product)),
-      );
-      setSearchMetaMessage("alt_text actualizado");
-    } catch (error) {
-      setSearchMetaMessage(
-        error instanceof Error ? error.message : "No se pudo actualizar alt_text.",
-      );
-    }
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            images: current.images.map((image) =>
+              image.id === imageId ? { ...image, alt_text: altText || null } : image,
+            ),
+          }
+        : current,
+    );
+    setSearchMetaMessage("alt_text actualizado en draft");
   }
 
   async function handleUpdateImageSort(imageId: number, sortOrder: number) {
-    if (!selectedProductId) {
+    if (!editDraft) {
       return;
     }
 
-    setSearchMetaMessage("Actualizando orden de imagen...");
-    try {
-      const updated = await updateImage(selectedProductId, imageId, {
-        sort_order: sortOrder,
-      });
-      setProducts((currentProducts) =>
-        currentProducts.map((product) => (product.id === updated.id ? updated : product)),
-      );
-      setSearchMetaMessage("Orden de imagen actualizado");
-    } catch (error) {
-      setSearchMetaMessage(
-        error instanceof Error ? error.message : "No se pudo actualizar sort_order.",
-      );
-    }
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            images: current.images.map((image) =>
+              image.id === imageId ? { ...image, sort_order: sortOrder } : image,
+            ),
+          }
+        : current,
+    );
+    setSearchMetaMessage("Orden de imagen actualizado en draft");
   }
 
   async function handleDeleteImage(imageId: number) {
-    if (!selectedProductId) {
+    if (!editDraft) {
       return;
     }
 
-    setSearchMetaMessage("Eliminando imagen...");
-    try {
-      const updated = await deleteImage(selectedProductId, imageId);
-      setProducts((currentProducts) =>
-        currentProducts.map((product) => (product.id === updated.id ? updated : product)),
-      );
-      setSearchMetaMessage("Imagen eliminada");
-    } catch (error) {
-      setSearchMetaMessage(error instanceof Error ? error.message : "No se pudo eliminar imagen.");
-    }
+    setEditDraft((current) =>
+      current
+        ? { ...current, images: current.images.filter((image) => image.id !== imageId) }
+        : current,
+    );
+    setSearchMetaMessage("Imagen eliminada del draft");
   }
 
   return (
@@ -1170,7 +1552,7 @@ export function ProductsPageClient() {
             <div className="inline-flex rounded-2xl border border-border bg-white p-1">
               <button
                 type="button"
-                onClick={() => setCurrentMode("catalog")}
+                onClick={() => requestSetCurrentMode("catalog")}
                 className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
                   currentMode === "catalog"
                     ? "bg-slate-950 text-white"
@@ -1181,7 +1563,7 @@ export function ProductsPageClient() {
               </button>
               <button
                 type="button"
-                onClick={() => setCurrentMode("performance")}
+                onClick={() => requestSetCurrentMode("performance")}
                 className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
                   currentMode === "performance"
                     ? "bg-slate-950 text-white"
@@ -1397,25 +1779,25 @@ export function ProductsPageClient() {
 
       {currentMode === "catalog" ? (
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <article className="rounded-[24px] border border-white/70 bg-white/90 p-5 shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
+          <article className="rounded-[24px] border border-white/70 bg-white/90 p-5 text-center shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               Productos activos
             </p>
             <p className="mt-2 text-3xl font-semibold text-slate-950">{catalogKpis.activeProducts}</p>
           </article>
-          <article className="rounded-[24px] border border-white/70 bg-white/90 p-5 shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
+          <article className="rounded-[24px] border border-white/70 bg-white/90 p-5 text-center shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               Visibles al agente
             </p>
             <p className="mt-2 text-3xl font-semibold text-slate-950">{catalogKpis.agentVisibleProducts}</p>
           </article>
-          <article className="rounded-[24px] border border-amber-200/80 bg-amber-50/80 p-5 shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
+          <article className="rounded-[24px] border border-amber-200/80 bg-amber-50/80 p-5 text-center shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">
               Con alertas de integridad
             </p>
             <p className="mt-2 text-3xl font-semibold text-amber-900">{catalogKpis.withAlerts}</p>
           </article>
-          <article className="rounded-[24px] border border-rose-200/80 bg-rose-50/80 p-5 shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
+          <article className="rounded-[24px] border border-rose-200/80 bg-rose-50/80 p-5 text-center shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-rose-700">
               Sin imagen principal
             </p>
@@ -1459,11 +1841,11 @@ export function ProductsPageClient() {
         </section>
       )}
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.75fr)_minmax(320px,0.85fr)]">
-        <div className="space-y-6">
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.75fr)_minmax(320px,0.85fr)] xl:items-stretch">
+        <div className={`space-y-6 ${currentMode === "catalog" ? "xl:h-full" : ""}`}>
           {currentMode === "catalog" ? (
-            <section className="rounded-[30px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
-              <div className="overflow-x-auto">
+            <section className="rounded-[30px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] xl:flex xl:h-full xl:flex-col">
+              <div className="overflow-x-auto xl:flex-1">
                 <table className="min-w-full divide-y divide-border/70 text-left">
                   <thead>
                     <tr className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
@@ -1473,19 +1855,24 @@ export function ProductsPageClient() {
                       <th className="px-3 py-3">Precio</th>
                       <th className="px-3 py-3">Estado</th>
                       <th className="px-3 py-3">Agente</th>
-                      <th className="px-3 py-3 text-right">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/60">
                     {isCatalogLoading ? (
                       <TableEmptyStateRow
-                        colSpan={7}
+                        colSpan={6}
                         title="Cargando catalogo real"
                         description="Consultando mwl_products_with_primary_image..."
                       />
                     ) : null}
                     {catalogRows.map((row) => {
                       const isSelected = row.id === selectedProductId;
+                      const thumbnailSrc = buildStoragePublicUrl(
+                        row.primary_image_bucket,
+                        row.primary_image_path,
+                      );
+                      const thumbnailKey = `${row.id}:${thumbnailSrc ?? "none"}`;
+                      const hasThumbnailError = Boolean(thumbnailLoadErrors[thumbnailKey]);
 
                       return (
                         <tr
@@ -1493,12 +1880,26 @@ export function ProductsPageClient() {
                           className={`cursor-pointer text-sm text-slate-700 transition hover:bg-slate-50 ${
                             isSelected ? "bg-slate-50/80" : ""
                           }`}
-                          onClick={() => setSelectedProductId(row.id)}
+                          onClick={() => requestSelectProduct(row.id)}
                         >
                           <td className="px-3 py-4 align-top">
                             <div className="flex items-start gap-3">
-                              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border/70 bg-slate-100 text-muted-foreground">
-                                {row.primary_image_path ? (
+                              <div className="relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/70 bg-slate-100 text-muted-foreground">
+                                {thumbnailSrc && !hasThumbnailError ? (
+                                  <Image
+                                    src={thumbnailSrc}
+                                    alt={row.primary_image_alt ?? `Thumbnail ${row.name}`}
+                                    fill
+                                    sizes="44px"
+                                    className="object-cover"
+                                    onError={() =>
+                                      setThumbnailLoadErrors((current) => ({
+                                        ...current,
+                                        [thumbnailKey]: true,
+                                      }))
+                                    }
+                                  />
+                                ) : row.primary_image_path ? (
                                   <ImageIcon className="h-4 w-4" />
                                 ) : (
                                   <span className="text-[10px] font-semibold uppercase tracking-[0.08em]">
@@ -1537,17 +1938,12 @@ export function ProductsPageClient() {
                               {row.is_agent_visible ? "Visible" : "Oculto"}
                             </StatusBadge>
                           </td>
-                          <td className="px-3 py-4 align-top text-right">
-                            <Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-full">
-                              <Ellipsis className="h-4 w-4" />
-                            </Button>
-                          </td>
                         </tr>
                       );
                     })}
                     {!isCatalogLoading && catalogRows.length === 0 ? (
                       <TableEmptyStateRow
-                        colSpan={7}
+                        colSpan={6}
                         title="No hay productos para este filtro"
                         description="Ajusta query, category, min_qty o exact_product_id para volver a ver resultados."
                       />
@@ -1555,6 +1951,37 @@ export function ProductsPageClient() {
                   </tbody>
                 </table>
               </div>
+              {!isCatalogLoading && filteredProducts.length > 0 ? (
+                <div className="mt-4 flex items-center justify-between gap-3 border-t border-border/60 px-1 pt-4 xl:mt-auto">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Pagina {Math.min(currentPage, totalPages)} de {totalPages}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={currentPage <= 1}
+                      onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                      className="h-8 rounded-full px-3"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      Anterior
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={currentPage >= totalPages}
+                      onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                      className="h-8 rounded-full px-3"
+                    >
+                      Siguiente
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
             </section>
           ) : (
             <section className="rounded-[30px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
@@ -1569,13 +1996,12 @@ export function ProductsPageClient() {
                       <th className="px-3 py-3">Margen</th>
                       <th className="px-3 py-3">Stock</th>
                       <th className="px-3 py-3">Ultima actualizacion</th>
-                      <th className="px-3 py-3 text-right">Acciones</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/60">
                     {isPerformanceLoading ? (
                       <TableEmptyStateRow
-                        colSpan={8}
+                        colSpan={7}
                         title="Cargando performance real"
                         description="Agregando ventas validas por product_id..."
                       />
@@ -1586,7 +2012,7 @@ export function ProductsPageClient() {
                         className={`cursor-pointer text-sm text-slate-700 transition hover:bg-slate-50 ${
                           row.id === selectedProductId ? "bg-slate-50/80" : ""
                         }`}
-                        onClick={() => setSelectedProductId(row.id)}
+                        onClick={() => requestSelectProduct(row.id)}
                       >
                         <td className="px-3 py-4">
                           <p className="font-medium text-slate-950">{row.name}</p>
@@ -1625,16 +2051,11 @@ export function ProductsPageClient() {
                           )}
                         </td>
                         <td className="px-3 py-4">{formatDateTime(row.updated_at)}</td>
-                        <td className="px-3 py-4 text-right">
-                          <Button type="button" variant="outline" size="icon" className="h-8 w-8 rounded-full">
-                            <Ellipsis className="h-4 w-4" />
-                          </Button>
-                        </td>
                       </tr>
                     ))}
                     {!isPerformanceLoading && performanceRows.length === 0 ? (
                       <TableEmptyStateRow
-                        colSpan={8}
+                        colSpan={7}
                         title="No hay datos para performance"
                         description="No hay ventas validas o productos visibles para los filtros actuales."
                       />
@@ -1646,17 +2067,17 @@ export function ProductsPageClient() {
           )}
         </div>
 
-        <aside className="space-y-6">
+        <aside className={`min-w-0 space-y-6 ${currentMode === "catalog" ? "xl:h-full" : ""}`}>
           {currentMode === "catalog" ? (
             <>
-              <section className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+              <section className="min-w-0 rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] xl:h-full">
                 {!selectedProductId ? (
                   <StateDisplay
                     compact
                     title="Selecciona un producto"
                     description="El panel contextual muestra detalle catalogo por producto."
                   />
-                ) : isSelectedProductLoading && !selectedProduct ? (
+                ) : isSelectedProductLoading && !selectedProductBase ? (
                   <StateDisplay
                     compact
                     title="Cargando detalle"
@@ -1669,204 +2090,273 @@ export function ProductsPageClient() {
                     title="No se pudo cargar el detalle"
                     description="Intenta seleccionar de nuevo el producto."
                   />
-                ) : !selectedProduct ? (
+                ) : !selectedProductBase ? (
                   <StateDisplay
                     compact
                     title="Producto no disponible"
                     description="El producto no fue encontrado en la consulta actual."
                   />
                 ) : (
-                  <div className="space-y-5">
+                  <div className="min-w-0 space-y-5">
                     <div className="space-y-1">
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary/70">
                         Product detail
                       </p>
                       <h3 className="text-xl font-semibold tracking-tight text-slate-950">
-                        {selectedProduct.name}
+                        {selectedProductBase.name}
                       </h3>
-                      <p className="text-xs text-muted-foreground">{selectedProduct.id}</p>
-                      {selectedProduct.ui_created_locally ? (
+                      <p className="text-xs text-muted-foreground">{selectedProductBase.id}</p>
+                      {selectedProductBase.ui_created_locally ? (
                         <StatusBadge tone="warning" className="mt-2">
                           Draft local UI
                         </StatusBadge>
                       ) : null}
                     </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-xl border border-border/70 bg-slate-50/70 p-3">
+                        <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">SKU</p>
+                        <p className="mt-1 text-sm font-medium text-slate-950">{selectedProductBase.sku}</p>
+                      </div>
+                      <div className="rounded-xl border border-border/70 bg-slate-50/70 p-3">
+                        <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">Categoria / Family</p>
+                        <p className="mt-1 text-sm font-medium text-slate-950">
+                          {selectedProductBase.category} / {selectedProductBase.family}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-border/70 bg-slate-50/70 p-3">
+                        <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">Precio</p>
+                        <p className="mt-1 text-sm font-medium text-slate-950">
+                          {getFormattedPrice(selectedProductBase)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-border/70 bg-slate-50/70 p-3">
+                        <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">Estado</p>
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          <StatusBadge tone={selectedProductBase.is_active ? "success" : "danger"}>
+                            {selectedProductBase.is_active ? "Activo" : "Inactivo"}
+                          </StatusBadge>
+                          <StatusBadge tone={selectedProductBase.is_agent_visible ? "info" : "warning"}>
+                            {selectedProductBase.is_agent_visible ? "Visible agente" : "Oculto agente"}
+                          </StatusBadge>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 rounded-2xl border border-border/70 bg-slate-50/70 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                        Resumen operativo
+                      </p>
+                      <p className="text-sm text-slate-900">{selectedProductBase.summary ?? "Sin summary."}</p>
+                      <p className="text-sm text-slate-700">{selectedProductBase.details ?? "Sin details."}</p>
+                      <p className="text-xs text-muted-foreground">{selectedProductBase.notes ?? "Sin notes."}</p>
+                    </div>
+
+                    <div className="space-y-2 rounded-2xl border border-border/70 bg-slate-50/70 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                        Busqueda y multimedia
+                      </p>
+                      <p className="text-sm text-slate-800">
+                        aliases: {selectedProductBase.search_meta.alias_entries.length}
+                      </p>
+                      <p className="text-sm text-slate-800">
+                        search_terms: {selectedProductBase.search_meta.search_terms.length}
+                      </p>
+                      <p className="text-sm text-slate-800">imagenes: {selectedProductBase.images.length}</p>
+                    </div>
 
                     <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-slate-50/70 p-3">
                       <p className="text-xs text-muted-foreground">
-                        {localValidationError ??
-                          saveStatusMessage ??
-                          "Edita campos permitidos y guarda cambios."}
+                        Vista solo lectura. Edita desde modal para aplicar cambios de forma controlada.
                       </p>
-                      <Button
-                        type="button"
-                        onClick={handleSaveChanges}
-                        disabled={
-                          !hasPendingChanges ||
-                          Boolean(localValidationError) ||
-                          isSavingProduct ||
-                          !selectedProductDetail
-                        }
-                      >
-                        {isSavingProduct ? "Guardando..." : "Guardar cambios"}
+                      <Button type="button" onClick={openEditModal}>
+                        Editar producto
                       </Button>
                     </div>
 
-                    <div className="flex flex-wrap gap-2">
-                      {catalogTabs.map((tab) => (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          onClick={() => setCatalogTab(tab.id)}
-                          className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] transition ${
-                            catalogTab === tab.id
-                              ? "border-slate-950 bg-slate-950 text-white"
-                              : "border-border bg-white text-slate-700 hover:bg-slate-50"
-                          }`}
+                    {isEditOpen && selectedProduct ? (
+                      <div
+                        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-[2px]"
+                        onMouseDown={(event) => {
+                          if (event.target === event.currentTarget) {
+                            requestCloseEditModal();
+                          }
+                        }}
+                      >
+                        <section
+                          className="flex h-[76vh] w-full max-w-4xl flex-col rounded-[30px] border border-white/80 bg-white p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]"
+                          onMouseDown={(event) => event.stopPropagation()}
                         >
-                          {tab.label}
-                        </button>
-                      ))}
-                    </div>
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="space-y-1">
+                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary/70">
+                                Editar producto
+                              </p>
+                              <h3 className="text-xl font-semibold tracking-tight text-slate-950">
+                                {selectedProduct?.name}
+                              </h3>
+                              <p className="text-xs text-muted-foreground">{selectedProduct?.id}</p>
+                              <p className="text-xs text-muted-foreground">SKU: {selectedProduct?.sku}</p>
+                            </div>
+                            {selectedPrimaryImageSrc ? (
+                              <div className="relative h-24 w-24 overflow-hidden rounded-2xl border border-border/70 bg-slate-100">
+                                {!thumbnailLoadErrors[`edit-header:${selectedProduct.id}:${selectedPrimaryImageSrc}`] ? (
+                                  <Image
+                                    src={selectedPrimaryImageSrc}
+                                    alt={selectedPrimaryImage.alt_text ?? `Imagen ${selectedProduct.name}`}
+                                    fill
+                                    sizes="96px"
+                                    className="object-cover"
+                                    onError={() =>
+                                      setThumbnailLoadErrors((current) => ({
+                                        ...current,
+                                        [`edit-header:${selectedProduct.id}:${selectedPrimaryImageSrc}`]: true,
+                                      }))
+                                    }
+                                  />
+                                ) : (
+                                  <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                    <ImageIcon className="h-5 w-5" />
+                                  </div>
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
 
-                    {catalogTab === "general" ? (
-                      <fieldset className="space-y-3">
-                        <label className="space-y-1">
-                          <span className="text-xs text-muted-foreground">name</span>
-                          <input
-                            value={selectedProduct.name}
-                            onChange={(event) =>
-                              updateSelectedProductField("name", event.target.value)
-                            }
-                            className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                          />
-                        </label>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">category (sensible)</span>
-                            <input
-                              value={selectedProduct.category}
-                              readOnly
-                              className="h-10 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 text-sm text-amber-900"
-                            />
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">family (sensible)</span>
-                            <input
-                              value={selectedProduct.family}
-                              readOnly
-                              className="h-10 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 text-sm text-amber-900"
-                            />
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">variant_label</span>
-                            <input
-                              value={selectedProduct.variant_label ?? ""}
-                              onChange={(event) =>
-                                updateSelectedProductField(
-                                  "variant_label",
-                                  event.target.value || null,
-                                )
-                              }
-                              className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                            />
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">size_label</span>
-                            <input
-                              value={selectedProduct.size_label ?? ""}
-                              onChange={(event) =>
-                                updateSelectedProductField(
-                                  "size_label",
-                                  event.target.value || null,
-                                )
-                              }
-                              className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                            />
-                          </label>
-                        </div>
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">material</span>
-                            <input
-                              value={selectedProduct.material ?? ""}
-                              onChange={(event) =>
-                                updateSelectedProductField("material", event.target.value || null)
-                              }
-                              className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                            />
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">base_color</span>
-                            <input
-                              value={selectedProduct.base_color ?? ""}
-                              onChange={(event) =>
-                                updateSelectedProductField("base_color", event.target.value || null)
-                              }
-                              className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                            />
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">print_type</span>
-                            <input
-                              value={selectedProduct.print_type ?? ""}
-                              onChange={(event) =>
-                                updateSelectedProductField("print_type", event.target.value || null)
-                              }
-                              className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                            />
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">personalization_area</span>
-                            <input
-                              value={selectedProduct.personalization_area ?? ""}
-                              onChange={(event) =>
-                                updateSelectedProductField(
-                                  "personalization_area",
-                                  event.target.value || null,
-                                )
-                              }
-                              className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                            />
-                          </label>
-                        </div>
-                        <label className="space-y-1">
-                          <span className="text-xs text-muted-foreground">summary</span>
-                          <textarea
-                            value={selectedProduct.summary ?? ""}
-                            onChange={(event) =>
-                              updateSelectedProductField("summary", event.target.value || null)
-                            }
-                            rows={2}
-                            className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
-                          />
-                        </label>
-                        <label className="space-y-1">
-                          <span className="text-xs text-muted-foreground">details</span>
-                          <textarea
-                            value={selectedProduct.details ?? ""}
-                            onChange={(event) =>
-                              updateSelectedProductField("details", event.target.value || null)
-                            }
-                            rows={3}
-                            className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
-                          />
-                        </label>
-                        <label className="space-y-1">
-                          <span className="text-xs text-muted-foreground">notes</span>
-                          <textarea
-                            value={selectedProduct.notes ?? ""}
-                            onChange={(event) =>
-                              updateSelectedProductField("notes", event.target.value || null)
-                            }
-                            rows={2}
-                            className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
-                          />
-                        </label>
-                      </fieldset>
-                    ) : null}
+                          <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-slate-50/70 p-3">
+                            <p className="text-xs text-muted-foreground">
+                              {localValidationError ??
+                                saveStatusMessage ??
+                                "Cambios locales. Nada se guarda hasta presionar Guardar cambios."}
+                            </p>
+                            <div className="flex items-center gap-2">
+                              <Button type="button" variant="outline" onClick={requestCloseEditModal}>
+                                Cancelar
+                              </Button>
+                              <Button
+                                type="button"
+                                onClick={handleSaveChanges}
+                                disabled={!hasPendingChanges || Boolean(localValidationError) || isSavingProduct}
+                              >
+                                {isSavingProduct ? "Guardando..." : "Guardar cambios"}
+                              </Button>
+                            </div>
+                          </div>
 
-                    {catalogTab === "precios" ? (
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            {catalogTabs.map((tab) => (
+                              <button
+                                key={tab.id}
+                                type="button"
+                                onClick={() => setCatalogTab(tab.id)}
+                                className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] transition ${
+                                  catalogTab === tab.id
+                                    ? "border-slate-950 bg-slate-950 text-white"
+                                    : "border-border bg-white text-slate-700 hover:bg-slate-50"
+                                }`}
+                              >
+                                {tab.label}
+                              </button>
+                            ))}
+                          </div>
+
+                          <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+                          {catalogTab === "general" ? (
+                            <fieldset className="space-y-3">
+                              <label className="space-y-1">
+                                <span className="text-xs text-muted-foreground">name</span>
+                                <input
+                                  value={selectedProduct?.name ?? ""}
+                                  onChange={(event) =>
+                                    updateSelectedProductField("name", event.target.value)
+                                  }
+                                  className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                                />
+                              </label>
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <label className="space-y-1">
+                                  <span className="text-xs text-muted-foreground">variant_label</span>
+                                  <input
+                                    value={selectedProduct?.variant_label ?? ""}
+                                    onChange={(event) =>
+                                      updateSelectedProductField(
+                                        "variant_label",
+                                        event.target.value || null,
+                                      )
+                                    }
+                                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-xs text-muted-foreground">size_label</span>
+                                  <input
+                                    value={selectedProduct?.size_label ?? ""}
+                                    onChange={(event) =>
+                                      updateSelectedProductField(
+                                        "size_label",
+                                        event.target.value || null,
+                                      )
+                                    }
+                                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-xs text-muted-foreground">material</span>
+                                  <input
+                                    value={selectedProduct?.material ?? ""}
+                                    onChange={(event) =>
+                                      updateSelectedProductField("material", event.target.value || null)
+                                    }
+                                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-xs text-muted-foreground">base_color</span>
+                                  <input
+                                    value={selectedProduct?.base_color ?? ""}
+                                    onChange={(event) =>
+                                      updateSelectedProductField("base_color", event.target.value || null)
+                                    }
+                                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                                  />
+                                </label>
+                              </div>
+                              <label className="space-y-1">
+                                <span className="text-xs text-muted-foreground">summary</span>
+                                <textarea
+                                  value={selectedProduct?.summary ?? ""}
+                                  onChange={(event) =>
+                                    updateSelectedProductField("summary", event.target.value || null)
+                                  }
+                                  rows={2}
+                                  className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
+                                />
+                              </label>
+                              <label className="space-y-1">
+                                <span className="text-xs text-muted-foreground">details</span>
+                                <textarea
+                                  value={selectedProduct?.details ?? ""}
+                                  onChange={(event) =>
+                                    updateSelectedProductField("details", event.target.value || null)
+                                  }
+                                  rows={3}
+                                  className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
+                                />
+                              </label>
+                              <label className="space-y-1">
+                                <span className="text-xs text-muted-foreground">notes</span>
+                                <textarea
+                                  value={selectedProduct?.notes ?? ""}
+                                  onChange={(event) =>
+                                    updateSelectedProductField("notes", event.target.value || null)
+                                  }
+                                  rows={2}
+                                  className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
+                                />
+                              </label>
+                            </fieldset>
+                          ) : null}
+
+                          {catalogTab === "precios" ? (
                       <fieldset className="space-y-3">
                         <label className="space-y-1">
                           <span className="text-xs text-muted-foreground">pricing_mode</span>
@@ -1988,23 +2478,24 @@ export function ProductsPageClient() {
                     ) : null}
 
                     {catalogTab === "busqueda" ? (
-                      <fieldset className="space-y-3">
+                      <fieldset className="min-w-0 space-y-3">
                         <div className="rounded-2xl border border-border/70 bg-slate-50/80 p-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                             aliases
                           </p>
-                          <div className="mt-2 flex gap-2">
+                          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                             <input
                               value={newAlias}
                               onChange={(event) => setNewAlias(event.target.value)}
                               placeholder="Nuevo alias"
-                              className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                              className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             />
                             <Button
                               type="button"
                               variant="outline"
                               onClick={handleAddAlias}
                               disabled={!newAlias.trim() || isUpdatingSearchMedia}
+                              className="w-full sm:w-auto sm:shrink-0"
                             >
                               Agregar
                             </Button>
@@ -2014,14 +2505,15 @@ export function ProductsPageClient() {
                               selectedProduct.search_meta.alias_entries.map((entry) => (
                                 <div
                                   key={entry.id}
-                                  className="flex items-center justify-between rounded-xl bg-white px-3 py-2 text-sm text-slate-800"
+                                  className="flex min-w-0 flex-col gap-2 rounded-xl bg-white px-3 py-2 text-sm text-slate-800 sm:flex-row sm:items-center sm:justify-between"
                                 >
-                                  <span>{entry.alias}</span>
+                                  <span className="min-w-0 break-all">{entry.alias}</span>
                                   <Button
                                     type="button"
                                     variant="outline"
                                     onClick={() => handleDeleteAlias(entry.id)}
                                     disabled={isUpdatingSearchMedia}
+                                    className="w-full sm:w-auto sm:shrink-0"
                                   >
                                     Eliminar
                                   </Button>
@@ -2037,7 +2529,7 @@ export function ProductsPageClient() {
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                             search terms
                           </p>
-                          <div className="mt-2 grid gap-2 sm:grid-cols-[2fr_1fr_2fr_auto]">
+                          <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-2">
                             <input
                               value={newSearchTermDraft.term}
                               onChange={(event) =>
@@ -2047,7 +2539,7 @@ export function ProductsPageClient() {
                                 }))
                               }
                               placeholder="term"
-                              className="h-10 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                              className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             />
                             <input
                               value={newSearchTermDraft.priority}
@@ -2059,7 +2551,7 @@ export function ProductsPageClient() {
                               }
                               placeholder="priority"
                               inputMode="numeric"
-                              className="h-10 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                              className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             />
                             <input
                               value={newSearchTermDraft.notes}
@@ -2069,14 +2561,15 @@ export function ProductsPageClient() {
                                   notes: event.target.value,
                                 }))
                               }
-                              placeholder="notes"
-                              className="h-10 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                              placeholder="Notas (opcional)"
+                              className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             />
                             <Button
                               type="button"
                               variant="outline"
                               onClick={handleAddSearchTerm}
                               disabled={!newSearchTermDraft.term.trim() || isUpdatingSearchMedia}
+                              className="w-full sm:col-span-2"
                             >
                               Agregar
                             </Button>
@@ -2085,7 +2578,7 @@ export function ProductsPageClient() {
                             {selectedProduct.search_meta.search_terms.length > 0 ? (
                               selectedProduct.search_meta.search_terms.map((term) => (
                                 <div key={term.id} className="rounded-xl bg-white px-3 py-2 text-slate-800">
-                                  <div className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr_2fr_auto_auto] sm:items-center">
+                                  <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)] sm:items-center">
                                     <input
                                       defaultValue={term.term}
                                       onBlur={(event) => {
@@ -2094,7 +2587,7 @@ export function ProductsPageClient() {
                                           void handleUpdateSearchTerm(term.id, { term: nextTerm });
                                         }
                                       }}
-                                      className="h-9 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
+                                      className="h-9 w-full min-w-0 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
                                     />
                                     <span className="text-xs uppercase text-muted-foreground">
                                       {term.term_type}
@@ -2108,8 +2601,10 @@ export function ProductsPageClient() {
                                         }
                                       }}
                                       inputMode="numeric"
-                                      className="h-9 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
+                                      className="h-9 w-full min-w-0 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
                                     />
+                                  </div>
+                                  <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-[minmax(0,2fr)_auto_auto] sm:items-center">
                                     <input
                                       defaultValue={term.notes ?? ""}
                                       onBlur={(event) => {
@@ -2118,7 +2613,8 @@ export function ProductsPageClient() {
                                           void handleUpdateSearchTerm(term.id, { notes: notes || null });
                                         }
                                       }}
-                                      className="h-9 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
+                                      placeholder="Sin notas. Agrega contexto opcional para este termino."
+                                      className="h-9 w-full min-w-0 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
                                     />
                                     <label className="inline-flex items-center gap-2 text-xs">
                                       <input
@@ -2137,6 +2633,7 @@ export function ProductsPageClient() {
                                       variant="outline"
                                       onClick={() => handleDeleteSearchTerm(term.id)}
                                       disabled={isUpdatingSearchMedia}
+                                      className="w-full sm:w-auto sm:shrink-0"
                                     >
                                       Eliminar
                                     </Button>
@@ -2202,7 +2699,7 @@ export function ProductsPageClient() {
                     ) : null}
 
                     {catalogTab === "multimedia" ? (
-                      <div className="space-y-3">
+                      <div className="min-w-0 space-y-3">
                         <div className="rounded-2xl border border-border/70 bg-slate-50 p-4">
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                             Primary image
@@ -2210,9 +2707,15 @@ export function ProductsPageClient() {
                           {selectedProduct.search_meta.storage_bucket &&
                           selectedProduct.search_meta.storage_path ? (
                             <div className="mt-3 space-y-1 text-sm text-slate-800">
-                              <p>primary_image_bucket: {selectedProduct.search_meta.storage_bucket}</p>
-                              <p>primary_image_path: {selectedProduct.search_meta.storage_path}</p>
-                              <p>primary_image_alt: {selectedProduct.search_meta.alt_text ?? "Sin alt_text"}</p>
+                              <p className="break-all">
+                                primary_image_bucket: {selectedProduct.search_meta.storage_bucket}
+                              </p>
+                              <p className="break-all">
+                                primary_image_path: {selectedProduct.search_meta.storage_path}
+                              </p>
+                              <p className="break-all">
+                                primary_image_alt: {selectedProduct.search_meta.alt_text ?? "Sin alt_text"}
+                              </p>
                             </div>
                           ) : (
                             <p className="mt-3 text-sm text-muted-foreground">Sin imagen primaria registrada.</p>
@@ -2222,7 +2725,7 @@ export function ProductsPageClient() {
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                             mwl_product_images
                           </p>
-                          <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_2fr_1fr_1fr_auto]">
+                          <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
                             <input
                               value={newImageDraft.storage_bucket}
                               onChange={(event) =>
@@ -2232,7 +2735,7 @@ export function ProductsPageClient() {
                                 }))
                               }
                               placeholder="bucket"
-                              className="h-10 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                              className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             />
                             <input
                               value={newImageDraft.storage_path}
@@ -2243,7 +2746,7 @@ export function ProductsPageClient() {
                                 }))
                               }
                               placeholder="storage_path"
-                              className="h-10 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                              className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             />
                             <input
                               value={newImageDraft.alt_text}
@@ -2254,28 +2757,31 @@ export function ProductsPageClient() {
                                 }))
                               }
                               placeholder="alt_text"
-                              className="h-10 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                              className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             />
-                            <input
-                              value={newImageDraft.sort_order}
-                              onChange={(event) =>
-                                setNewImageDraft((current) => ({
-                                  ...current,
-                                  sort_order: event.target.value,
-                                }))
-                              }
-                              placeholder="sort"
-                              inputMode="numeric"
-                              className="h-10 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                            />
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={handleAddImage}
-                              disabled={!newImageDraft.storage_path.trim() || isUpdatingSearchMedia}
-                            >
-                              Agregar
-                            </Button>
+                            <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+                              <input
+                                value={newImageDraft.sort_order}
+                                onChange={(event) =>
+                                  setNewImageDraft((current) => ({
+                                    ...current,
+                                    sort_order: event.target.value,
+                                  }))
+                                }
+                                placeholder="sort"
+                                inputMode="numeric"
+                                className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleAddImage}
+                                disabled={!newImageDraft.storage_path.trim() || isUpdatingSearchMedia}
+                                className="w-full sm:w-auto sm:shrink-0"
+                              >
+                                Agregar
+                              </Button>
+                            </div>
                           </div>
                           <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-700">
                             <input
@@ -2294,9 +2800,14 @@ export function ProductsPageClient() {
                             {selectedProduct.images.length > 0 ? (
                               selectedProduct.images.map((image) => (
                                 <div key={image.id} className="rounded-xl bg-white px-3 py-2">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <p>{image.storage_bucket}</p>
-                                    <div className="flex gap-2">
+                                  <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+                                    <div className="min-w-0 space-y-1">
+                                      <p className="break-all">{image.storage_bucket}</p>
+                                      <p className="break-all text-xs text-muted-foreground">
+                                        {image.storage_path}
+                                      </p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2 sm:justify-end">
                                       <Button
                                         type="button"
                                         variant="outline"
@@ -2315,8 +2826,7 @@ export function ProductsPageClient() {
                                       </Button>
                                     </div>
                                   </div>
-                                  <p className="text-xs text-muted-foreground">{image.storage_path}</p>
-                                  <div className="mt-2 grid gap-2 sm:grid-cols-[2fr_1fr]">
+                                  <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] sm:items-center">
                                     <input
                                       defaultValue={image.alt_text ?? ""}
                                       onBlur={(event) => {
@@ -2326,7 +2836,7 @@ export function ProductsPageClient() {
                                         }
                                       }}
                                       placeholder="alt_text"
-                                      className="h-9 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
+                                      className="h-9 w-full min-w-0 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
                                     />
                                     <input
                                       defaultValue={String(image.sort_order)}
@@ -2338,7 +2848,7 @@ export function ProductsPageClient() {
                                       }}
                                       inputMode="numeric"
                                       placeholder="sort_order"
-                                      className="h-9 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
+                                      className="h-9 w-full min-w-0 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
                                     />
                                   </div>
                                   <p className="mt-1 text-xs text-muted-foreground">
@@ -2455,9 +2965,9 @@ export function ProductsPageClient() {
                           </label>
                         </div>
                       </fieldset>
-                    ) : null}
+                          ) : null}
 
-                    {catalogTab === "seguridad" ? (
+                          {catalogTab === "seguridad" ? (
                       <div className="space-y-3">
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                           <div className="flex items-start gap-2">
@@ -2530,6 +3040,10 @@ export function ProductsPageClient() {
                             className="h-10 w-full rounded-xl border border-border bg-slate-100 px-3 text-sm text-slate-700"
                           />
                         </label>
+                      </div>
+                          ) : null}
+                          </div>
+                        </section>
                       </div>
                     ) : null}
                   </div>
@@ -2665,6 +3179,30 @@ export function ProductsPageClient() {
           )}
         </aside>
       </section>
+
+      {isDiscardChangesOpen ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/40 px-4 backdrop-blur-[2px]">
+          <div className="w-full max-w-md rounded-[24px] border border-white/80 bg-white p-5 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">
+                Cambios no guardados
+              </p>
+              <h4 className="text-lg font-semibold text-slate-950">Hay cambios pendientes en el editor</h4>
+              <p className="text-sm text-muted-foreground">
+                Si sales ahora, se perdera el draft local y no se guardara nada en base de datos.
+              </p>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={handleContinueEditing}>
+                Continuar editando
+              </Button>
+              <Button type="button" onClick={handleDiscardChangesConfirm}>
+                Descartar cambios
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {isCreateOpen ? (
         <div
