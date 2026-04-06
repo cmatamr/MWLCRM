@@ -1,4 +1,5 @@
 import { badRequest, handleRouteError, ok, type RouteContext } from "@/server/api/http";
+import { requireRole, requireSessionProfile } from "@/server/api/auth";
 import { getProductDetail, updateProduct } from "@/server/services/products";
 import { z } from "zod";
 
@@ -40,6 +41,7 @@ export async function GET(
   context: RouteContext<{ id: string }>,
 ) {
   try {
+    await requireSessionProfile();
     const { id } = await context.params;
 
     if (!id?.trim()) {
@@ -58,6 +60,7 @@ export async function PATCH(
   context: RouteContext<{ id: string }>,
 ) {
   try {
+    await requireRole("admin");
     const { id } = await context.params;
 
     if (!id?.trim()) {

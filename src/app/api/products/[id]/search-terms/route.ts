@@ -1,4 +1,5 @@
 import { badRequest, handleRouteError, ok, type RouteContext } from "@/server/api/http";
+import { requireRole } from "@/server/api/auth";
 import { addProductSearchTerm } from "@/server/services/products";
 import { z } from "zod";
 
@@ -21,6 +22,7 @@ export async function POST(
   context: RouteContext<{ id: string }>,
 ) {
   try {
+    await requireRole("admin");
     const { id } = await context.params;
 
     if (!id?.trim()) {

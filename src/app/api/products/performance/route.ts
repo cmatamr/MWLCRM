@@ -6,6 +6,7 @@ import {
   parsePositiveIntParam,
   parseStringParam,
 } from "@/server/api/http";
+import { requireSessionProfile } from "@/server/api/auth";
 import {
   getProductsPerformance,
   type GetProductsPerformanceParams,
@@ -57,6 +58,7 @@ function parsePricingModeParam(searchParams: URLSearchParams): ProductPricingMod
 
 export async function GET(request: Request) {
   try {
+    await requireSessionProfile();
     const searchParams = new URL(request.url).searchParams;
 
     const params: GetProductsPerformanceParams = {

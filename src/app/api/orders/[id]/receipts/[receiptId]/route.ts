@@ -7,6 +7,7 @@ import {
   RouteContext,
 } from "@/server/api/http";
 import { paymentReceiptRouteParamsSchema, updatePaymentReceiptSchema } from "@/domain/crm/schemas";
+import { requireAnyRole, requireRole } from "@/server/api/auth";
 import { PaymentReceiptError, softDeletePaymentReceipt, updatePaymentReceipt } from "@/server/services/orders";
 
 export async function PATCH(
@@ -14,6 +15,7 @@ export async function PATCH(
   context: RouteContext<{ id: string; receiptId: string }>,
 ) {
   try {
+    await requireAnyRole(["admin", "agent"]);
     const params = paymentReceiptRouteParamsSchema.parse(await context.params);
     const body = updatePaymentReceiptSchema.parse(await request.json());
 
@@ -63,6 +65,7 @@ export async function DELETE(
   context: RouteContext<{ id: string; receiptId: string }>,
 ) {
   try {
+    await requireRole("admin");
     const params = paymentReceiptRouteParamsSchema.parse(await context.params);
     const bodyText = await request.text();
     const body = bodyText

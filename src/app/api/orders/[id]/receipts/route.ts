@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { badRequest, conflict, handleRouteError, notFound, ok, RouteContext } from "@/server/api/http";
 import { createPaymentReceiptSchema, crmEntityIdParamsSchema } from "@/domain/crm/schemas";
+import { requireAnyRole } from "@/server/api/auth";
 import { createPaymentReceipt, PaymentReceiptError } from "@/server/services/orders";
 
 export async function POST(
@@ -8,6 +9,7 @@ export async function POST(
   context: RouteContext<{ id: string }>,
 ) {
   try {
+    await requireAnyRole(["admin", "agent"]);
     const orderId = crmEntityIdParamsSchema.parse(await context.params).id;
     const body = createPaymentReceiptSchema.parse(await request.json());
 

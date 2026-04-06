@@ -15,9 +15,11 @@ import {
   updateOrder,
   UpdateOrderError,
 } from "@/server/services/orders";
+import { requireAnyRole, requireRole, requireSessionProfile } from "@/server/api/auth";
 
 export async function GET(_request: Request, context: RouteContext<{ id: string }>) {
   try {
+    await requireSessionProfile();
     const orderId = crmEntityIdParamsSchema.parse(await context.params).id;
     const order = await getOrderDetail(orderId);
 
@@ -33,6 +35,7 @@ export async function GET(_request: Request, context: RouteContext<{ id: string 
 
 export async function PATCH(request: Request, context: RouteContext<{ id: string }>) {
   try {
+    await requireAnyRole(["admin", "agent"]);
     const orderId = crmEntityIdParamsSchema.parse(await context.params).id;
     const body = await request.json();
     const paymentActionParse = orderPaymentActionSchema.safeParse(body);
@@ -80,6 +83,7 @@ export async function PATCH(request: Request, context: RouteContext<{ id: string
 
 export async function DELETE(_request: Request, context: RouteContext<{ id: string }>) {
   try {
+    await requireRole("admin");
     const orderId = crmEntityIdParamsSchema.parse(await context.params).id;
     const result = await deleteOrder(orderId);
 

@@ -1,5 +1,6 @@
 import { badRequest, conflict, handleRouteError, notFound, ok, RouteContext } from "@/server/api/http";
 import { paymentReceiptReviewActionSchema, paymentReceiptRouteParamsSchema } from "@/domain/crm/schemas";
+import { requireRole } from "@/server/api/auth";
 import { PaymentReceiptError, rejectPaymentReceipt } from "@/server/services/orders";
 
 export async function POST(
@@ -7,6 +8,7 @@ export async function POST(
   context: RouteContext<{ id: string; receiptId: string }>,
 ) {
   try {
+    await requireRole("admin");
     const params = paymentReceiptRouteParamsSchema.parse(await context.params);
     const body = paymentReceiptReviewActionSchema.parse(await request.json());
 

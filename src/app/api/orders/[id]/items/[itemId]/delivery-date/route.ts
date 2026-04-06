@@ -1,5 +1,6 @@
 import { orderItemRouteParamsSchema, updateOrderItemDeliveryDateSchema } from "@/domain/crm/schemas";
 import { badRequest, handleRouteError, notFound, ok, RouteContext } from "@/server/api/http";
+import { requireAnyRole } from "@/server/api/auth";
 import { UpdateOrderItemDeliveryDateError, updateOrderItemDeliveryDate } from "@/server/services/orders";
 
 export async function PATCH(
@@ -7,6 +8,7 @@ export async function PATCH(
   context: RouteContext<{ id: string; itemId: string }>,
 ) {
   try {
+    await requireAnyRole(["admin", "agent"]);
     const params = orderItemRouteParamsSchema.parse(await context.params);
     const body = updateOrderItemDeliveryDateSchema.parse(await request.json());
 

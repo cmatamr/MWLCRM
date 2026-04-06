@@ -7,10 +7,12 @@ import {
   ok,
   RouteContext,
 } from "@/server/api/http";
+import { requireAnyRole, requireSessionProfile } from "@/server/api/auth";
 import { getCustomerDetail, UpdateCustomerError, updateCustomer } from "@/server/services/customers";
 
 export async function GET(_request: Request, context: RouteContext<{ id: string }>) {
   try {
+    await requireSessionProfile();
     const customerId = crmEntityIdParamsSchema.parse(await context.params).id;
     const customer = await getCustomerDetail(customerId);
 
@@ -26,6 +28,7 @@ export async function GET(_request: Request, context: RouteContext<{ id: string 
 
 export async function PATCH(request: Request, context: RouteContext<{ id: string }>) {
   try {
+    await requireAnyRole(["admin", "agent"]);
     const customerId = crmEntityIdParamsSchema.parse(await context.params).id;
     const payload = updateCustomerSchema.parse(await request.json());
     const customer = await updateCustomer(customerId, payload);

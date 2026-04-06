@@ -20,6 +20,7 @@ if (supabaseUrl) {
 
 function buildContentSecurityPolicy(): string {
   const isDevelopment = process.env.NODE_ENV === "development";
+  const turnstileOrigin = "https://challenges.cloudflare.com";
 
   const imageSources = ["'self'", "data:", "blob:"];
 
@@ -28,10 +29,16 @@ function buildContentSecurityPolicy(): string {
   }
 
   const connectSources = ["'self'"];
+  const scriptSources = ["'self'", "'unsafe-inline'"];
+  const frameSources = ["'self'"];
 
   if (supabaseOrigin) {
     connectSources.push(supabaseOrigin);
   }
+
+  connectSources.push(turnstileOrigin);
+  scriptSources.push(turnstileOrigin);
+  frameSources.push(turnstileOrigin);
 
   if (isDevelopment) {
     connectSources.push("ws:", "wss:");
@@ -44,14 +51,14 @@ function buildContentSecurityPolicy(): string {
     "frame-ancestors 'none'",
     "object-src 'none'",
     "manifest-src 'self'",
-    "frame-src 'none'",
+    `frame-src ${frameSources.join(" ")}`,
     "worker-src 'self' blob:",
     `img-src ${imageSources.join(" ")}`,
     "font-src 'self' data:",
     // Next.js injecta estilos inline en runtime y la UI usa style={} en varios componentes.
     "style-src 'self' 'unsafe-inline'",
     // Sin nonce por request, Next.js requiere unsafe-inline para scripts inline de runtime/hidratacion.
-    `script-src 'self' 'unsafe-inline'${isDevelopment ? " 'unsafe-eval'" : ""}`,
+    `script-src ${scriptSources.join(" ")}${isDevelopment ? " 'unsafe-eval'" : ""}`,
     `connect-src ${connectSources.join(" ")}`,
   ];
 

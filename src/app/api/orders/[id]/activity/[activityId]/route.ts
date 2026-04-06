@@ -6,12 +6,14 @@ import {
   updateOrderActivity,
   UpdateOrderActivityError,
 } from "@/server/services/orders";
+import { requireAnyRole, requireRole } from "@/server/api/auth";
 
 export async function PATCH(
   request: Request,
   context: RouteContext<{ id: string; activityId: string }>,
 ) {
   try {
+    await requireAnyRole(["admin", "agent"]);
     const params = orderActivityRouteParamsSchema.parse(await context.params);
     const body = updateOrderActivitySchema.parse(await request.json());
     const order = await updateOrderActivity({
@@ -43,6 +45,7 @@ export async function DELETE(
   context: RouteContext<{ id: string; activityId: string }>,
 ) {
   try {
+    await requireRole("admin");
     const params = orderActivityRouteParamsSchema.parse(await context.params);
     const order = await deleteOrderActivity({
       orderId: params.id,

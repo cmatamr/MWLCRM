@@ -3,6 +3,7 @@ import { Bell } from "lucide-react";
 
 import { GlobalSearchForm } from "@/components/layout/global-search-form";
 import { MobileNav } from "@/components/layout/mobile-nav";
+import { UserMenu } from "@/components/layout/user-menu";
 import { Button } from "@/components/ui/button";
 
 export function AppTopbar() {
@@ -26,6 +27,7 @@ export function AppTopbar() {
             <Button variant="outline" size="icon" aria-label="Notificaciones">
               <Bell className="h-4 w-4" />
             </Button>
+            <UserMenu />
           </div>
         </div>
         <MobileNav />

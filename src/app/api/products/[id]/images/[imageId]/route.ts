@@ -1,4 +1,5 @@
 import { badRequest, handleRouteError, ok, type RouteContext } from "@/server/api/http";
+import { requireRole } from "@/server/api/auth";
 import { deleteProductImage, updateProductImage } from "@/server/services/products";
 import { z } from "zod";
 
@@ -29,6 +30,7 @@ export async function PATCH(
   context: RouteContext<{ id: string; imageId: string }>,
 ) {
   try {
+    await requireRole("admin");
     const { id, imageId } = await context.params;
 
     if (!id?.trim()) {
@@ -53,6 +55,7 @@ export async function DELETE(
   context: RouteContext<{ id: string; imageId: string }>,
 ) {
   try {
+    await requireRole("admin");
     const { id, imageId } = await context.params;
 
     if (!id?.trim()) {

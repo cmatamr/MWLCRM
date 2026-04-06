@@ -1,9 +1,11 @@
 import { createOrderSchema, listOrdersParamsSchema, parseQueryParams } from "@/domain/crm/schemas";
 import { badRequest, conflict, handleRouteError, notFound, ok } from "@/server/api/http";
+import { requireAnyRole, requireSessionProfile } from "@/server/api/auth";
 import { createOrder, CreateOrderError, listOrders } from "@/server/services/orders";
 
 export async function GET(request: Request) {
   try {
+    await requireSessionProfile();
     const orders = await listOrders(
       parseQueryParams(listOrdersParamsSchema, new URL(request.url).searchParams),
     );
@@ -15,6 +17,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    await requireAnyRole(["admin", "agent"]);
     const body = createOrderSchema.parse(await request.json());
     const order = await createOrder(body);
 

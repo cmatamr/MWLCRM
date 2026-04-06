@@ -1,5 +1,6 @@
 import { createOrderActivitySchema, crmEntityIdParamsSchema } from "@/domain/crm/schemas";
 import { badRequest, handleRouteError, notFound, ok, RouteContext } from "@/server/api/http";
+import { requireAnyRole } from "@/server/api/auth";
 import { createOrderActivity, CreateOrderActivityError } from "@/server/services/orders";
 
 export async function POST(
@@ -7,6 +8,7 @@ export async function POST(
   context: RouteContext<{ id: string }>,
 ) {
   try {
+    await requireAnyRole(["admin", "agent"]);
     const orderId = crmEntityIdParamsSchema.parse(await context.params).id;
     const body = createOrderActivitySchema.parse(await request.json());
 

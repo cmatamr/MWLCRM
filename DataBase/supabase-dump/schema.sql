@@ -79,6 +79,15 @@ CREATE TYPE "public"."alert_status_type" AS ENUM (
 ALTER TYPE "public"."alert_status_type" OWNER TO "postgres";
 
 
+CREATE TYPE "public"."app_role" AS ENUM (
+    'admin',
+    'agent'
+);
+
+
+ALTER TYPE "public"."app_role" OWNER TO "postgres";
+
+
 CREATE TYPE "public"."budget_status_enum" AS ENUM (
     'unknown',
     'mentioned',
@@ -621,6 +630,19 @@ CREATE TABLE IF NOT EXISTS "public"."alerts" (
 
 
 ALTER TABLE "public"."alerts" OWNER TO "postgres";
+
+
+CREATE TABLE IF NOT EXISTS "public"."app_user_profiles" (
+    "id" "uuid" NOT NULL,
+    "role" "public"."app_role" NOT NULL,
+    "full_name" "text" NOT NULL,
+    "is_active" boolean DEFAULT true NOT NULL,
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp with time zone DEFAULT "now"() NOT NULL
+);
+
+
+ALTER TABLE "public"."app_user_profiles" OWNER TO "postgres";
 
 
 CREATE TABLE IF NOT EXISTS "public"."banks" (
@@ -1611,6 +1633,11 @@ ALTER TABLE ONLY "public"."alerts"
 
 
 
+ALTER TABLE ONLY "public"."app_user_profiles"
+    ADD CONSTRAINT "app_user_profiles_pkey" PRIMARY KEY ("id");
+
+
+
 ALTER TABLE ONLY "public"."banks"
     ADD CONSTRAINT "banks_pkey" PRIMARY KEY ("id");
 
@@ -1841,6 +1868,10 @@ CREATE INDEX "followups_conversation_idx" ON "public"."followups" USING "btree" 
 
 
 CREATE INDEX "followups_due_idx" ON "public"."followups" USING "btree" ("status", "due_at");
+
+
+
+CREATE INDEX "idx_app_user_profiles_role_active" ON "public"."app_user_profiles" USING "btree" ("role", "is_active");
 
 
 
@@ -2096,6 +2127,10 @@ CREATE OR REPLACE VIEW "public"."customer_summary" WITH ("security_invoker"='on'
 
 
 
+CREATE OR REPLACE TRIGGER "trg_app_user_profiles_updated_at" BEFORE UPDATE ON "public"."app_user_profiles" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
 CREATE OR REPLACE TRIGGER "trg_contacts_updated_at" BEFORE UPDATE ON "public"."contacts" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
 
 
@@ -2130,6 +2165,11 @@ CREATE OR REPLACE TRIGGER "trg_validate_lead_stage_transition" BEFORE UPDATE ON 
 
 ALTER TABLE ONLY "public"."alerts"
     ADD CONSTRAINT "alerts_lead_thread_id_fkey" FOREIGN KEY ("lead_thread_id") REFERENCES "public"."lead_threads"("id") ON DELETE SET NULL;
+
+
+
+ALTER TABLE ONLY "public"."app_user_profiles"
+    ADD CONSTRAINT "app_user_profiles_id_fkey" FOREIGN KEY ("id") REFERENCES "auth"."users"("id") ON DELETE CASCADE;
 
 
 
@@ -2269,6 +2309,13 @@ ALTER TABLE ONLY "public"."state_changes"
 
 
 ALTER TABLE "public"."alerts" ENABLE ROW LEVEL SECURITY;
+
+
+ALTER TABLE "public"."app_user_profiles" ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "app_user_profiles_select_own" ON "public"."app_user_profiles" FOR SELECT TO "authenticated" USING (("id" = "auth"."uid"()));
+
 
 
 ALTER TABLE "public"."banks" ENABLE ROW LEVEL SECURITY;
@@ -2812,6 +2859,12 @@ GRANT ALL ON FUNCTION "public"."word_similarity_op"("text", "text") TO "service_
 GRANT ALL ON TABLE "public"."alerts" TO "anon";
 GRANT ALL ON TABLE "public"."alerts" TO "authenticated";
 GRANT ALL ON TABLE "public"."alerts" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."app_user_profiles" TO "anon";
+GRANT ALL ON TABLE "public"."app_user_profiles" TO "authenticated";
+GRANT ALL ON TABLE "public"."app_user_profiles" TO "service_role";
 
 
 

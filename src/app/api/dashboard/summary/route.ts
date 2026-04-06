@@ -1,6 +1,7 @@
 import { OrderStatusEnum } from "@prisma/client";
 
 import { ok, handleRouteError } from "@/server/api/http";
+import { requireSessionProfile } from "@/server/api/auth";
 import {
   getDashboardSummary,
   SUPPORTED_DASHBOARD_DAILY_SALES_DAYS,
@@ -41,6 +42,7 @@ function parseRecentOrdersStatus(request: Request): OrderStatusEnum | undefined 
 
 export async function GET(request: Request) {
   try {
+    await requireSessionProfile();
     const summary = await getDashboardSummary({
       revenueWindowDays: parseRevenueWindowDays(request),
       recentOrdersStatus: parseRecentOrdersStatus(request),

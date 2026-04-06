@@ -1,5 +1,6 @@
 import { orderItemRouteParamsSchema, updateOrderItemQuantitySchema } from "@/domain/crm/schemas";
 import { badRequest, conflict, handleRouteError, notFound, ok, RouteContext } from "@/server/api/http";
+import { requireAnyRole } from "@/server/api/auth";
 import {
   deleteOrderItem,
   DeleteOrderItemError,
@@ -12,6 +13,7 @@ export async function PATCH(
   context: RouteContext<{ id: string; itemId: string }>,
 ) {
   try {
+    await requireAnyRole(["admin", "agent"]);
     const params = orderItemRouteParamsSchema.parse(await context.params);
     const body = updateOrderItemQuantitySchema.parse(await request.json());
 
@@ -46,6 +48,7 @@ export async function DELETE(
   context: RouteContext<{ id: string; itemId: string }>,
 ) {
   try {
+    await requireAnyRole(["admin", "agent"]);
     const params = orderItemRouteParamsSchema.parse(await context.params);
 
     const order = await deleteOrderItem({

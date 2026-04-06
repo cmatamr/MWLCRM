@@ -56,6 +56,24 @@ export function badRequest(message: string, details?: unknown) {
   });
 }
 
+export function unauthorized(message: string, details?: unknown) {
+  return new ApiRouteError({
+    status: 401,
+    code: "UNAUTHORIZED",
+    message,
+    details,
+  });
+}
+
+export function forbidden(message: string, details?: unknown) {
+  return new ApiRouteError({
+    status: 403,
+    code: "FORBIDDEN",
+    message,
+    details,
+  });
+}
+
 export function notFound(message: string, details?: unknown) {
   return new ApiRouteError({
     status: 404,

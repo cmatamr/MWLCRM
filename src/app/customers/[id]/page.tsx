@@ -90,7 +90,7 @@ export default async function CustomerDetailPage({ params }: CustomerDetailPageP
           {summaryItems.map((item) => (
             <article
               key={item.label}
-              className="rounded-[24px] border border-border/70 bg-slate-50/70 p-4"
+              className="rounded-[24px] border border-border/70 bg-slate-50/70 p-4 text-center"
             >
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                 {item.label}

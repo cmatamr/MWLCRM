@@ -5,10 +5,12 @@ import {
   ok,
   RouteContext,
 } from "@/server/api/http";
+import { requireSessionProfile } from "@/server/api/auth";
 import { getCampaignDetail } from "@/server/services/campaigns";
 
 export async function GET(_request: Request, context: RouteContext<{ id: string }>) {
   try {
+    await requireSessionProfile();
     const campaignId = crmEntityIdParamsSchema.parse(await context.params).id;
     const campaign = await getCampaignDetail(campaignId);
 

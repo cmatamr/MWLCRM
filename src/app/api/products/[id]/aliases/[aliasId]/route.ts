@@ -1,4 +1,5 @@
 import { badRequest, handleRouteError, ok, type RouteContext } from "@/server/api/http";
+import { requireRole } from "@/server/api/auth";
 import { deleteProductAlias } from "@/server/services/products";
 
 function parseAliasId(rawValue: string): number {
@@ -17,6 +18,7 @@ export async function DELETE(
   context: RouteContext<{ id: string; aliasId: string }>,
 ) {
   try {
+    await requireRole("admin");
     const { id, aliasId } = await context.params;
 
     if (!id?.trim()) {

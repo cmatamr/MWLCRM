@@ -1,4 +1,5 @@
 import { badRequest, handleRouteError, ok, parsePositiveIntParam, parseStringParam } from "@/server/api/http";
+import { requireRole, requireSessionProfile } from "@/server/api/auth";
 import {
   createProduct,
   listCatalogProducts,
@@ -87,6 +88,7 @@ function parsePricingModeParam(
 
 export async function GET(request: Request) {
   try {
+    await requireSessionProfile();
     const searchParams = new URL(request.url).searchParams;
 
     const params: ListCatalogProductsParams = {
@@ -112,6 +114,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    await requireRole("admin");
     const rawBody = await request.json();
     if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) {
       throw badRequest("Invalid JSON body.");

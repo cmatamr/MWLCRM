@@ -1,4 +1,7 @@
+"use client";
+
 import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
 
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppTopbar } from "@/components/layout/app-topbar";
@@ -8,6 +11,13 @@ type AppShellProps = {
 };
 
 export function AppShell({ children }: AppShellProps) {
+  const pathname = usePathname();
+  const isAuthRoute = pathname.startsWith("/auth");
+
+  if (isAuthRoute) {
+    return <div className="min-h-screen px-4 md:px-6 lg:px-8">{children}</div>;
+  }
+
   return (
     <div className="min-h-screen">
       <div className="mx-auto flex min-h-screen max-w-[1760px]">
