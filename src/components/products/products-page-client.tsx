@@ -81,6 +81,106 @@ type CreateProductDraft = {
   sort_order: string;
 };
 
+type SuggestionInputProps = {
+  label: string;
+  value: string;
+  options: string[];
+  placeholder?: string;
+  createOptionLabel: string;
+  onChange: (value: string) => void;
+};
+
+function SuggestionInput({
+  label,
+  value,
+  options,
+  placeholder,
+  createOptionLabel,
+  onChange,
+}: SuggestionInputProps) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const normalizedValue = value.trim().toLowerCase();
+  const uniqueOptions = useMemo(
+    () => Array.from(new Set(options.map((option) => option.trim()).filter(Boolean))),
+    [options],
+  );
+
+  const filteredOptions = useMemo(() => {
+    if (!normalizedValue) {
+      return uniqueOptions.slice(0, 8);
+    }
+
+    return uniqueOptions.filter((option) => option.toLowerCase().includes(normalizedValue)).slice(0, 8);
+  }, [normalizedValue, uniqueOptions]);
+
+  const trimmedValue = value.trim();
+  const canCreateNewOption =
+    trimmedValue.length > 0 &&
+    !uniqueOptions.some((option) => option.toLowerCase() === trimmedValue.toLowerCase());
+  const createOptionPreviewValue = trimmedValue || "...";
+
+  return (
+    <label className="space-y-1">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <div className="relative">
+        <input
+          value={value}
+          onChange={(event) => {
+            onChange(event.target.value);
+            setIsOpen(true);
+          }}
+          onFocus={() => setIsOpen(true)}
+          onBlur={() => {
+            setTimeout(() => setIsOpen(false), 120);
+          }}
+          placeholder={placeholder}
+          className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+        />
+        {isOpen ? (
+          <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-border/80 bg-white shadow-[0_14px_35px_rgba(15,23,42,0.12)]">
+            <ul className="max-h-52 overflow-y-auto py-1">
+              <li>
+                <button
+                  type="button"
+                  disabled={!canCreateNewOption}
+                  className="w-full border-b border-border/70 px-3 py-2 text-left text-sm font-medium text-primary transition enabled:hover:bg-primary/5 disabled:cursor-not-allowed disabled:text-muted-foreground"
+                  onMouseDown={(event) => {
+                    if (!canCreateNewOption) {
+                      return;
+                    }
+
+                    event.preventDefault();
+                    onChange(trimmedValue);
+                    setIsOpen(false);
+                  }}
+                >
+                  {createOptionLabel}: &quot;{createOptionPreviewValue}&quot;
+                </button>
+              </li>
+              {filteredOptions.map((option) => (
+                <li key={option}>
+                  <button
+                    type="button"
+                    className="w-full px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      onChange(option);
+                      setIsOpen(false);
+                    }}
+                  >
+                    {option}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </label>
+  );
+}
+
 const catalogTabs: Array<{ id: CatalogSidebarTab; label: string }> = [
   { id: "general", label: "General" },
   { id: "precios", label: "Precios" },
@@ -449,6 +549,61 @@ function toNumberOrNull(rawValue: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeDecimalRawInput(rawValue: string) {
+  const sanitized = rawValue.replace(/\s+/g, "").replace(/,/g, ".").replace(/[^0-9.]/g, "");
+
+  if (!sanitized) {
+    return "";
+  }
+
+  const firstDotIndex = sanitized.indexOf(".");
+  const hasDot = firstDotIndex >= 0;
+  const integerPartRaw = hasDot ? sanitized.slice(0, firstDotIndex) : sanitized;
+  const decimalRaw = hasDot ? sanitized.slice(firstDotIndex + 1) : "";
+
+  const integerPart = integerPartRaw.replace(/\./g, "").replace(/^0+(?=\d)/, "");
+  const normalizedInteger = integerPart || "0";
+  const normalizedDecimal = decimalRaw.replace(/\./g, "").slice(0, 2);
+
+  if (!hasDot) {
+    return normalizedInteger;
+  }
+
+  if (normalizedDecimal.length === 0 && rawValue.trim().endsWith(".")) {
+    return `${normalizedInteger}.`;
+  }
+
+  return normalizedDecimal.length > 0 ? `${normalizedInteger}.${normalizedDecimal}` : normalizedInteger;
+}
+
+function toDecimalOrNull(rawValue: string) {
+  const normalized = rawValue.trim().replace(/\s+/g, "");
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (!/^\d+(\.\d+)?$/.test(normalized)) {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatDecimalDisplay(rawValue: string) {
+  const parsed = toDecimalOrNull(rawValue);
+
+  if (parsed == null) {
+    return "";
+  }
+
+  const [integerPart, decimalPart] = parsed.toFixed(2).split(".");
+  const integerWithSpaces = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+
+  return `${integerWithSpaces}.${decimalPart}`;
+}
+
 function validateCreateDraft(draft: CreateProductDraft): string | null {
   if (!draft.name.trim()) {
     return "name cannot be empty.";
@@ -465,8 +620,8 @@ function validateCreateDraft(draft: CreateProductDraft): string | null {
     return "min_qty must be greater than or equal to 1.";
   }
 
-  const price = toNumberOrNull(draft.price_crc);
-  const priceFrom = toNumberOrNull(draft.price_from_crc);
+  const price = toDecimalOrNull(draft.price_crc);
+  const priceFrom = toDecimalOrNull(draft.price_from_crc);
 
   if (draft.pricing_mode === "fixed" && price == null) {
     return "pricing_mode=fixed requires price_crc.";
@@ -501,8 +656,8 @@ function buildCreatePayloadFromDraft(draft: CreateProductDraft): CreateProductIn
     variant_label: draft.variant_label.trim() || null,
     size_label: draft.size_label.trim() || null,
     pricing_mode: draft.pricing_mode,
-    price_crc: toNumberOrNull(draft.price_crc),
-    price_from_crc: toNumberOrNull(draft.price_from_crc),
+    price_crc: toDecimalOrNull(draft.price_crc),
+    price_from_crc: toDecimalOrNull(draft.price_from_crc),
     min_qty: toNumberOrNull(draft.min_qty) ?? 1,
     is_active: draft.is_active,
     is_agent_visible: draft.is_agent_visible,
@@ -577,6 +732,8 @@ export function ProductsPageClient() {
   const [editBaseline, setEditBaseline] = useState<ProductDetail | null>(null);
   const [isDiscardChangesOpen, setIsDiscardChangesOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isEditingCreatePriceCrc, setIsEditingCreatePriceCrc] = useState(false);
+  const [isEditingCreatePriceFromCrc, setIsEditingCreatePriceFromCrc] = useState(false);
   const [createDraft, setCreateDraft] = useState<CreateProductDraft>(defaultCreateDraft);
   const [skuControlEnabled, setSkuControlEnabled] = useState(false);
   const [skuDraft, setSkuDraft] = useState("");
@@ -885,20 +1042,26 @@ export function ProductsPageClient() {
     );
   }, [performanceMetric, topProductsByPeriod]);
 
-  const createPreviewId = useMemo(() => {
-    const tokens = [
-      toSlugToken(createDraft.category),
-      toSlugToken(createDraft.family),
-      toSlugToken(createDraft.name),
-      toSlugToken(createDraft.variant_label),
-    ].filter(Boolean);
-
-    return tokens.join("_").replace(/_+/g, "_").replace(/^_+|_+$/g, "") || "product";
-  }, [createDraft.category, createDraft.family, createDraft.name, createDraft.variant_label]);
-
   const createPreviewSku = useMemo(() => {
-    return `MWL-${createPreviewId.replaceAll("_", "-").toUpperCase()}`.replace(/-+/g, "-");
-  }, [createPreviewId]);
+    const normalizePreviewToken = (value: string) =>
+      value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+
+    const skuChunks = [
+      createDraft.category,
+      createDraft.family,
+      createDraft.name,
+      createDraft.variant_label,
+    ]
+      .map(normalizePreviewToken)
+      .filter(Boolean)
+      .map((chunk) => chunk.slice(0, 3).toUpperCase());
+
+    return skuChunks.length > 0 ? `MWL-${skuChunks.join("-")}` : "MWL-";
+  }, [createDraft.category, createDraft.family, createDraft.name, createDraft.variant_label]);
 
   const resolveProductName = (productId: string | null) => {
     if (!productId) {
@@ -1106,6 +1269,19 @@ export function ProductsPageClient() {
           error instanceof Error ? error.message : "No se pudo crear el producto.";
         setCreateStatusMessage(message);
       });
+  }
+
+  function handleCreatePriceBlur(field: "price_crc" | "price_from_crc") {
+    if (field === "price_crc") {
+      setIsEditingCreatePriceCrc(false);
+    } else {
+      setIsEditingCreatePriceFromCrc(false);
+    }
+
+    setCreateDraft((current) => ({
+      ...current,
+      [field]: current[field].replace(/\.$/, ""),
+    }));
   }
 
   async function handleSaveChanges() {
@@ -3213,13 +3389,13 @@ export function ProductsPageClient() {
           <div className="w-full max-w-2xl rounded-[30px] border border-white/80 bg-white p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
             <div className="space-y-1">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary/70">
-                Nuevo producto
+                NUEVO PRODUCTO
               </p>
               <h3 className="text-2xl font-semibold tracking-tight text-slate-950">
-                Alta segura en catalogo
+                Agrega un producto a tu catálogo
               </h3>
               <p className="text-sm text-muted-foreground">
-                Crea el producto minimo valido y luego completa multimedia/busqueda desde el detalle.
+                Agrega la información básica ahora. Podrás añadir imágenes, descripciones y optimizar la búsqueda más adelante.
               </p>
             </div>
 
@@ -3227,8 +3403,8 @@ export function ProductsPageClient() {
               <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70 sm:col-span-2">
                 General
               </p>
-              <label className="space-y-1 sm:col-span-2">
-                <span className="text-xs text-muted-foreground">name</span>
+              <label className="space-y-1">
+                <span className="text-xs text-muted-foreground">Nombre del Producto</span>
                 <input
                   value={createDraft.name}
                   onChange={(event) =>
@@ -3238,29 +3414,35 @@ export function ProductsPageClient() {
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">family</span>
+                <span className="text-xs text-muted-foreground">SKU (autogenerado)</span>
                 <input
-                  value={createDraft.family}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({ ...current, family: event.target.value }))
-                  }
-                  list="family-options"
-                  className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                  value={createPreviewSku}
+                  readOnly
+                  className="h-10 w-full rounded-xl border border-border bg-slate-100 px-3 text-sm text-slate-700 outline-none"
                 />
               </label>
+              <SuggestionInput
+                label="Familia del producto"
+                value={createDraft.family}
+                options={familyOptions}
+                placeholder="Ej. popi_gigante, chip_bags, caminata"
+                createOptionLabel="Crear nueva familia"
+                onChange={(nextValue) =>
+                  setCreateDraft((current) => ({ ...current, family: nextValue }))
+                }
+              />
+              <SuggestionInput
+                label="Categoría"
+                value={createDraft.category}
+                options={categoryOptions}
+                placeholder="Ej. Hogar, Ropa, Accesorios"
+                createOptionLabel="Crear nueva categoría"
+                onChange={(nextValue) =>
+                  setCreateDraft((current) => ({ ...current, category: nextValue }))
+                }
+              />
               <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">category</span>
-                <input
-                  value={createDraft.category}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({ ...current, category: event.target.value }))
-                  }
-                  list="category-options"
-                  className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">variant_label</span>
+                <span className="text-xs text-muted-foreground">Variante</span>
                 <input
                   value={createDraft.variant_label}
                   onChange={(event) =>
@@ -3269,16 +3451,18 @@ export function ProductsPageClient() {
                       variant_label: event.target.value,
                     }))
                   }
+                  placeholder="Ej. rosado, azul, grande, edición navidad"
                   className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">size_label</span>
+                <span className="text-xs text-muted-foreground">Tamaño / Presentación</span>
                 <input
                   value={createDraft.size_label}
                   onChange={(event) =>
                     setCreateDraft((current) => ({ ...current, size_label: event.target.value }))
                   }
+                  placeholder="Ej. 20x25 cm"
                   className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                 />
               </label>
@@ -3287,7 +3471,7 @@ export function ProductsPageClient() {
                 Pricing
               </p>
               <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">pricing_mode</span>
+                <span className="text-xs text-muted-foreground">Tipo de precio</span>
                 <select
                   value={createDraft.pricing_mode}
                   onChange={(event) =>
@@ -3315,27 +3499,44 @@ export function ProductsPageClient() {
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">price_crc</span>
+                <span className="text-xs text-muted-foreground">Precio</span>
                 <input
-                  value={createDraft.price_crc}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({ ...current, price_crc: event.target.value }))
+                  value={
+                    isEditingCreatePriceCrc
+                      ? createDraft.price_crc
+                      : formatDecimalDisplay(createDraft.price_crc)
                   }
-                  inputMode="numeric"
+                  onChange={(event) =>
+                    setCreateDraft((current) => ({
+                      ...current,
+                      price_crc: normalizeDecimalRawInput(event.target.value),
+                    }))
+                  }
+                  onFocus={() => setIsEditingCreatePriceCrc(true)}
+                  onBlur={() => handleCreatePriceBlur("price_crc")}
+                  inputMode="decimal"
+                  placeholder="Ej. 2 500.00"
                   className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">price_from_crc</span>
+                <span className="text-xs text-muted-foreground">Precio desde</span>
                 <input
-                  value={createDraft.price_from_crc}
+                  value={
+                    isEditingCreatePriceFromCrc
+                      ? createDraft.price_from_crc
+                      : formatDecimalDisplay(createDraft.price_from_crc)
+                  }
                   onChange={(event) =>
                     setCreateDraft((current) => ({
                       ...current,
-                      price_from_crc: event.target.value,
+                      price_from_crc: normalizeDecimalRawInput(event.target.value),
                     }))
                   }
-                  inputMode="numeric"
+                  onFocus={() => setIsEditingCreatePriceFromCrc(true)}
+                  onBlur={() => handleCreatePriceBlur("price_from_crc")}
+                  inputMode="decimal"
+                  placeholder="Ej. 15 567.64"
                   className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                 />
               </label>
@@ -3428,13 +3629,6 @@ export function ProductsPageClient() {
                 </select>
               </label>
 
-              <div className="space-y-2 sm:col-span-2 rounded-2xl border border-amber-200 bg-amber-50 p-3">
-                <p className="text-xs text-amber-900">
-                  `id` es solo lectura y se genera en backend. `sku` se autogenera y no es editable en alta estandar.
-                </p>
-                <p className="text-sm text-amber-900">id preview: {createPreviewId}</p>
-                <p className="text-sm text-amber-900">sku preview: {createPreviewSku}</p>
-              </div>
               <label className="space-y-1 sm:col-span-2">
                 <span className="text-xs text-muted-foreground">summary</span>
                 <textarea
@@ -3451,17 +3645,6 @@ export function ProductsPageClient() {
                   "Al crear se guarda en mwl_products, se refresca indice y se abre el detalle del nuevo producto."}
               </p>
             </div>
-            <datalist id="category-options">
-              {categoryOptions.map((category) => (
-                <option key={category} value={category} />
-              ))}
-            </datalist>
-            <datalist id="family-options">
-              {familyOptions.map((family) => (
-                <option key={family} value={family} />
-              ))}
-            </datalist>
-
             <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
               <Button
                 type="button"

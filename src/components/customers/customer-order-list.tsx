@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import type { CustomerOrderSummary } from "@/server/services/customers/types";
 import { InlineStateDisplay } from "@/components/ui/state-display";
 import { StatusBadgeFromViewModel } from "@/components/ui/status-badge";
@@ -32,27 +34,31 @@ export function CustomerOrderList({ orders }: CustomerOrderListProps) {
             const orderBadge = getOrderStatusBadge(order.status);
 
             return (
-            <article
-              key={order.id}
-              className="rounded-[24px] border border-border/70 bg-slate-50/70 p-4"
-            >
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-slate-950">#{order.id.slice(0, 8)}</p>
-                  <p className="text-sm text-muted-foreground">
-                    Creada: {formatDateTime(order.createdAt)}
-                  </p>
-                </div>
+              <Link
+                key={order.id}
+                href={`/orders/${order.id}`}
+                className="group block rounded-[24px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+                aria-label={`Abrir detalle de la orden ${order.id.slice(0, 8)}`}
+              >
+                <article className="rounded-[24px] border border-border/70 bg-slate-50/70 p-4 transition duration-200 ease-out transform-gpu group-hover:scale-[1.01] group-hover:brightness-95 group-hover:shadow-[0_12px_30px_rgba(15,23,42,0.14)] group-focus-visible:scale-[1.01] group-focus-visible:brightness-95">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-slate-950">#{order.id.slice(0, 8)}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Creada: {formatDateTime(order.createdAt)}
+                      </p>
+                    </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                  <StatusBadgeFromViewModel badge={orderBadge} />
-                  <span className="text-sm font-semibold text-slate-950">
-                    {formatCurrencyCRC(order.totalCrc)}
-                  </span>
-                </div>
-              </div>
-            </article>
-          );
+                    <div className="flex flex-wrap items-center gap-3">
+                      <StatusBadgeFromViewModel badge={orderBadge} />
+                      <span className="text-sm font-semibold text-slate-950">
+                        {formatCurrencyCRC(order.totalCrc)}
+                      </span>
+                    </div>
+                  </div>
+                </article>
+              </Link>
+            );
           })
         ) : (
           <InlineStateDisplay

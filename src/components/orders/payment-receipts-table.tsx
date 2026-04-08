@@ -59,6 +59,8 @@ export function PaymentReceiptsTable({ orderId, receipts }: PaymentReceiptsTable
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingReceipt, setEditingReceipt] = useState<OrderReceiptSummary | null>(null);
+  const [receiptPendingValidationConfirm, setReceiptPendingValidationConfirm] =
+    useState<OrderReceiptSummary | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [openMenuReceiptId, setOpenMenuReceiptId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<{
@@ -122,23 +124,36 @@ export function PaymentReceiptsTable({ orderId, receipts }: PaymentReceiptsTable
     });
   }
 
-  async function handleValidateReceipt(receipt: OrderReceiptSummary) {
+  function handleValidateReceipt(receipt: OrderReceiptSummary) {
     if (!canValidateReceipt(receipt) || validateReceiptMutation.isPending) {
       return;
     }
 
     setActionError(null);
-    const confirmed = window.confirm("¿Validar este comprobante y mover la orden a produccion si aplica?");
+    setReceiptPendingValidationConfirm(receipt);
+  }
 
-    if (!confirmed) {
+  function closeValidateConfirmModal() {
+    if (validateReceiptMutation.isPending) {
       return;
     }
+
+    setReceiptPendingValidationConfirm(null);
+  }
+
+  async function confirmValidateReceipt() {
+    if (!receiptPendingValidationConfirm || validateReceiptMutation.isPending) {
+      return;
+    }
+
+    const receipt = receiptPendingValidationConfirm;
 
     try {
       await validateReceiptMutation.mutateAsync({
         receiptId: receipt.id,
         performedBy: "CRM",
       });
+      setReceiptPendingValidationConfirm(null);
     } catch (error) {
       if (error instanceof Error) {
         setActionError(error.message);
@@ -625,6 +640,51 @@ export function PaymentReceiptsTable({ orderId, receipts }: PaymentReceiptsTable
         onClose={closeEditModal}
         onSubmit={handleUpdateReceipt}
       />
+
+      {receiptPendingValidationConfirm ? (
+        <div
+          className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/25 px-4 py-10 backdrop-blur-[2px]"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="validate-receipt-confirm-title"
+        >
+          <div className="mx-auto w-full max-w-xl rounded-[32px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
+            <div className="space-y-2 border-b border-border/70 pb-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary/70">
+                Payment receipts
+              </p>
+              <h3 id="validate-receipt-confirm-title" className="text-2xl font-semibold tracking-tight text-slate-950">
+                Confirmar validación
+              </h3>
+              <p className="text-sm leading-6 text-muted-foreground">
+                ¿Desea validar este comprobante y mover la orden a producción?
+              </p>
+            </div>
+
+            <div className="mt-5 rounded-[20px] border border-border/70 bg-slate-50/70 px-4 py-3 text-sm text-slate-700">
+              Comprobante <span className="font-semibold text-slate-950">#{receiptPendingValidationConfirm.id.slice(0, 8)}</span>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={closeValidateConfirmModal}
+                disabled={validateReceiptMutation.isPending}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void confirmValidateReceipt()}
+                disabled={validateReceiptMutation.isPending}
+              >
+                {validateReceiptMutation.isPending ? "Validando..." : "Validar comprobante"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {menuPortal}
     </>

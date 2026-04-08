@@ -81,7 +81,7 @@ function AddOrderItemModal({ isOpen, onClose, orderId }: AddOrderItemModalProps)
       aria-labelledby="add-order-item-title"
     >
       <div className="w-full max-w-2xl rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-3">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary/70">
               Order items
@@ -95,10 +95,6 @@ function AddOrderItemModal({ isOpen, onClose, orderId }: AddOrderItemModalProps)
               </p>
             </div>
           </div>
-
-          <Button type="button" variant="outline" onClick={handleClose} disabled={createMutation.isPending}>
-            Cancelar
-          </Button>
         </div>
 
         <div className="mt-6">
@@ -110,6 +106,9 @@ function AddOrderItemModal({ isOpen, onClose, orderId }: AddOrderItemModalProps)
             submitLabel="Agregar item"
             isSubmitting={createMutation.isPending}
             formError={formError}
+            closeLabel="Cancelar"
+            actionOrder="submit-close"
+            onClose={handleClose}
             onAddItem={handleSubmit}
           />
         </div>

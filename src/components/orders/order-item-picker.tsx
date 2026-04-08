@@ -19,6 +19,7 @@ type OrderItemPickerProps = {
   isSubmitting: boolean;
   formError: string | null;
   closeLabel?: string;
+  actionOrder?: "close-submit" | "submit-close";
   closeOnSubmitSuccess?: boolean;
   onClose?: () => void;
   onAddItem: (input: { product: OrderItemProductOption; quantity: number }) => Promise<void>;
@@ -34,6 +35,7 @@ export function OrderItemPicker({
   isSubmitting,
   formError,
   closeLabel = "Cancelar",
+  actionOrder = "close-submit",
   closeOnSubmitSuccess = false,
   onClose,
   onAddItem,
@@ -223,14 +225,29 @@ export function OrderItemPicker({
       ) : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-        {onClose ? (
-          <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
-            {closeLabel}
-          </Button>
-        ) : null}
-        <Button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting || !selectedProduct}>
-          {isSubmitting ? "Guardando..." : submitLabel}
-        </Button>
+        {actionOrder === "submit-close" ? (
+          <>
+            <Button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting || !selectedProduct}>
+              {isSubmitting ? "Guardando..." : submitLabel}
+            </Button>
+            {onClose ? (
+              <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
+                {closeLabel}
+              </Button>
+            ) : null}
+          </>
+        ) : (
+          <>
+            {onClose ? (
+              <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
+                {closeLabel}
+              </Button>
+            ) : null}
+            <Button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting || !selectedProduct}>
+              {isSubmitting ? "Guardando..." : submitLabel}
+            </Button>
+          </>
+        )}
       </div>
     </div>
   );
