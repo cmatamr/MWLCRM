@@ -598,7 +598,7 @@ function formatDecimalDisplay(rawValue: string) {
     return "";
   }
 
-  const [integerPart, decimalPart] = parsed.toFixed(2).split(".");
+  const [integerPart = "0", decimalPart = "00"] = parsed.toFixed(2).split(".");
   const integerWithSpaces = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 
   return `${integerWithSpaces}.${decimalPart}`;
