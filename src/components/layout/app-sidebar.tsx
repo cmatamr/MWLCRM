@@ -71,16 +71,6 @@ export function AppSidebar() {
           })}
         </nav>
 
-        <div className="rounded-3xl border border-cyan-400/20 bg-cyan-400/10 p-4">
-          <p className="text-sm font-semibold text-cyan-100">
-            Base lista para crecer
-          </p>
-          <p className="mt-2 text-sm leading-relaxed text-cyan-50/80">
-            La arquitectura queda preparada para separar dominios, servicios y
-            nuevos módulos sin sobrecargar las páginas.
-          </p>
-        </div>
-
         <div className="mt-4 px-1 text-center">
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-200">
             Powered by RevenueCore
