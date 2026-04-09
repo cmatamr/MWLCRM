@@ -25,22 +25,26 @@ import type {
   ProductsPerformanceRange,
 } from "@/components/products/types";
 import {
-  useCreateProduct,
   useProductDetail,
-  useProductSearchMedia,
+  useSaveProduct,
   useProductsCatalog,
   useProductsPerformance,
-  useUpdateProduct,
 } from "@/hooks";
 import { Button } from "@/components/ui/button";
 import { StateDisplay, TableEmptyStateRow } from "@/components/ui/state-display";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
+import { FetcherError } from "@/lib/fetcher";
+import {
+  isSearchTermUsefulForNova,
+  NOVA_SEARCH_TERM_QUALITY_RULE_EN,
+  NOVA_SEARCH_TERM_QUALITY_RULE_ES,
+} from "@/lib/products/search-term-quality";
 import type {
-  CreateProductInput,
   GetProductsPerformanceParams,
   ListCatalogProductsParams,
   ProductDiscountVisibility,
+  SaveProductInput,
   UpdateProductInput,
 } from "@/server/services/products";
 
@@ -64,6 +68,8 @@ type CreateProductDraft = {
   category: string;
   variant_label: string;
   size_label: string;
+  search_terms_raw: string;
+  publication_mode: "internal" | "nova";
   pricing_mode: ProductPricingMode;
   price_crc: string;
   price_from_crc: string;
@@ -184,7 +190,7 @@ function SuggestionInput({
 const catalogTabs: Array<{ id: CatalogSidebarTab; label: string }> = [
   { id: "general", label: "General" },
   { id: "precios", label: "Precios" },
-  { id: "busqueda", label: "Busqueda" },
+  { id: "busqueda", label: "Busqueda + NOVA" },
   { id: "multimedia", label: "Multimedia" },
   { id: "reglas", label: "Reglas" },
   { id: "seguridad", label: "Seguridad" },
@@ -208,12 +214,14 @@ const defaultCreateDraft: CreateProductDraft = {
   category: "",
   variant_label: "",
   size_label: "",
+  search_terms_raw: "",
+  publication_mode: "internal",
   pricing_mode: "fixed",
   price_crc: "",
   price_from_crc: "",
   min_qty: "1",
   is_active: true,
-  is_agent_visible: true,
+  is_agent_visible: false,
   allows_name: false,
   requires_design_approval: false,
   is_discountable: false,
@@ -288,6 +296,217 @@ function getPrimaryImage(product: ProductDetail) {
 }
 
 type ProductPriceShape = Pick<ProductDetail, "pricing_mode" | "price_crc" | "price_from_crc">;
+type NovaOperationalStatus = "ready" | "not_publishable" | "hidden" | "inactive";
+type NovaOperationalAssessment = {
+  status: NovaOperationalStatus;
+  statusLabel: string;
+  statusTone: "success" | "danger" | "warning";
+  blockingIssues: string[];
+  warnings: string[];
+  activeDiscoveryTerms: number;
+  hasVisibleContractViolation: boolean;
+};
+
+type OperationalFeedbackSeverity = "error" | "warning" | "info";
+type OperationalFeedbackItem = {
+  severity: OperationalFeedbackSeverity;
+  message: string;
+};
+
+const feedbackToneBySeverity = {
+  error: "danger",
+  warning: "warning",
+  info: "info",
+} as const;
+
+const feedbackLabelBySeverity = {
+  error: "Error bloqueante",
+  warning: "Advertencia",
+  info: "Informacion",
+} as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toFriendlyOperationalMessage(rawMessage: string): string {
+  const normalized = rawMessage.trim();
+  const lower = normalized.toLowerCase();
+
+  if (
+    lower.includes("summary is required") ||
+    lower.includes("falta summary") ||
+    lower.includes("agrega un summary")
+  ) {
+    return "Completa el resumen del producto para poder publicarlo en NOVA.";
+  }
+
+  if (
+    lower.includes("discovery term") ||
+    lower.includes("faltan search terms") ||
+    lower.includes("at least one active search term") ||
+    lower.includes("3 alphanumeric characters")
+  ) {
+    return NOVA_SEARCH_TERM_QUALITY_RULE_ES;
+  }
+
+  if (lower.includes("min_qty")) {
+    return "La cantidad minima debe ser un numero mayor o igual a 1.";
+  }
+
+  if (
+    lower.includes("pricing_mode") ||
+    lower.includes("price_crc") ||
+    lower.includes("price_from_crc") ||
+    lower.includes("precio invalido")
+  ) {
+    return "Completa el precio segun el tipo de precio seleccionado.";
+  }
+
+  if (
+    lower.includes("category is required") ||
+    lower.includes("family is required") ||
+    lower.includes("category y family son obligatorios") ||
+    lower.includes("category cannot be empty") ||
+    lower.includes("family cannot be empty") ||
+    lower.includes("category must match") ||
+    lower.includes("family must match") ||
+    lower.includes("taxonomia incompleta")
+  ) {
+    return "Selecciona una categoria y una familia validas del catalogo.";
+  }
+
+  if (
+    lower.includes("cannot remain agent-visible") ||
+    lower.includes("no se puede publicar al agente") ||
+    lower.includes("no publicable para nova")
+  ) {
+    return "Este producto todavia no esta listo para publicarse en NOVA.";
+  }
+
+  if (lower.includes("is_active must be true")) {
+    return "Activa el producto para publicarlo en NOVA.";
+  }
+
+  if (lower.includes("name must be descriptive") || lower.includes("nombre invalido")) {
+    return "Revisa el nombre: debe ser claro y tener al menos 3 caracteres utiles.";
+  }
+
+  return normalized;
+}
+
+function dedupeFeedbackItems(items: OperationalFeedbackItem[]): OperationalFeedbackItem[] {
+  const seen = new Set<string>();
+  const deduped: OperationalFeedbackItem[] = [];
+
+  for (const item of items) {
+    const key = `${item.severity}:${item.message.trim().toLowerCase()}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(item);
+  }
+
+  return deduped;
+}
+
+function mapIssuesToFeedback(
+  issues: string[],
+  severity: Exclude<OperationalFeedbackSeverity, "info">,
+): OperationalFeedbackItem[] {
+  return issues.map((issue) => ({
+    severity,
+    message: toFriendlyOperationalMessage(issue),
+  }));
+}
+
+function buildFeedbackFromNovaValidation(input: {
+  blockingIssues: string[];
+  warnings: string[];
+  activeDiscoveryTerms?: number;
+}): OperationalFeedbackItem[] {
+  const feedback: OperationalFeedbackItem[] = [
+    ...mapIssuesToFeedback(input.blockingIssues, "error"),
+    ...mapIssuesToFeedback(input.warnings, "warning"),
+  ];
+
+  if (typeof input.activeDiscoveryTerms === "number") {
+    feedback.push({
+      severity: "info",
+      message: `Search terms activos y utiles: ${input.activeDiscoveryTerms}.`,
+    });
+  }
+
+  if (input.blockingIssues.length === 0 && input.warnings.length === 0) {
+    feedback.push({
+      severity: "info",
+      message: "No hay bloqueos ni advertencias para publicar este producto en NOVA.",
+    });
+  }
+
+  return dedupeFeedbackItems(feedback);
+}
+
+function extractNovaValidationFromError(error: unknown): {
+  blockingIssues: string[];
+  warnings: string[];
+} | null {
+  if (!(error instanceof FetcherError) || !isRecord(error.details)) {
+    return null;
+  }
+
+  const rawValidation = isRecord(error.details.novaValidation)
+    ? error.details.novaValidation
+    : isRecord(error.details)
+      ? error.details
+      : null;
+
+  if (!rawValidation) {
+    return null;
+  }
+
+  const blockingIssues = Array.isArray(rawValidation.blockingIssues)
+    ? rawValidation.blockingIssues.filter((item): item is string => typeof item === "string")
+    : [];
+  const warnings = Array.isArray(rawValidation.warnings)
+    ? rawValidation.warnings.filter((item): item is string => typeof item === "string")
+    : [];
+
+  if (blockingIssues.length === 0 && warnings.length === 0) {
+    return null;
+  }
+
+  return { blockingIssues, warnings };
+}
+
+function FeedbackList({
+  items,
+  className = "",
+}: {
+  items: OperationalFeedbackItem[];
+  className?: string;
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={`space-y-2 ${className}`.trim()}>
+      {items.map((item, index) => (
+        <div
+          key={`${item.severity}:${item.message}:${index}`}
+          className="flex items-start gap-2 rounded-lg border border-border/60 bg-white/70 p-2"
+        >
+          <StatusBadge tone={feedbackToneBySeverity[item.severity]} className="shrink-0">
+            {feedbackLabelBySeverity[item.severity]}
+          </StatusBadge>
+          <p className="pt-0.5 text-xs text-slate-800">{item.message}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function getPriceValue(product: ProductPriceShape) {
   if (product.pricing_mode === "fixed") {
@@ -329,6 +548,171 @@ function getFormattedPrice(product: ProductPriceShape) {
   }
 
   return formatCurrencyCRC(value);
+}
+
+function toUniqueNormalizedTerms(terms: string[]) {
+  const unique = new Map<string, string>();
+
+  for (const term of terms) {
+    const normalized = term.trim();
+    if (!normalized) {
+      continue;
+    }
+
+    const key = normalized.toLowerCase();
+    if (!unique.has(key)) {
+      unique.set(key, normalized);
+    }
+  }
+
+  return Array.from(unique.values());
+}
+
+function getActiveDiscoveryTerms(product: ProductDetail) {
+  return toUniqueNormalizedTerms(
+    product.search_meta.search_terms
+      .filter((term) => term.is_active)
+      .map((term) => term.term)
+      .filter(isSearchTermUsefulForNova),
+  );
+}
+
+function assessNovaOperationalStatus(product: ProductDetail): NovaOperationalAssessment {
+  const blockingIssues: string[] = [];
+  const warnings: string[] = [];
+  const normalizedName = product.name.trim();
+  const normalizedCategory = product.category.trim();
+  const normalizedFamily = product.family.trim();
+  const normalizedVariant = product.variant_label?.trim() ?? "";
+  const normalizedSummary = product.summary?.trim() ?? "";
+  const activeSearchTerms = toUniqueNormalizedTerms(
+    product.search_meta.search_terms
+      .filter((term) => term.is_active)
+      .map((term) => term.term),
+  );
+  const activeDiscoveryTerms = getActiveDiscoveryTerms(product);
+  const invalidActiveSearchTerms = activeSearchTerms.filter(
+    (term) => !isSearchTermUsefulForNova(term),
+  );
+
+  if (normalizedName.length < 3 || !/[a-z0-9]/i.test(normalizedName)) {
+    blockingIssues.push("Nombre invalido: usa al menos 3 caracteres utiles.");
+  }
+
+  if (!normalizedCategory || !normalizedFamily) {
+    blockingIssues.push("Category y family son obligatorios.");
+  }
+
+  if (product.pricing_mode === "fixed") {
+    if (product.price_crc == null) {
+      blockingIssues.push("Falta el precio principal para este modo de precio.");
+    }
+    if (product.price_from_crc != null) {
+      blockingIssues.push("Este modo de precio no admite precio desde.");
+    }
+  } else if (product.pricing_mode === "from") {
+    if (product.price_from_crc == null) {
+      blockingIssues.push("Falta el precio desde para este modo de precio.");
+    }
+    if (product.price_crc != null) {
+      blockingIssues.push("Este modo de precio no admite precio fijo.");
+    }
+  } else if (product.pricing_mode === "variable") {
+    if (product.price_crc == null) {
+      blockingIssues.push("Falta el precio base para precio variable.");
+    }
+    if (product.price_from_crc != null) {
+      blockingIssues.push("Precio variable no admite precio desde.");
+    }
+  } else {
+    blockingIssues.push("Modo de precio invalido.");
+  }
+
+  if ((product.price_crc ?? 0) < 0 || (product.price_from_crc ?? 0) < 0) {
+    blockingIssues.push("El precio no puede ser negativo.");
+  }
+
+  if (product.min_qty == null || product.min_qty < 1) {
+    blockingIssues.push("La cantidad minima debe ser mayor o igual a 1.");
+  }
+
+  if (!normalizedSummary) {
+    blockingIssues.push("Falta el resumen del producto.");
+  } else if (normalizedSummary.length < 20) {
+    warnings.push("El resumen es corto y puede reducir la calidad del descubrimiento.");
+  }
+
+  if (activeDiscoveryTerms.length === 0 || invalidActiveSearchTerms.length > 0) {
+    blockingIssues.push(NOVA_SEARCH_TERM_QUALITY_RULE_ES);
+  } else if (activeDiscoveryTerms.length < 2) {
+    warnings.push("Solo hay un termino de busqueda activo. Conviene agregar variantes.");
+  }
+
+  if (normalizedVariant.length > 0) {
+    const loweredVariant = normalizedVariant.toLowerCase();
+    if (loweredVariant === normalizedName.toLowerCase()) {
+      blockingIssues.push("variant_label no puede ser idéntico al nombre.");
+    }
+    if (normalizedCategory && loweredVariant === normalizedCategory.toLowerCase()) {
+      blockingIssues.push("variant_label debe aportar más contexto que category.");
+    }
+    if (normalizedFamily && loweredVariant === normalizedFamily.toLowerCase()) {
+      blockingIssues.push("variant_label debe aportar más contexto que family.");
+    }
+    if (normalizedVariant.length < 3) {
+      warnings.push("La variante es muy corta. Revisa la coherencia del nombre.");
+    }
+  }
+
+  if (!product.is_discountable && product.discount_visibility !== "never") {
+    blockingIssues.push("La configuracion de descuento no es valida para este producto.");
+  }
+
+  if (!product.is_active) {
+    return {
+      status: "inactive",
+      statusLabel: "Inactivo",
+      statusTone: "warning",
+      blockingIssues,
+      warnings,
+      activeDiscoveryTerms: activeDiscoveryTerms.length,
+      hasVisibleContractViolation: product.is_agent_visible,
+    };
+  }
+
+  if (!product.is_agent_visible) {
+    return {
+      status: "hidden",
+      statusLabel: "Oculto al agente",
+      statusTone: "warning",
+      blockingIssues,
+      warnings,
+      activeDiscoveryTerms: activeDiscoveryTerms.length,
+      hasVisibleContractViolation: false,
+    };
+  }
+
+  if (blockingIssues.length > 0) {
+    return {
+      status: "not_publishable",
+      statusLabel: "No publicable para NOVA",
+      statusTone: "danger",
+      blockingIssues,
+      warnings,
+      activeDiscoveryTerms: activeDiscoveryTerms.length,
+      hasVisibleContractViolation: true,
+    };
+  }
+
+  return {
+    status: "ready",
+    statusLabel: "Listo para NOVA",
+    statusTone: "success",
+    blockingIssues,
+    warnings,
+    activeDiscoveryTerms: activeDiscoveryTerms.length,
+    hasVisibleContractViolation: false,
+  };
 }
 
 function getIntegrityAlerts(product: ProductDetail) {
@@ -463,6 +847,8 @@ function toProductDetailStub(row: CatalogProductRow): ProductDetail {
 function toUpdatePayload(product: ProductDetail): UpdateProductInput {
   return {
     name: product.name,
+    category: product.category,
+    family: product.family,
     variant_label: product.variant_label,
     size_label: product.size_label,
     material: product.material,
@@ -491,48 +877,132 @@ function toUpdatePayload(product: ProductDetail): UpdateProductInput {
   };
 }
 
+type PendingChangesSnapshot = {
+  core: UpdateProductInput;
+  search_meta: {
+    aliases: string[];
+    search_terms: Array<{
+      term: string;
+      term_type: "alias";
+      priority: number;
+      is_active: boolean;
+      notes: string | null;
+    }>;
+  };
+  images: Array<{
+    storage_bucket: string;
+    storage_path: string;
+    alt_text: string | null;
+    is_primary: boolean;
+    sort_order: number;
+  }>;
+};
+
+function normalizeAliasTokens(aliases: string[]) {
+  return toUniqueNormalizedTerms(aliases).sort((left, right) =>
+    left.localeCompare(right, "es", { sensitivity: "base" }),
+  );
+}
+
+function buildPendingChangesSnapshot(product: ProductDetail): PendingChangesSnapshot {
+  const aliasesFromEntries = product.search_meta.alias_entries.map((entry) => entry.alias);
+  const aliasesSource =
+    aliasesFromEntries.length > 0 ? aliasesFromEntries : product.search_meta.aliases;
+
+  const normalizedSearchTerms = product.search_meta.search_terms
+    .map((term) => ({
+      term: term.term.trim(),
+      term_type: "alias" as const,
+      priority: term.priority,
+      is_active: term.is_active,
+      notes: term.notes?.trim() || null,
+    }))
+    .filter((term) => term.term.length > 0)
+    .sort((left, right) =>
+      `${left.term.toLowerCase()}|${left.priority}|${left.is_active ? "1" : "0"}|${left.notes ?? ""}`.localeCompare(
+        `${right.term.toLowerCase()}|${right.priority}|${right.is_active ? "1" : "0"}|${right.notes ?? ""}`,
+        "es",
+        { sensitivity: "base" },
+      ),
+    );
+
+  const normalizedImages = product.images
+    .map((image) => ({
+      storage_bucket: image.storage_bucket.trim() || "mwl-products",
+      storage_path: image.storage_path.trim(),
+      alt_text: image.alt_text?.trim() || null,
+      is_primary: image.is_primary,
+      sort_order: image.sort_order,
+    }))
+    .filter((image) => image.storage_path.length > 0)
+    .sort((left, right) =>
+      `${left.sort_order}|${left.storage_bucket.toLowerCase()}|${left.storage_path.toLowerCase()}`.localeCompare(
+        `${right.sort_order}|${right.storage_bucket.toLowerCase()}|${right.storage_path.toLowerCase()}`,
+        "es",
+        { sensitivity: "base" },
+      ),
+    );
+
+  return {
+    core: toUpdatePayload(product),
+    search_meta: {
+      aliases: normalizeAliasTokens(aliasesSource),
+      search_terms: normalizedSearchTerms,
+    },
+    images: normalizedImages,
+  };
+}
+
 function validateProductPayloadForSave(payload: UpdateProductInput): string | null {
   const name = payload.name?.trim() ?? "";
   if (!name) {
-    return "name cannot be empty.";
+    return "Completa el nombre del producto.";
+  }
+  const category = payload.category?.trim() ?? "";
+  if (!category) {
+    return "Selecciona una categoria valida.";
+  }
+  const family = payload.family?.trim() ?? "";
+  if (!family) {
+    return "Selecciona una familia valida.";
   }
 
   const pricingMode = payload.pricing_mode;
   if (!pricingMode) {
-    return "pricing_mode is required.";
+    return "Selecciona un tipo de precio.";
   }
 
   if (payload.price_crc != null && payload.price_crc < 0) {
-    return "price_crc must be greater than or equal to 0.";
+    return "El precio no puede ser negativo.";
   }
   if (payload.price_from_crc != null && payload.price_from_crc < 0) {
-    return "price_from_crc must be greater than or equal to 0.";
+    return "El precio no puede ser negativo.";
   }
   if (payload.min_qty != null && payload.min_qty < 1) {
-    return "min_qty must be greater than or equal to 1.";
+    return "La cantidad minima debe ser mayor o igual a 1.";
   }
 
   if (pricingMode === "fixed" && payload.price_crc == null) {
-    return "pricing_mode=fixed requires price_crc.";
+    return "Completa el precio principal para continuar.";
   }
   if (pricingMode === "fixed" && payload.price_from_crc != null) {
-    return "pricing_mode=fixed does not allow price_from_crc.";
+    return "Este tipo de precio no admite precio desde.";
   }
   if (pricingMode === "from" && payload.price_from_crc == null) {
-    return "pricing_mode=from requires price_from_crc.";
+    return "Completa el precio desde para continuar.";
   }
   if (pricingMode === "from" && payload.price_crc != null) {
-    return "pricing_mode=from does not allow price_crc.";
+    return "Este tipo de precio no admite precio fijo.";
   }
   if (pricingMode === "variable" && payload.price_crc == null) {
-    return "pricing_mode=variable requires price_crc as base price.";
+    return "Completa el precio base para precio variable.";
   }
   if (pricingMode === "variable" && payload.price_from_crc != null) {
-    return "pricing_mode=variable does not allow price_from_crc.";
+    return "Precio variable no admite precio desde.";
   }
 
   if (!payload.is_discountable && payload.discount_visibility !== "never") {
-    return "Non-discountable products must use discount_visibility=never.";
+    return "Ajusta la configuracion de descuento para continuar.";
   }
 
   return null;
@@ -606,49 +1076,123 @@ function formatDecimalDisplay(rawValue: string) {
 
 function validateCreateDraft(draft: CreateProductDraft): string | null {
   if (!draft.name.trim()) {
-    return "name cannot be empty.";
+    return "Completa el nombre del producto.";
   }
   if (!draft.category.trim()) {
-    return "category is required.";
+    return "Selecciona una categoria valida.";
   }
   if (!draft.family.trim()) {
-    return "family is required.";
+    return "Selecciona una familia valida.";
   }
 
   const minQty = toNumberOrNull(draft.min_qty);
   if (minQty == null || minQty < 1) {
-    return "min_qty must be greater than or equal to 1.";
+    return "La cantidad minima debe ser mayor o igual a 1.";
   }
 
   const price = toDecimalOrNull(draft.price_crc);
   const priceFrom = toDecimalOrNull(draft.price_from_crc);
 
   if (draft.pricing_mode === "fixed" && price == null) {
-    return "pricing_mode=fixed requires price_crc.";
+    return "Completa el precio principal para continuar.";
   }
   if (draft.pricing_mode === "fixed" && priceFrom != null) {
-    return "pricing_mode=fixed does not allow price_from_crc.";
+    return "Este tipo de precio no admite precio desde.";
   }
   if (draft.pricing_mode === "from" && priceFrom == null) {
-    return "pricing_mode=from requires price_from_crc.";
+    return "Completa el precio desde para continuar.";
   }
   if (draft.pricing_mode === "from" && price != null) {
-    return "pricing_mode=from does not allow price_crc.";
+    return "Este tipo de precio no admite precio fijo.";
   }
   if (draft.pricing_mode === "variable" && price == null) {
-    return "pricing_mode=variable requires price_crc as base price.";
+    return "Completa el precio base para precio variable.";
   }
   if (draft.pricing_mode === "variable" && priceFrom != null) {
-    return "pricing_mode=variable does not allow price_from_crc.";
+    return "Precio variable no admite precio desde.";
   }
   if (!draft.is_discountable && draft.discount_visibility !== "never") {
-    return "Non-discountable products must use discount_visibility=never.";
+    return "Ajusta la configuracion de descuento para continuar.";
   }
 
   return null;
 }
 
-function buildCreatePayloadFromDraft(draft: CreateProductDraft): CreateProductInput {
+function parseSearchTermsRawInput(rawValue: string): string[] {
+  const uniqueByLower = new Map<string, string>();
+  const chunks = rawValue
+    .split(/[\n,;]+/g)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  for (const chunk of chunks) {
+    const normalized = chunk.toLowerCase();
+    if (!uniqueByLower.has(normalized)) {
+      uniqueByLower.set(normalized, chunk);
+    }
+  }
+
+  return Array.from(uniqueByLower.values());
+}
+
+function validateCreateDraftForNova(draft: CreateProductDraft): {
+  isNovaReady: boolean;
+  blockingIssues: string[];
+  warnings: string[];
+  usableSearchTerms: string[];
+} {
+  const blockingIssues: string[] = [];
+  const warnings: string[] = [];
+  const normalizedName = draft.name.trim();
+  const normalizedFamily = draft.family.trim();
+  const normalizedCategory = draft.category.trim();
+  const normalizedVariant = draft.variant_label.trim();
+  const normalizedSummary = draft.summary.trim();
+  const allSearchTerms = parseSearchTermsRawInput(draft.search_terms_raw);
+  const usableSearchTerms = allSearchTerms.filter(isSearchTermUsefulForNova);
+  const invalidSearchTerms = allSearchTerms.filter((term) => !isSearchTermUsefulForNova(term));
+
+  if (!draft.is_active) {
+    blockingIssues.push("Activa el producto para poder publicarlo en NOVA.");
+  }
+
+  if (!normalizedSummary) {
+    blockingIssues.push("Completa el resumen del producto.");
+  } else if (normalizedSummary.length < 20) {
+    warnings.push("El resumen es corto y puede reducir la calidad del descubrimiento.");
+  }
+
+  if (usableSearchTerms.length === 0 || invalidSearchTerms.length > 0) {
+    blockingIssues.push(NOVA_SEARCH_TERM_QUALITY_RULE_ES);
+  } else if (usableSearchTerms.length < 2) {
+    warnings.push("Solo hay un termino de busqueda. Conviene agregar variantes.");
+  }
+
+  if (normalizedVariant) {
+    const loweredVariant = normalizedVariant.toLowerCase();
+    if (loweredVariant === normalizedName.toLowerCase()) {
+      blockingIssues.push("variant_label no puede ser igual al nombre.");
+    }
+    if (loweredVariant === normalizedFamily.toLowerCase()) {
+      blockingIssues.push("variant_label debe agregar contexto más allá de family.");
+    }
+    if (loweredVariant === normalizedCategory.toLowerCase()) {
+      blockingIssues.push("variant_label debe agregar contexto más allá de category.");
+    }
+    if (normalizedVariant.length < 3) {
+      warnings.push("variant_label es muy corto; revisa consistencia.");
+    }
+  }
+
+  return {
+    isNovaReady: blockingIssues.length === 0,
+    blockingIssues,
+    warnings,
+    usableSearchTerms,
+  };
+}
+
+function buildCreatePayloadFromDraft(draft: CreateProductDraft): SaveProductInput["product"] {
   return {
     name: draft.name.trim(),
     category: draft.category.trim(),
@@ -660,7 +1204,7 @@ function buildCreatePayloadFromDraft(draft: CreateProductDraft): CreateProductIn
     price_from_crc: toDecimalOrNull(draft.price_from_crc),
     min_qty: toNumberOrNull(draft.min_qty) ?? 1,
     is_active: draft.is_active,
-    is_agent_visible: draft.is_agent_visible,
+    is_agent_visible: false,
     allows_name: draft.allows_name,
     requires_design_approval: draft.requires_design_approval,
     is_discountable: draft.is_discountable,
@@ -670,6 +1214,38 @@ function buildCreatePayloadFromDraft(draft: CreateProductDraft): CreateProductIn
     notes: draft.notes.trim() || null,
     search_boost: toNumberOrNull(draft.search_boost) ?? 0,
     sort_order: toNumberOrNull(draft.sort_order) ?? 0,
+  };
+}
+
+function buildSaveProductPayloadFromDetail(product: ProductDetail): SaveProductInput["product"] {
+  return {
+    name: product.name,
+    category: product.category,
+    family: product.family,
+    variant_label: product.variant_label,
+    size_label: product.size_label,
+    material: product.material,
+    base_color: product.base_color,
+    print_type: product.print_type,
+    personalization_area: product.personalization_area,
+    summary: product.summary,
+    details: product.details,
+    notes: product.notes,
+    pricing_mode: product.pricing_mode,
+    price_crc: product.price_crc,
+    price_from_crc: product.price_from_crc,
+    min_qty: product.min_qty ?? 1,
+    is_active: product.is_active,
+    allows_name: product.allows_name,
+    includes_design_adjustment_count: product.includes_design_adjustment_count,
+    extra_adjustment_has_cost: product.extra_adjustment_has_cost,
+    requires_design_approval: product.requires_design_approval,
+    is_full_color: product.is_full_color,
+    is_premium: product.is_premium,
+    is_discountable: product.is_discountable,
+    discount_visibility: product.discount_visibility,
+    search_boost: product.search_boost,
+    sort_order: product.sort_order,
   };
 }
 
@@ -739,7 +1315,9 @@ export function ProductsPageClient() {
   const [skuDraft, setSkuDraft] = useState("");
   const [topPeriod, setTopPeriod] = useState<ProductsPerformanceRange>("30d");
   const [saveStatusMessage, setSaveStatusMessage] = useState<string | null>(null);
+  const [saveFeedbackItems, setSaveFeedbackItems] = useState<OperationalFeedbackItem[]>([]);
   const [createStatusMessage, setCreateStatusMessage] = useState<string | null>(null);
+  const [createFeedbackItems, setCreateFeedbackItems] = useState<OperationalFeedbackItem[]>([]);
   const [newAlias, setNewAlias] = useState("");
   const [newImageDraft, setNewImageDraft] = useState({
     storage_bucket: "mwl-products",
@@ -758,10 +1336,7 @@ export function ProductsPageClient() {
   const [thumbnailLoadErrors, setThumbnailLoadErrors] = useState<Record<string, boolean>>({});
   const [tempIdSeed, setTempIdSeed] = useState(-1);
 
-  const { updateProduct, isPending: isSavingProduct } = useUpdateProduct();
-  const { createProduct, isPending: isCreatingProduct } = useCreateProduct();
-  const { addImage, updateImage, deleteImage, addAlias, deleteAlias, addSearchTerm, updateSearchTerm, deleteSearchTerm, isPending: isUpdatingSearchMedia } =
-    useProductSearchMedia();
+  const { saveProduct, isPending: isSavingProduct } = useSaveProduct();
 
   const catalogQueryParams = useMemo<ListCatalogProductsParams>(() => {
     return {
@@ -950,26 +1525,70 @@ export function ProductsPageClient() {
     () => (editDraft ? toUpdatePayload(editDraft) : null),
     [editDraft],
   );
-  const originalSelectedEditablePayload = useMemo(
-    () => (editBaseline ? toUpdatePayload(editBaseline) : null),
+  const pendingChangesSnapshot = useMemo(
+    () => (editDraft ? buildPendingChangesSnapshot(editDraft) : null),
+    [editDraft],
+  );
+  const baselinePendingChangesSnapshot = useMemo(
+    () => (editBaseline ? buildPendingChangesSnapshot(editBaseline) : null),
     [editBaseline],
   );
   const hasPendingChanges = useMemo(() => {
-    if (!selectedProductEditablePayload || !originalSelectedEditablePayload) {
+    if (!pendingChangesSnapshot || !baselinePendingChangesSnapshot) {
       return false;
     }
 
-    return (
-      JSON.stringify(selectedProductEditablePayload) !==
-      JSON.stringify(originalSelectedEditablePayload)
+    return JSON.stringify(pendingChangesSnapshot) !== JSON.stringify(baselinePendingChangesSnapshot);
+  }, [baselinePendingChangesSnapshot, pendingChangesSnapshot]);
+  const localValidationError = useMemo(() => {
+    const payloadValidation = selectedProductEditablePayload
+      ? validateProductPayloadForSave(selectedProductEditablePayload)
+      : null;
+    if (payloadValidation) {
+      return payloadValidation;
+    }
+
+    if (!editDraft) {
+      return null;
+    }
+
+    const hasInvalidActiveSearchTerm = editDraft.search_meta.search_terms.some(
+      (term) => term.is_active && !isSearchTermUsefulForNova(term.term),
     );
-  }, [originalSelectedEditablePayload, selectedProductEditablePayload]);
-  const localValidationError = useMemo(
+    if (hasInvalidActiveSearchTerm) {
+      return NOVA_SEARCH_TERM_QUALITY_RULE_EN;
+    }
+
+    return null;
+  }, [editDraft, selectedProductEditablePayload]);
+  const editNovaOperationalAssessment = useMemo(
+    () => (editDraft ? assessNovaOperationalStatus(editDraft) : null),
+    [editDraft],
+  );
+  const editNovaContractError = useMemo(() => {
+    if (!editNovaOperationalAssessment?.hasVisibleContractViolation) {
+      return null;
+    }
+
+    const firstBlockingIssue = editNovaOperationalAssessment.blockingIssues[0];
+    if (!firstBlockingIssue) {
+      return "No se puede publicar en NOVA mientras el producto no cumpla las validaciones requeridas.";
+    }
+
+    return `No se puede publicar en NOVA. ${toFriendlyOperationalMessage(
+      firstBlockingIssue,
+    )}`;
+  }, [editNovaOperationalAssessment]);
+  const editOperationalFeedback = useMemo(
     () =>
-      selectedProductEditablePayload
-        ? validateProductPayloadForSave(selectedProductEditablePayload)
-        : null,
-    [selectedProductEditablePayload],
+      editNovaOperationalAssessment
+        ? buildFeedbackFromNovaValidation({
+            blockingIssues: editNovaOperationalAssessment.blockingIssues,
+            warnings: editNovaOperationalAssessment.warnings,
+            activeDiscoveryTerms: editNovaOperationalAssessment.activeDiscoveryTerms,
+          })
+        : [],
+    [editNovaOperationalAssessment],
   );
   const hasDraftFormsPendingChanges = Boolean(
     newAlias.trim() ||
@@ -996,6 +1615,7 @@ export function ProductsPageClient() {
     setSkuDraft(selectedProductBase.sku);
     setSkuControlEnabled(false);
     setSaveStatusMessage(null);
+    setSaveFeedbackItems([]);
     setSearchMetaMessage(null);
     setNewAlias("");
     setNewImageDraft({
@@ -1062,6 +1682,19 @@ export function ProductsPageClient() {
 
     return skuChunks.length > 0 ? `MWL-${skuChunks.join("-")}` : "MWL-";
   }, [createDraft.category, createDraft.family, createDraft.name, createDraft.variant_label]);
+  const createDraftNovaValidation = useMemo(
+    () => validateCreateDraftForNova(createDraft),
+    [createDraft],
+  );
+  const createDraftOperationalFeedback = useMemo(
+    () =>
+      buildFeedbackFromNovaValidation({
+        blockingIssues: createDraftNovaValidation.blockingIssues,
+        warnings: createDraftNovaValidation.warnings,
+        activeDiscoveryTerms: createDraftNovaValidation.usableSearchTerms.length,
+      }),
+    [createDraftNovaValidation],
+  );
 
   const resolveProductName = (productId: string | null) => {
     if (!productId) {
@@ -1089,6 +1722,7 @@ export function ProductsPageClient() {
     setEditDraft(snapshot);
     setCatalogTab("general");
     setSaveStatusMessage(null);
+    setSaveFeedbackItems([]);
     setSearchMetaMessage(null);
     setNewAlias("");
     setNewImageDraft({
@@ -1115,6 +1749,7 @@ export function ProductsPageClient() {
     setPendingMode(null);
     setIsDiscardChangesOpen(false);
     setSaveStatusMessage(null);
+    setSaveFeedbackItems([]);
     setSearchMetaMessage(null);
     setNewAlias("");
     setNewImageDraft({
@@ -1215,13 +1850,74 @@ export function ProductsPageClient() {
       return;
     }
 
+    const unsavedChangesMessage =
+      "Hay cambios pendientes sin guardar. Si sales ahora, se perderan.";
+
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
       event.returnValue = "";
     };
 
+    const handleDocumentClick = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const anchor = target?.closest("a[href]") as HTMLAnchorElement | null;
+
+      if (!anchor) {
+        return;
+      }
+
+      if (anchor.target && anchor.target !== "_self") {
+        return;
+      }
+
+      if (anchor.hasAttribute("download")) {
+        return;
+      }
+
+      const href = anchor.getAttribute("href")?.trim() ?? "";
+      if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:")) {
+        return;
+      }
+
+      const nextUrl = new URL(anchor.href, window.location.href);
+      const currentUrl = new URL(window.location.href);
+      if (nextUrl.href === currentUrl.href) {
+        return;
+      }
+
+      const allowNavigation = window.confirm(unsavedChangesMessage);
+      if (!allowNavigation) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+
+    let isHandlingPopState = false;
+    const handlePopState = () => {
+      if (isHandlingPopState) {
+        return;
+      }
+
+      const allowNavigation = window.confirm(unsavedChangesMessage);
+      if (allowNavigation) {
+        return;
+      }
+
+      isHandlingPopState = true;
+      window.history.go(1);
+      window.setTimeout(() => {
+        isHandlingPopState = false;
+      }, 0);
+    };
+
     window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("click", handleDocumentClick, true);
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("click", handleDocumentClick, true);
+      window.removeEventListener("popstate", handlePopState);
+    };
   }, [hasUnsavedChanges]);
 
   function updateSelectedProductField<K extends keyof ProductDetail>(
@@ -1234,41 +1930,82 @@ export function ProductsPageClient() {
 
     setEditDraft((current) => (current ? { ...current, [field]: value } : current));
     setSaveStatusMessage(null);
+    setSaveFeedbackItems([]);
   }
 
   function applySkuDraft() {
     // Fase 2 mantiene SKU como solo lectura.
   }
 
-  function createLocalProduct() {
+  async function createLocalProduct() {
     const validationError = validateCreateDraft(createDraft);
     if (validationError) {
-      setCreateStatusMessage(validationError);
+      const friendlyMessage = toFriendlyOperationalMessage(validationError);
+      setCreateStatusMessage(friendlyMessage);
+      setCreateFeedbackItems([{ severity: "error", message: friendlyMessage }]);
+      return;
+    }
+
+    const wantsNovaPublication = createDraft.publication_mode === "nova";
+    if (wantsNovaPublication && !createDraftNovaValidation.isNovaReady) {
+      setCreateStatusMessage("Este producto no se puede publicar en NOVA todavia.");
+      setCreateFeedbackItems(createDraftOperationalFeedback);
       return;
     }
 
     const payload = buildCreatePayloadFromDraft(createDraft);
+    setCreateFeedbackItems([]);
     setCreateStatusMessage("Creando producto...");
 
-    void createProduct({ input: payload })
-      .then((createdProduct) => {
-        setProducts((currentProducts) => {
-          const withoutCurrent = currentProducts.filter(
-            (product) => product.id !== createdProduct.id,
-          );
-          return [createdProduct, ...withoutCurrent];
-        });
-        setSelectedProductId(createdProduct.id);
-        setCatalogTab("general");
-        setIsCreateOpen(false);
-        setCreateDraft(defaultCreateDraft);
-        setCreateStatusMessage(null);
-      })
-      .catch((error) => {
-        const message =
-          error instanceof Error ? error.message : "No se pudo crear el producto.";
-        setCreateStatusMessage(message);
+    try {
+      const searchableTerms = createDraftNovaValidation.usableSearchTerms.map((term) => ({
+        term,
+        term_type: "alias" as const,
+        priority: 100,
+        is_active: true,
+      }));
+
+      const saveResult = await saveProduct({
+        input: {
+          product: payload,
+          publication_mode: wantsNovaPublication ? "nova" : "internal",
+          search_terms: searchableTerms,
+          aliases: [],
+          images: [],
+        },
       });
+      const createdProduct = saveResult.product;
+
+      setProducts((currentProducts) => {
+        const withoutCurrent = currentProducts.filter((product) => product.id !== createdProduct.id);
+        return [createdProduct, ...withoutCurrent];
+      });
+      setSelectedProductId(createdProduct.id);
+      setCatalogTab("general");
+      setIsCreateOpen(false);
+      setCreateDraft(defaultCreateDraft);
+      setCreateFeedbackItems([]);
+      setCreateStatusMessage(
+        saveResult.save_state === "saved_and_published_to_nova"
+          ? "Guardado y listo para NOVA"
+          : saveResult.save_state === "saved_internal_not_published"
+            ? "Guardado interno no publicado"
+            : "Guardado con fallo de refresh de indice",
+      );
+    } catch (error) {
+      const novaValidation = extractNovaValidationFromError(error);
+      if (novaValidation) {
+        setCreateStatusMessage("No se pudo publicar en NOVA. Corrige los puntos marcados.");
+        setCreateFeedbackItems(buildFeedbackFromNovaValidation(novaValidation));
+        return;
+      }
+
+      const fallbackMessage =
+        error instanceof Error ? error.message : "No se pudo crear el producto.";
+      const friendlyMessage = toFriendlyOperationalMessage(fallbackMessage);
+      setCreateStatusMessage(friendlyMessage);
+      setCreateFeedbackItems([{ severity: "error", message: friendlyMessage }]);
+    }
   }
 
   function handleCreatePriceBlur(field: "price_crc" | "price_from_crc") {
@@ -1289,147 +2026,100 @@ export function ProductsPageClient() {
       return;
     }
 
-    if (localValidationError) {
-      setSaveStatusMessage(localValidationError);
+    if (editNovaContractError) {
+      setSaveStatusMessage(editNovaContractError);
+      setSaveFeedbackItems(
+        editNovaOperationalAssessment
+          ? buildFeedbackFromNovaValidation({
+              blockingIssues: editNovaOperationalAssessment.blockingIssues,
+              warnings: editNovaOperationalAssessment.warnings,
+              activeDiscoveryTerms: editNovaOperationalAssessment.activeDiscoveryTerms,
+            })
+          : [{ severity: "error", message: editNovaContractError }],
+      );
       return;
     }
 
+    if (localValidationError) {
+      const friendlyMessage = toFriendlyOperationalMessage(localValidationError);
+      setSaveStatusMessage(friendlyMessage);
+      setSaveFeedbackItems([{ severity: "error", message: friendlyMessage }]);
+      return;
+    }
+
+    setSaveFeedbackItems([]);
     setSaveStatusMessage("Guardando...");
 
     try {
-      let updatedProduct = await updateProduct({
-        id: selectedProductId,
-        input: selectedProductEditablePayload,
+      const publicationMode = editDraft.is_agent_visible ? "nova" : "internal";
+      const corePayload = buildSaveProductPayloadFromDetail(editDraft);
+
+      const normalizedAliases = editDraft.search_meta.alias_entries
+        .map((entry) => entry.alias.trim())
+        .filter(Boolean)
+        .map((alias) => ({ alias }));
+
+      const normalizedSearchTerms = editDraft.search_meta.search_terms
+        .map((term) => ({
+          id: term.id > 0 ? term.id : null,
+          term: term.term.trim(),
+          term_type: "alias" as const,
+          priority: term.priority,
+          is_active: term.is_active,
+          notes: term.notes ?? null,
+        }))
+        .filter((term) => term.term.length > 0);
+
+      const normalizedImages = editDraft.images
+        .map((image) => ({
+          id: image.id > 0 ? image.id : null,
+          storage_bucket: image.storage_bucket,
+          storage_path: image.storage_path.trim(),
+          alt_text: image.alt_text ?? null,
+          is_primary: image.is_primary,
+          sort_order: image.sort_order,
+        }))
+        .filter((image) => image.storage_path.length > 0);
+
+      const saveResult = await saveProduct({
+        input: {
+          product_id: selectedProductId,
+          product: corePayload,
+          publication_mode: publicationMode,
+          aliases: normalizedAliases,
+          search_terms: normalizedSearchTerms,
+          images: normalizedImages,
+        },
       });
-
-      const baselineAliases = editBaseline.search_meta.alias_entries;
-      const draftAliases = editDraft.search_meta.alias_entries;
-
-      for (const baselineAlias of baselineAliases) {
-        const draftAlias = draftAliases.find((entry) => entry.id === baselineAlias.id);
-        if (!draftAlias) {
-          updatedProduct = await deleteAlias(selectedProductId, baselineAlias.id);
-          continue;
-        }
-
-        const nextAlias = draftAlias.alias.trim();
-        if (nextAlias && nextAlias !== baselineAlias.alias) {
-          updatedProduct = await deleteAlias(selectedProductId, baselineAlias.id);
-          updatedProduct = await addAlias(selectedProductId, { alias: nextAlias });
-        }
-      }
-
-      for (const draftAlias of draftAliases.filter((entry) => entry.id < 1)) {
-        const aliasValue = draftAlias.alias.trim();
-        if (aliasValue) {
-          updatedProduct = await addAlias(selectedProductId, { alias: aliasValue });
-        }
-      }
-
-      const baselineTerms = editBaseline.search_meta.search_terms;
-      const draftTerms = editDraft.search_meta.search_terms;
-
-      for (const baselineTerm of baselineTerms) {
-        const draftTerm = draftTerms.find((term) => term.id === baselineTerm.id);
-        if (!draftTerm) {
-          updatedProduct = await deleteSearchTerm(selectedProductId, baselineTerm.id);
-          continue;
-        }
-
-        const termUpdates: {
-          term?: string;
-          priority?: number;
-          is_active?: boolean;
-          notes?: string | null;
-        } = {};
-
-        if (draftTerm.term !== baselineTerm.term) {
-          termUpdates.term = draftTerm.term;
-        }
-        if (draftTerm.priority !== baselineTerm.priority) {
-          termUpdates.priority = draftTerm.priority;
-        }
-        if (draftTerm.is_active !== baselineTerm.is_active) {
-          termUpdates.is_active = draftTerm.is_active;
-        }
-        if ((draftTerm.notes ?? null) !== (baselineTerm.notes ?? null)) {
-          termUpdates.notes = draftTerm.notes ?? null;
-        }
-
-        if (Object.keys(termUpdates).length > 0) {
-          updatedProduct = await updateSearchTerm(selectedProductId, baselineTerm.id, termUpdates);
-        }
-      }
-
-      for (const draftTerm of draftTerms.filter((term) => term.id < 1)) {
-        if (!draftTerm.term.trim()) {
-          continue;
-        }
-
-        updatedProduct = await addSearchTerm(selectedProductId, {
-          term: draftTerm.term.trim(),
-          term_type: "alias",
-          priority: draftTerm.priority,
-          is_active: draftTerm.is_active,
-          notes: draftTerm.notes ?? null,
-        });
-      }
-
-      const baselineImages = editBaseline.images;
-      const draftImages = editDraft.images;
-
-      for (const baselineImage of baselineImages) {
-        const draftImage = draftImages.find((image) => image.id === baselineImage.id);
-        if (!draftImage) {
-          updatedProduct = await deleteImage(selectedProductId, baselineImage.id);
-          continue;
-        }
-
-        const imageUpdates: {
-          alt_text?: string | null;
-          is_primary?: boolean;
-          sort_order?: number;
-        } = {};
-
-        if ((draftImage.alt_text ?? null) !== (baselineImage.alt_text ?? null)) {
-          imageUpdates.alt_text = draftImage.alt_text ?? null;
-        }
-        if (draftImage.is_primary !== baselineImage.is_primary) {
-          imageUpdates.is_primary = draftImage.is_primary;
-        }
-        if (draftImage.sort_order !== baselineImage.sort_order) {
-          imageUpdates.sort_order = draftImage.sort_order;
-        }
-
-        if (Object.keys(imageUpdates).length > 0) {
-          updatedProduct = await updateImage(selectedProductId, baselineImage.id, imageUpdates);
-        }
-      }
-
-      for (const draftImage of draftImages.filter((image) => image.id < 1)) {
-        if (!draftImage.storage_path.trim()) {
-          continue;
-        }
-
-        updatedProduct = await addImage(selectedProductId, {
-          storage_bucket: draftImage.storage_bucket,
-          storage_path: draftImage.storage_path,
-          alt_text: draftImage.alt_text,
-          is_primary: draftImage.is_primary,
-          sort_order: draftImage.sort_order,
-        });
-      }
+      const updatedProduct = saveResult.product;
 
       setProducts((currentProducts) =>
         currentProducts.map((product) =>
           product.id === updatedProduct.id ? updatedProduct : product,
         ),
       );
-      setSaveStatusMessage("Cambios guardados");
+      setSaveStatusMessage(
+        saveResult.save_state === "saved_and_published_to_nova"
+          ? "Guardado y listo para NOVA"
+          : saveResult.save_state === "saved_internal_not_published"
+            ? "Guardado interno no publicado"
+            : "Guardado con fallo de refresh de indice",
+      );
+      setSaveFeedbackItems([]);
       resetEditModalState();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "No se pudieron guardar los cambios.";
-      setSaveStatusMessage(message);
+      const novaValidation = extractNovaValidationFromError(error);
+      if (novaValidation) {
+        setSaveStatusMessage("No se pudo publicar en NOVA. Corrige los puntos marcados.");
+        setSaveFeedbackItems(buildFeedbackFromNovaValidation(novaValidation));
+        return;
+      }
+
+      const fallbackMessage =
+        error instanceof Error ? error.message : "No se pudieron guardar los cambios.";
+      const friendlyMessage = toFriendlyOperationalMessage(fallbackMessage);
+      setSaveStatusMessage(friendlyMessage);
+      setSaveFeedbackItems([{ severity: "error", message: friendlyMessage }]);
     }
   }
 
@@ -1493,6 +2183,10 @@ export function ProductsPageClient() {
 
   async function handleAddSearchTerm() {
     if (!editDraft || !newSearchTermDraft.term.trim()) {
+      return;
+    }
+    if (!isSearchTermUsefulForNova(newSearchTermDraft.term)) {
+      setSearchMetaMessage(NOVA_SEARCH_TERM_QUALITY_RULE_ES);
       return;
     }
 
@@ -1715,6 +2409,7 @@ export function ProductsPageClient() {
               className="gap-2"
               onClick={() => {
                 setCreateStatusMessage(null);
+                setCreateFeedbackItems([]);
                 setIsCreateOpen(true);
               }}
             >
@@ -2398,9 +3093,30 @@ export function ProductsPageClient() {
                             ) : null}
                           </div>
 
-                          <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-slate-50/70 p-3">
+                          <div className="mt-4 space-y-3">
+                            {editNovaOperationalAssessment ? (
+                              <div className="rounded-2xl border border-border/70 bg-slate-50/80 p-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70">
+                                    Estado operativo NOVA
+                                  </p>
+                                  <StatusBadge tone={editNovaOperationalAssessment.statusTone}>
+                                    {editNovaOperationalAssessment.statusLabel}
+                                  </StatusBadge>
+                                </div>
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                  Search terms activos: {editNovaOperationalAssessment.activeDiscoveryTerms}
+                                </p>
+                                <FeedbackList items={editOperationalFeedback} className="mt-2" />
+                              </div>
+                            ) : null}
+
+                          <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-slate-50/70 p-3">
                             <p className="text-xs text-muted-foreground">
-                              {localValidationError ??
+                              {editNovaContractError ??
+                                (localValidationError
+                                  ? toFriendlyOperationalMessage(localValidationError)
+                                  : null) ??
                                 saveStatusMessage ??
                                 "Cambios locales. Nada se guarda hasta presionar Guardar cambios."}
                             </p>
@@ -2411,11 +3127,18 @@ export function ProductsPageClient() {
                               <Button
                                 type="button"
                                 onClick={handleSaveChanges}
-                                disabled={!hasPendingChanges || Boolean(localValidationError) || isSavingProduct}
+                                disabled={
+                                  !hasPendingChanges ||
+                                  Boolean(localValidationError) ||
+                                  Boolean(editNovaContractError) ||
+                                  isSavingProduct
+                                }
                               >
                                 {isSavingProduct ? "Guardando..." : "Guardar cambios"}
                               </Button>
                             </div>
+                          </div>
+                            <FeedbackList items={saveFeedbackItems} />
                           </div>
 
                           <div className="mt-4 flex flex-wrap gap-2">
@@ -2448,6 +3171,28 @@ export function ProductsPageClient() {
                                   className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                                 />
                               </label>
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <label className="space-y-1">
+                                  <span className="text-xs text-muted-foreground">category</span>
+                                  <input
+                                    value={selectedProduct?.category ?? ""}
+                                    onChange={(event) =>
+                                      updateSelectedProductField("category", event.target.value)
+                                    }
+                                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-xs text-muted-foreground">family</span>
+                                  <input
+                                    value={selectedProduct?.family ?? ""}
+                                    onChange={(event) =>
+                                      updateSelectedProductField("family", event.target.value)
+                                    }
+                                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                                  />
+                                </label>
+                              </div>
                               <div className="grid gap-3 sm:grid-cols-2">
                                 <label className="space-y-1">
                                   <span className="text-xs text-muted-foreground">variant_label</span>
@@ -2518,6 +3263,60 @@ export function ProductsPageClient() {
                                   className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
                                 />
                               </label>
+                              <div className="space-y-2 rounded-2xl border border-border/70 bg-slate-50/80 p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                    Search terms para NOVA
+                                  </p>
+                                  <StatusBadge tone="info">
+                                    {getActiveDiscoveryTerms(selectedProduct).length} activos
+                                  </StatusBadge>
+                                </div>
+                                <div className="flex flex-col gap-2 sm:flex-row">
+                                  <input
+                                    value={newSearchTermDraft.term}
+                                    onChange={(event) =>
+                                      setNewSearchTermDraft((current) => ({
+                                        ...current,
+                                        term: event.target.value,
+                                      }))
+                                    }
+                                    placeholder="Agregar search term"
+                                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                                  />
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={handleAddSearchTerm}
+                                    disabled={!newSearchTermDraft.term.trim() || isSavingProduct}
+                                    className="w-full sm:w-auto sm:shrink-0"
+                                  >
+                                    Agregar
+                                  </Button>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  {selectedProduct.search_meta.search_terms.length > 0 ? (
+                                    selectedProduct.search_meta.search_terms.map((term) => (
+                                      <button
+                                        key={term.id}
+                                        type="button"
+                                        onClick={() => handleDeleteSearchTerm(term.id)}
+                                        className={`inline-flex items-center rounded-full border px-3 py-1 text-xs transition ${
+                                          term.is_active
+                                            ? "border-slate-300 bg-white text-slate-800 hover:bg-rose-50 hover:text-rose-700"
+                                            : "border-slate-200 bg-slate-100 text-slate-500 hover:bg-slate-200"
+                                        }`}
+                                      >
+                                        {term.term}
+                                      </button>
+                                    ))
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground">
+                                      Sin search terms. Agrega al menos uno para mantener publicable en NOVA.
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
                               <label className="space-y-1">
                                 <span className="text-xs text-muted-foreground">notes</span>
                                 <textarea
@@ -2670,7 +3469,7 @@ export function ProductsPageClient() {
                               type="button"
                               variant="outline"
                               onClick={handleAddAlias}
-                              disabled={!newAlias.trim() || isUpdatingSearchMedia}
+                              disabled={!newAlias.trim() || isSavingProduct}
                               className="w-full sm:w-auto sm:shrink-0"
                             >
                               Agregar
@@ -2688,7 +3487,7 @@ export function ProductsPageClient() {
                                     type="button"
                                     variant="outline"
                                     onClick={() => handleDeleteAlias(entry.id)}
-                                    disabled={isUpdatingSearchMedia}
+                                    disabled={isSavingProduct}
                                     className="w-full sm:w-auto sm:shrink-0"
                                   >
                                     Eliminar
@@ -2744,7 +3543,7 @@ export function ProductsPageClient() {
                               type="button"
                               variant="outline"
                               onClick={handleAddSearchTerm}
-                              disabled={!newSearchTermDraft.term.trim() || isUpdatingSearchMedia}
+                              disabled={!newSearchTermDraft.term.trim() || isSavingProduct}
                               className="w-full sm:col-span-2"
                             >
                               Agregar
@@ -2808,7 +3607,7 @@ export function ProductsPageClient() {
                                       type="button"
                                       variant="outline"
                                       onClick={() => handleDeleteSearchTerm(term.id)}
-                                      disabled={isUpdatingSearchMedia}
+                                      disabled={isSavingProduct}
                                       className="w-full sm:w-auto sm:shrink-0"
                                     >
                                       Eliminar
@@ -2952,7 +3751,7 @@ export function ProductsPageClient() {
                                 type="button"
                                 variant="outline"
                                 onClick={handleAddImage}
-                                disabled={!newImageDraft.storage_path.trim() || isUpdatingSearchMedia}
+                                disabled={!newImageDraft.storage_path.trim() || isSavingProduct}
                                 className="w-full sm:w-auto sm:shrink-0"
                               >
                                 Agregar
@@ -2988,7 +3787,7 @@ export function ProductsPageClient() {
                                         type="button"
                                         variant="outline"
                                         onClick={() => handleTogglePrimaryImage(image.id, image.is_primary)}
-                                        disabled={isUpdatingSearchMedia}
+                                        disabled={isSavingProduct}
                                       >
                                         {image.is_primary ? "Quitar primaria" : "Marcar primaria"}
                                       </Button>
@@ -2996,7 +3795,7 @@ export function ProductsPageClient() {
                                         type="button"
                                         variant="outline"
                                         onClick={() => handleDeleteImage(image.id)}
-                                        disabled={isUpdatingSearchMedia}
+                                        disabled={isSavingProduct}
                                       >
                                         Eliminar
                                       </Button>
@@ -3149,8 +3948,8 @@ export function ProductsPageClient() {
                           <div className="flex items-start gap-2">
                             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
                             <p>
-                              Campos sensibles: <strong>id</strong>, <strong>sku</strong>,{" "}
-                              <strong>family</strong>, <strong>category</strong>. `id` es solo lectura.
+                              Campos sensibles: <strong>id</strong> y <strong>sku</strong>. `id` es
+                              solo lectura.
                             </p>
                           </div>
                         </div>
@@ -3395,255 +4194,324 @@ export function ProductsPageClient() {
                 Agrega un producto a tu catálogo
               </h3>
               <p className="text-sm text-muted-foreground">
-                Agrega la información básica ahora. Podrás añadir imágenes, descripciones y optimizar la búsqueda más adelante.
+                Flujo de publicación NOVA: crea interno o publica al agente solo cuando cumple el contrato.
               </p>
             </div>
 
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70 sm:col-span-2">
-                General
-              </p>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Nombre del Producto</span>
-                <input
-                  value={createDraft.name}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({ ...current, name: event.target.value }))
-                  }
-                  className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">SKU (autogenerado)</span>
-                <input
-                  value={createPreviewSku}
-                  readOnly
-                  className="h-10 w-full rounded-xl border border-border bg-slate-100 px-3 text-sm text-slate-700 outline-none"
-                />
-              </label>
-              <SuggestionInput
-                label="Familia del producto"
-                value={createDraft.family}
-                options={familyOptions}
-                placeholder="Ej. popi_gigante, chip_bags, caminata"
-                createOptionLabel="Crear nueva familia"
-                onChange={(nextValue) =>
-                  setCreateDraft((current) => ({ ...current, family: nextValue }))
-                }
-              />
-              <SuggestionInput
-                label="Categoría"
-                value={createDraft.category}
-                options={categoryOptions}
-                placeholder="Ej. Hogar, Ropa, Accesorios"
-                createOptionLabel="Crear nueva categoría"
-                onChange={(nextValue) =>
-                  setCreateDraft((current) => ({ ...current, category: nextValue }))
-                }
-              />
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Variante</span>
-                <input
-                  value={createDraft.variant_label}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({
-                      ...current,
-                      variant_label: event.target.value,
-                    }))
-                  }
-                  placeholder="Ej. rosado, azul, grande, edición navidad"
-                  className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Tamaño / Presentación</span>
-                <input
-                  value={createDraft.size_label}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({ ...current, size_label: event.target.value }))
-                  }
-                  placeholder="Ej. 20x25 cm"
-                  className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                />
-              </label>
+            <div className="mt-5 max-h-[64vh] space-y-5 overflow-y-auto pr-1">
+              <section className="rounded-2xl border border-border/70 bg-slate-50/70 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70">
+                    Estado de Preparacion
+                  </p>
+                  <StatusBadge tone={createDraftNovaValidation.isNovaReady ? "success" : "warning"}>
+                    {createDraftNovaValidation.isNovaReady ? "Listo para NOVA" : "Incompleto para NOVA"}
+                  </StatusBadge>
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Publicar al agente requiere summary, search terms con 3+ caracteres alfanumericos y 1+ letra, estado activo y coherencia de variante.
+                </p>
+              </section>
 
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70 sm:col-span-2">
-                Pricing
-              </p>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Tipo de precio</span>
-                <select
-                  value={createDraft.pricing_mode}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({
-                      ...current,
-                      pricing_mode: event.target.value as ProductPricingMode,
-                    }))
-                  }
-                  className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                >
-                  <option value="fixed">fixed</option>
-                  <option value="from">from</option>
-                  <option value="variable">variable</option>
-                </select>
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">min_qty</span>
-                <input
-                  value={createDraft.min_qty}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({ ...current, min_qty: event.target.value }))
-                  }
-                  inputMode="numeric"
-                  className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Precio</span>
-                <input
-                  value={
-                    isEditingCreatePriceCrc
-                      ? createDraft.price_crc
-                      : formatDecimalDisplay(createDraft.price_crc)
-                  }
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({
-                      ...current,
-                      price_crc: normalizeDecimalRawInput(event.target.value),
-                    }))
-                  }
-                  onFocus={() => setIsEditingCreatePriceCrc(true)}
-                  onBlur={() => handleCreatePriceBlur("price_crc")}
-                  inputMode="decimal"
-                  placeholder="Ej. 2 500.00"
-                  className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                />
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">Precio desde</span>
-                <input
-                  value={
-                    isEditingCreatePriceFromCrc
-                      ? createDraft.price_from_crc
-                      : formatDecimalDisplay(createDraft.price_from_crc)
-                  }
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({
-                      ...current,
-                      price_from_crc: normalizeDecimalRawInput(event.target.value),
-                    }))
-                  }
-                  onFocus={() => setIsEditingCreatePriceFromCrc(true)}
-                  onBlur={() => handleCreatePriceBlur("price_from_crc")}
-                  inputMode="decimal"
-                  placeholder="Ej. 15 567.64"
-                  className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                />
-              </label>
-              <label className="inline-flex items-center gap-2 text-sm text-slate-800">
-                <input
-                  type="checkbox"
-                  checked={createDraft.is_active}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({
-                      ...current,
-                      is_active: event.target.checked,
-                    }))
+              <section className="grid gap-4 sm:grid-cols-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70 sm:col-span-2">
+                  Identidad del producto
+                </p>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">Nombre del producto</span>
+                  <input
+                    value={createDraft.name}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({ ...current, name: event.target.value }))
+                    }
+                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">SKU (autogenerado)</span>
+                  <input
+                    value={createPreviewSku}
+                    readOnly
+                    className="h-10 w-full rounded-xl border border-border bg-slate-100 px-3 text-sm text-slate-700 outline-none"
+                  />
+                </label>
+                <SuggestionInput
+                  label="Family"
+                  value={createDraft.family}
+                  options={familyOptions}
+                  placeholder="Ej. chip_bags, caminata"
+                  createOptionLabel="Crear family"
+                  onChange={(nextValue) =>
+                    setCreateDraft((current) => ({ ...current, family: nextValue }))
                   }
                 />
-                is_active
-              </label>
-              <label className="inline-flex items-center gap-2 text-sm text-slate-800">
-                <input
-                  type="checkbox"
-                  checked={createDraft.is_agent_visible}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({
-                      ...current,
-                      is_agent_visible: event.target.checked,
-                    }))
+                <SuggestionInput
+                  label="Category"
+                  value={createDraft.category}
+                  options={categoryOptions}
+                  placeholder="Ej. Hogar, Ropa"
+                  createOptionLabel="Crear category"
+                  onChange={(nextValue) =>
+                    setCreateDraft((current) => ({ ...current, category: nextValue }))
                   }
                 />
-                is_agent_visible
-              </label>
+              </section>
 
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70 sm:col-span-2">
-                Rules
-              </p>
-              <label className="inline-flex items-center gap-2 text-sm text-slate-800">
-                <input
-                  type="checkbox"
-                  checked={createDraft.allows_name}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({ ...current, allows_name: event.target.checked }))
-                  }
-                />
-                allows_name
-              </label>
-              <label className="inline-flex items-center gap-2 text-sm text-slate-800">
-                <input
-                  type="checkbox"
-                  checked={createDraft.requires_design_approval}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({
-                      ...current,
-                      requires_design_approval: event.target.checked,
-                    }))
-                  }
-                />
-                requires_design_approval
-              </label>
-              <label className="inline-flex items-center gap-2 text-sm text-slate-800">
-                <input
-                  type="checkbox"
-                  checked={createDraft.is_discountable}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({
-                      ...current,
-                      is_discountable: event.target.checked,
-                      discount_visibility: event.target.checked
-                        ? current.discount_visibility
-                        : "never",
-                    }))
-                  }
-                />
-                is_discountable
-              </label>
-              <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">discount_visibility</span>
-                <select
-                  value={createDraft.discount_visibility}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({
-                      ...current,
-                      discount_visibility: event.target.value as ProductDiscountVisibility,
-                    }))
-                  }
-                  disabled={!createDraft.is_discountable}
-                  className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary disabled:bg-slate-100"
-                >
-                  <option value="never">never</option>
-                  <option value="only_if_customer_requests">only_if_customer_requests</option>
-                  <option value="internal_only">internal_only</option>
-                  <option value="always">always</option>
-                </select>
-              </label>
+              <section className="grid gap-4 sm:grid-cols-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70 sm:col-span-2">
+                  Precio y reglas comerciales
+                </p>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">pricing_mode</span>
+                  <select
+                    value={createDraft.pricing_mode}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({
+                        ...current,
+                        pricing_mode: event.target.value as ProductPricingMode,
+                      }))
+                    }
+                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                  >
+                    <option value="fixed">fixed</option>
+                    <option value="from">from</option>
+                    <option value="variable">variable</option>
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">min_qty</span>
+                  <input
+                    value={createDraft.min_qty}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({ ...current, min_qty: event.target.value }))
+                    }
+                    inputMode="numeric"
+                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">price_crc</span>
+                  <input
+                    value={
+                      isEditingCreatePriceCrc
+                        ? createDraft.price_crc
+                        : formatDecimalDisplay(createDraft.price_crc)
+                    }
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({
+                        ...current,
+                        price_crc: normalizeDecimalRawInput(event.target.value),
+                      }))
+                    }
+                    onFocus={() => setIsEditingCreatePriceCrc(true)}
+                    onBlur={() => handleCreatePriceBlur("price_crc")}
+                    inputMode="decimal"
+                    placeholder="Ej. 2 500.00"
+                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">price_from_crc</span>
+                  <input
+                    value={
+                      isEditingCreatePriceFromCrc
+                        ? createDraft.price_from_crc
+                        : formatDecimalDisplay(createDraft.price_from_crc)
+                    }
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({
+                        ...current,
+                        price_from_crc: normalizeDecimalRawInput(event.target.value),
+                      }))
+                    }
+                    onFocus={() => setIsEditingCreatePriceFromCrc(true)}
+                    onBlur={() => handleCreatePriceBlur("price_from_crc")}
+                    inputMode="decimal"
+                    placeholder="Ej. 15 567.64"
+                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                  />
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={createDraft.is_active}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({
+                        ...current,
+                        is_active: event.target.checked,
+                      }))
+                    }
+                  />
+                  is_active
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={createDraft.is_discountable}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({
+                        ...current,
+                        is_discountable: event.target.checked,
+                        discount_visibility: event.target.checked
+                          ? current.discount_visibility
+                          : "never",
+                      }))
+                    }
+                  />
+                  is_discountable
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={createDraft.allows_name}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({ ...current, allows_name: event.target.checked }))
+                    }
+                  />
+                  allows_name
+                </label>
+                <label className="inline-flex items-center gap-2 text-sm text-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={createDraft.requires_design_approval}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({
+                        ...current,
+                        requires_design_approval: event.target.checked,
+                      }))
+                    }
+                  />
+                  requires_design_approval
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">discount_visibility</span>
+                  <select
+                    value={createDraft.discount_visibility}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({
+                        ...current,
+                        discount_visibility: event.target.value as ProductDiscountVisibility,
+                      }))
+                    }
+                    disabled={!createDraft.is_discountable}
+                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary disabled:bg-slate-100"
+                  >
+                    <option value="never">never</option>
+                    <option value="only_if_customer_requests">only_if_customer_requests</option>
+                    <option value="internal_only">internal_only</option>
+                    <option value="always">always</option>
+                  </select>
+                </label>
+              </section>
 
-              <label className="space-y-1 sm:col-span-2">
-                <span className="text-xs text-muted-foreground">summary</span>
-                <textarea
-                  value={createDraft.summary}
-                  onChange={(event) =>
-                    setCreateDraft((current) => ({ ...current, summary: event.target.value }))
-                  }
-                  rows={2}
-                  className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
-                />
-              </label>
-              <p className="sm:col-span-2 text-xs text-muted-foreground">
+              <section className="grid gap-4 sm:grid-cols-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70 sm:col-span-2">
+                  Descubrimiento para NOVA
+                </p>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">variant_label</span>
+                  <input
+                    value={createDraft.variant_label}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({
+                        ...current,
+                        variant_label: event.target.value,
+                      }))
+                    }
+                    placeholder="Ej. rosado, premium, edición navidad"
+                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-muted-foreground">size_label</span>
+                  <input
+                    value={createDraft.size_label}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({ ...current, size_label: event.target.value }))
+                    }
+                    placeholder="Ej. 20x25 cm"
+                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                  />
+                </label>
+                <label className="space-y-1 sm:col-span-2">
+                  <span className="text-xs text-muted-foreground">summary</span>
+                  <textarea
+                    value={createDraft.summary}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({ ...current, summary: event.target.value }))
+                    }
+                    rows={2}
+                    className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
+                  />
+                </label>
+                <label className="space-y-1 sm:col-span-2">
+                  <span className="text-xs text-muted-foreground">details</span>
+                  <textarea
+                    value={createDraft.details}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({ ...current, details: event.target.value }))
+                    }
+                    rows={3}
+                    className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
+                  />
+                </label>
+                <label className="space-y-1 sm:col-span-2">
+                  <span className="text-xs text-muted-foreground">search terms</span>
+                  <textarea
+                    value={createDraft.search_terms_raw}
+                    onChange={(event) =>
+                      setCreateDraft((current) => ({ ...current, search_terms_raw: event.target.value }))
+                    }
+                    rows={3}
+                    placeholder="Ej. bolso infantil, bolso cumpleaños, bolsito personalizado"
+                    className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
+                  />
+                </label>
+              </section>
+
+              <section className="space-y-3 rounded-2xl border border-border/70 bg-slate-50/70 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70">
+                  Publicacion al agente
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCreateDraft((current) => ({ ...current, publication_mode: "internal" }))
+                    }
+                    className={`rounded-xl border px-3 py-2 text-left text-sm transition ${
+                      createDraft.publication_mode === "internal"
+                        ? "border-slate-950 bg-white text-slate-950"
+                        : "border-border bg-white text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    Guardar como interno
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCreateDraft((current) => ({ ...current, publication_mode: "nova" }))
+                    }
+                    className={`rounded-xl border px-3 py-2 text-left text-sm transition ${
+                      createDraft.publication_mode === "nova"
+                        ? "border-slate-950 bg-white text-slate-950"
+                        : "border-border bg-white text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    Publicar al agente (NOVA)
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  `is_agent_visible` se decide por el flujo de publicación: interno lo deja en `false`, publicar lo activa solo si cumple NOVA.
+                </p>
+                <FeedbackList items={createDraftOperationalFeedback} />
+              </section>
+
+              <p className="text-xs text-muted-foreground">
                 {createStatusMessage ??
-                  "Al crear se guarda en mwl_products, se refresca indice y se abre el detalle del nuevo producto."}
+                  "El producto se crea primero como interno y, si aplica, se publica al agente al completar validación NOVA."}
               </p>
+              <FeedbackList items={createFeedbackItems} />
             </div>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
               <Button
@@ -3652,13 +4520,18 @@ export function ProductsPageClient() {
                 onClick={() => {
                   setIsCreateOpen(false);
                   setCreateStatusMessage(null);
+                  setCreateFeedbackItems([]);
                 }}
-                disabled={isCreatingProduct}
+                disabled={isSavingProduct}
               >
                 Cancelar
               </Button>
-              <Button type="button" onClick={createLocalProduct} disabled={isCreatingProduct}>
-                {isCreatingProduct ? "Creando..." : "Crear producto"}
+              <Button type="button" onClick={createLocalProduct} disabled={isSavingProduct}>
+                {isSavingProduct
+                  ? "Creando..."
+                  : createDraft.publication_mode === "nova"
+                    ? "Crear y publicar al agente"
+                    : "Guardar producto interno"}
               </Button>
             </div>
           </div>

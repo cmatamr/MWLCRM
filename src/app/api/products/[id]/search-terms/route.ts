@@ -1,6 +1,10 @@
 import { badRequest, handleRouteError, ok, type RouteContext } from "@/server/api/http";
 import { requireRole } from "@/server/api/auth";
 import { addProductSearchTerm } from "@/server/services/products";
+import {
+  isSearchTermUsefulForNova,
+  NOVA_SEARCH_TERM_QUALITY_RULE_EN,
+} from "@/lib/products/search-term-quality";
 import { z } from "zod";
 
 const searchTermTypeEnum = z.enum(["alias"]);
@@ -15,6 +19,10 @@ const addSearchTermSchema = z
     is_active: z.boolean().optional(),
     notes: z.string().max(500).optional().nullable(),
   })
+  .refine(
+    (value) => value.is_active === false || isSearchTermUsefulForNova(value.term),
+    { message: NOVA_SEARCH_TERM_QUALITY_RULE_EN, path: ["term"] },
+  )
   .strict();
 
 export async function POST(

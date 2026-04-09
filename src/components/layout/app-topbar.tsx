@@ -12,12 +12,13 @@ export function AppTopbar() {
       <div className="mx-auto flex max-w-[1320px] flex-col gap-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-sm font-medium uppercase tracking-[0.24em] text-primary/70">
-              Made With Love CRM
+            <p className="text-base font-semibold tracking-[0.07em] text-primary/80">
+              RevenueCore by 4 + [ UNO ]
             </p>
-            <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-900">
-              Operación comercial centralizada
+            <h1 className="font-serif text-2xl font-semibold tracking-tight text-slate-900 md:text-[1.75rem]">
+              Operación Comerial Centralizada
             </h1>
+            <p className="mt-1 text-sm italic text-muted-foreground">Operando Made With Love</p>
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center lg:justify-end">

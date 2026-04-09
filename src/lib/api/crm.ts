@@ -43,6 +43,8 @@ import type {
   AddProductImageInput,
   ListCatalogProductsParams,
   ProductDetail as CatalogProductDetail,
+  SaveProductInput,
+  SaveProductResult,
   UpdateProductImageInput,
   UpdateProductSearchTermInput,
   AddProductSearchTermInput,
@@ -196,6 +198,17 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     },
     createProduct(input: CreateProductInput, init?: RequestInit) {
       return get<CatalogProductDetail>("/api/products", undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    saveProduct(input: SaveProductInput, init?: RequestInit) {
+      return get<SaveProductResult>("/api/products/save", undefined, {
         method: "POST",
         body: JSON.stringify(input),
         headers: {

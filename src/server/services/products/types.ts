@@ -10,6 +10,12 @@ export type ProductDiscountVisibility =
 // DB data and search-index logic only use/support that value.
 export type ProductSearchTermType = "alias";
 
+export interface NovaPublicationValidationResult {
+  isNovaReady: boolean;
+  blockingIssues: string[];
+  warnings: string[];
+}
+
 export interface ProductImageMeta {
   id: number;
   product_id: string;
@@ -246,6 +252,8 @@ export interface ProductsCatalogResponse {
 
 export interface UpdateProductInput {
   name?: string;
+  category?: string;
+  family?: string;
   variant_label?: string | null;
   size_label?: string | null;
   material?: string | null;
@@ -336,4 +344,59 @@ export interface UpdateProductSearchTermInput {
   priority?: number;
   is_active?: boolean;
   notes?: string | null;
+}
+
+export type ProductPublicationMode = "internal" | "nova";
+
+export interface SaveProductAliasInput {
+  alias: string;
+}
+
+export interface SaveProductSearchTermInput {
+  id?: number | null;
+  term: string;
+  term_type?: ProductSearchTermType;
+  priority?: number;
+  is_active?: boolean;
+  notes?: string | null;
+}
+
+export interface SaveProductImageInput {
+  id?: number | null;
+  storage_bucket?: string;
+  storage_path: string;
+  alt_text?: string | null;
+  is_primary?: boolean;
+  sort_order?: number;
+}
+
+export interface SaveProductInput {
+  product_id?: string | null;
+  product: CreateProductInput;
+  publication_mode: ProductPublicationMode;
+  aliases?: SaveProductAliasInput[];
+  search_terms?: SaveProductSearchTermInput[];
+  images?: SaveProductImageInput[];
+}
+
+export interface SaveProductResult {
+  product: ProductDetail;
+  save_state:
+    | "saved_internal_not_published"
+    | "saved_and_published_to_nova"
+    | "save_failed_index_refresh";
+  publication_mode: ProductPublicationMode;
+  index_refresh: {
+    attempted: true;
+    status: "succeeded" | "failed";
+    reason:
+      | "product_create"
+      | "product_update"
+      | "product_save_unified"
+      | "product_alias_add"
+      | "product_alias_delete"
+      | "search_term_add"
+      | "search_term_update"
+      | "search_term_delete";
+  };
 }

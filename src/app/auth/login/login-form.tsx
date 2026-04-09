@@ -205,9 +205,9 @@ export function LoginForm({ nextPath }: LoginFormProps) {
         }}
       />
 
-      <form onSubmit={onSubmit} className="space-y-4">
+      <form onSubmit={onSubmit} className="space-y-5">
         <div className="space-y-1.5">
-          <label htmlFor="email" className="text-sm font-medium text-slate-800">
+          <label htmlFor="email" className="text-sm font-medium text-foreground">
             Correo
           </label>
           <input
@@ -219,13 +219,13 @@ export function LoginForm({ nextPath }: LoginFormProps) {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             disabled={isSubmitting}
-            className="w-full rounded-xl border border-border bg-white px-3 py-2.5 text-sm shadow-sm outline-none transition focus:border-primary/70 focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-70"
+            className="w-full rounded-2xl border border-border/80 bg-white px-4 py-3 text-sm text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground/70 focus:border-primary/65 focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-70"
             placeholder="tu@empresa.com"
           />
         </div>
 
         <div className="space-y-1.5">
-          <label htmlFor="password" className="text-sm font-medium text-slate-800">
+          <label htmlFor="password" className="text-sm font-medium text-foreground">
             Contraseña
           </label>
           <input
@@ -237,15 +237,15 @@ export function LoginForm({ nextPath }: LoginFormProps) {
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             disabled={isSubmitting}
-            className="w-full rounded-xl border border-border bg-white px-3 py-2.5 text-sm shadow-sm outline-none transition focus:border-primary/70 focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-70"
+            className="w-full rounded-2xl border border-border/80 bg-white px-4 py-3 text-sm text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground/70 focus:border-primary/65 focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-70"
             placeholder="••••••••"
           />
         </div>
 
-        <div>
+        <div className="rounded-2xl border border-border/70 bg-secondary/30 p-3">
           <div ref={turnstileContainerRef} className="min-h-[65px]" />
           {!isTurnstileScriptReady ? (
-            <p className="mt-1 text-xs text-slate-500">Cargando captcha...</p>
+            <p className="mt-1 text-xs text-muted-foreground">Cargando captcha...</p>
           ) : null}
           {turnstileStatus === "expired" ? (
             <p className="mt-1 text-xs text-amber-700">El captcha expiro. Completa el captcha de nuevo.</p>
@@ -258,12 +258,16 @@ export function LoginForm({ nextPath }: LoginFormProps) {
         </div>
 
         {errorMessage ? (
-          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <p className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {errorMessage}
           </p>
         ) : null}
 
-        <Button type="submit" className="w-full" disabled={isSubmitting || !siteKey}>
+        <Button
+          type="submit"
+          className="w-full rounded-2xl border border-[#2b4f7a]/70 bg-[linear-gradient(135deg,#0c2d57_0%,#165085_100%)] py-6 text-sm font-semibold text-white shadow-[0_12px_28px_-14px_rgba(2,6,23,0.75)] hover:brightness-110"
+          disabled={isSubmitting || !siteKey}
+        >
           {isSubmitting ? "Ingresando..." : "Ingresar"}
         </Button>
       </form>

@@ -1,49 +1,19 @@
-import { badRequest, handleRouteError, ok, parsePositiveIntParam, parseStringParam } from "@/server/api/http";
+import {
+  ApiRouteError,
+  badRequest,
+  handleRouteError,
+  ok,
+  parsePositiveIntParam,
+  parseStringParam,
+} from "@/server/api/http";
 import { requireRole, requireSessionProfile } from "@/server/api/auth";
 import {
-  createProduct,
   listCatalogProducts,
   type ListCatalogProductsParams,
   type ProductPricingMode,
 } from "@/server/services/products";
-import { z } from "zod";
 
 const PRODUCT_PRICING_MODES: ProductPricingMode[] = ["fixed", "from", "variable"];
-
-const createProductPayloadSchema = z
-  .object({
-    name: z.string().trim().min(1).max(180),
-    category: z.string().trim().min(1),
-    family: z.string().trim().min(1),
-    pricing_mode: z.enum(["fixed", "from", "variable"]),
-    price_crc: z.number().int().min(0).optional().nullable(),
-    price_from_crc: z.number().int().min(0).optional().nullable(),
-    min_qty: z.number().int().min(1),
-    is_active: z.boolean().optional(),
-    is_agent_visible: z.boolean().optional(),
-    variant_label: z.string().optional().nullable(),
-    size_label: z.string().optional().nullable(),
-    material: z.string().optional().nullable(),
-    base_color: z.string().optional().nullable(),
-    print_type: z.string().optional().nullable(),
-    personalization_area: z.string().optional().nullable(),
-    summary: z.string().optional().nullable(),
-    details: z.string().optional().nullable(),
-    notes: z.string().optional().nullable(),
-    allows_name: z.boolean().optional(),
-    includes_design_adjustment_count: z.number().int().min(0).optional(),
-    extra_adjustment_has_cost: z.boolean().optional(),
-    requires_design_approval: z.boolean().optional(),
-    is_full_color: z.boolean().optional(),
-    is_premium: z.boolean().optional(),
-    is_discountable: z.boolean().optional(),
-    discount_visibility: z
-      .enum(["never", "only_if_customer_requests", "internal_only", "always"])
-      .optional(),
-    search_boost: z.number().int().optional(),
-    sort_order: z.number().int().min(0).optional(),
-  })
-  .strict();
 
 function parseBooleanParam(searchParams: URLSearchParams, key: string): boolean | undefined {
   const value = parseStringParam(searchParams, key);
@@ -112,22 +82,22 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(_request: Request) {
   try {
     await requireRole("admin");
-    const rawBody = await request.json();
-    if (!rawBody || typeof rawBody !== "object" || Array.isArray(rawBody)) {
-      throw badRequest("Invalid JSON body.");
-    }
-
-    const payload = createProductPayloadSchema.parse(rawBody);
-    const product = await createProduct(payload);
-    return ok(product);
+    throw new ApiRouteError({
+      status: 410,
+      code: "DEPRECATED_ROUTE",
+      message:
+        "POST /api/products is deprecated. Use POST /api/products/save with publication_mode to enforce NOVA publication contract.",
+      details: {
+        deprecated_route: "POST /api/products",
+        replacement_route: "POST /api/products/save",
+        required_fields: ["publication_mode", "product"],
+        allowed_publication_mode: ["internal", "nova"],
+      },
+    });
   } catch (error) {
-    if (error instanceof SyntaxError) {
-      return handleRouteError(badRequest("Invalid JSON body."));
-    }
-
     return handleRouteError(error);
   }
 }

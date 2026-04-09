@@ -1,7 +1,11 @@
 import { OrderStatusEnum, Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
-import { badRequest, notFound } from "@/server/api/http";
+import { ApiRouteError, badRequest, notFound } from "@/server/api/http";
+import {
+  isSearchTermUsefulForNova,
+  NOVA_SEARCH_TERM_QUALITY_RULE_EN,
+} from "@/lib/products/search-term-quality";
 import {
   createPaginationMeta,
   normalizePagination,
@@ -17,6 +21,7 @@ import type {
   CreateProductInput,
   GetProductsPerformanceParams,
   ListCatalogProductsParams,
+  NovaPublicationValidationResult,
   ProductAliasMeta,
   ProductDetail,
   ProductDiscountRuleMeta,
@@ -27,12 +32,21 @@ import type {
   ProductPerformanceTrendPoint,
   ProductsPerformanceResponse,
   ProductsCatalogResponse,
+  SaveProductAliasInput,
+  SaveProductImageInput,
+  SaveProductInput,
+  SaveProductResult,
+  SaveProductSearchTermInput,
   UpdateProductInput,
   UpdateProductImageInput,
   UpdateProductSearchTermInput,
 } from "./types";
 
 const PRODUCT_PRICING_MODES = ["fixed", "from", "variable"] as const;
+const PRODUCT_DEFAULTS = {
+  requires_design_approval: true,
+  discount_visibility: "only_if_customer_requests",
+} as const;
 
 type ProductListRawRow = {
   id: string;
@@ -88,13 +102,19 @@ type KpiRawRow = {
   without_primary_image: bigint | number;
 };
 
-type ProductUpdateValidationRow = {
+type ProductNovaValidationRow = {
   id: string;
   name: string;
+  category: string;
+  family: string;
+  variant_label: string | null;
+  summary: string | null;
   pricing_mode: "fixed" | "from" | "variable";
   price_crc: number | null;
   price_from_crc: number | null;
   min_qty: number | null;
+  is_active: boolean;
+  is_agent_visible: boolean;
   is_discountable: boolean;
   discount_visibility: "never" | "only_if_customer_requests" | "internal_only" | "always";
 };
@@ -182,16 +202,70 @@ function toIsoDate(value: Date | string): string {
 
 async function refreshSearchIndexSafely(
   db: ReturnType<typeof resolveDb>,
-  context: Record<string, unknown>,
-) {
+  context: {
+    productId: string;
+    reason:
+      | "product_create"
+      | "product_update"
+      | "product_save_unified"
+      | "product_alias_add"
+      | "product_alias_delete"
+      | "search_term_add"
+      | "search_term_update"
+      | "search_term_delete";
+  },
+): Promise<{ success: true } | { success: false; error: unknown; message: string }> {
   try {
     await db.$executeRaw(Prisma.sql`SELECT public.mwl_refresh_product_search_index()`);
+    return { success: true };
   } catch (error) {
+    const message =
+      error instanceof Error && error.message.trim().length > 0
+        ? error.message
+        : "unknown_error";
     console.error("Failed to refresh mwl product search index", {
       ...context,
       error,
     });
+    return {
+      success: false,
+      error,
+      message,
+    };
   }
+}
+
+function throwOnFailedNovaIndexRefresh(input: {
+  productId: string;
+  reason:
+    | "product_create"
+    | "product_update"
+    | "product_save_unified"
+    | "product_alias_add"
+    | "product_alias_delete"
+    | "search_term_add"
+    | "search_term_update"
+    | "search_term_delete";
+  refresh: { success: false; error: unknown; message: string };
+}) {
+  throw new ApiRouteError({
+    status: 503,
+    code: "INDEX_REFRESH_FAILED",
+    message:
+      "Product save cannot be confirmed as published to NOVA because search index refresh failed.",
+    details: {
+      product_id: input.productId,
+      operation: input.reason,
+      save_state: "save_failed_index_refresh",
+      publication_mode: "nova",
+      index_refresh: {
+        attempted: true,
+        status: "failed",
+        reason: input.reason,
+        error_message: input.refresh.message,
+      },
+    },
+  });
 }
 
 async function ensureProductExists(
@@ -208,6 +282,38 @@ async function ensureProductExists(
   if (!row) {
     throw notFound("Product not found.", { productId });
   }
+}
+
+async function getProductNovaValidationRow(
+  db: Prisma.TransactionClient | PrismaClient,
+  productId: string,
+): Promise<ProductNovaValidationRow> {
+  const [row] = await db.$queryRaw<ProductNovaValidationRow[]>(Prisma.sql`
+    SELECT
+      id,
+      name,
+      category,
+      family,
+      variant_label,
+      summary,
+      pricing_mode,
+      price_crc,
+      price_from_crc,
+      min_qty,
+      is_active,
+      is_agent_visible,
+      is_discountable,
+      discount_visibility
+    FROM public.mwl_products
+    WHERE id = ${productId}
+    LIMIT 1
+  `);
+
+  if (!row) {
+    throw notFound("Product not found.", { productId });
+  }
+
+  return row;
 }
 
 async function reindexProductImageSortOrder(
@@ -836,6 +942,12 @@ function buildSanitizedUpdateInput(payload: UpdateProductInput): UpdateProductIn
   if (payload.name !== undefined) {
     sanitized.name = payload.name.trim();
   }
+  if (payload.category !== undefined) {
+    sanitized.category = normalizeRequiredText(payload.category, "category");
+  }
+  if (payload.family !== undefined) {
+    sanitized.family = normalizeRequiredText(payload.family, "family");
+  }
 
   const nullableTextFields: Array<keyof Pick<
     UpdateProductInput,
@@ -894,9 +1006,15 @@ function buildSanitizedUpdateInput(payload: UpdateProductInput): UpdateProductIn
   return sanitized;
 }
 
-function validateMergedProductForUpdate(input: ProductUpdateValidationRow) {
+function validateMergedProductForUpdate(input: ProductNovaValidationRow) {
   if (!input.name.trim()) {
     throw badRequest("name cannot be empty.", { field: "name" });
+  }
+  if (!input.category.trim()) {
+    throw badRequest("category cannot be empty.", { field: "category" });
+  }
+  if (!input.family.trim()) {
+    throw badRequest("family cannot be empty.", { field: "family" });
   }
 
   if (input.price_crc != null && input.price_crc < 0) {
@@ -967,6 +1085,155 @@ function validateMergedProductForUpdate(input: ProductUpdateValidationRow) {
   }
 }
 
+async function listNovaDiscoveryTerms(
+  db: Prisma.TransactionClient | PrismaClient,
+  input: { productId: string; family: string; category: string },
+): Promise<string[]> {
+  const rows = await db.$queryRaw<Array<{ term: string }>>(Prisma.sql`
+    SELECT DISTINCT BTRIM(term) AS term
+    FROM public.mwl_product_search_terms
+    WHERE is_active = TRUE
+      AND COALESCE(BTRIM(term), '') <> ''
+      AND (
+        product_id = ${input.productId}
+        OR (product_id IS NULL AND family = ${input.family})
+        OR (product_id IS NULL AND family IS NULL AND category = ${input.category})
+      )
+    ORDER BY BTRIM(term) ASC
+  `);
+
+  return rows
+    .map((row) => row.term.trim())
+    .filter((term, index, allTerms) => term.length > 0 && allTerms.indexOf(term) === index)
+    .filter(isSearchTermUsefulForNova);
+}
+
+export function validateProductForNovaPublication(input: {
+  product: ProductNovaValidationRow;
+  discoveryTerms: string[];
+}): NovaPublicationValidationResult {
+  const blockingIssues: string[] = [];
+  const warnings: string[] = [];
+  const product = input.product;
+  const normalizedName = product.name.trim();
+  const normalizedCategory = product.category.trim();
+  const normalizedFamily = product.family.trim();
+  const normalizedVariant = product.variant_label?.trim() ?? "";
+  const normalizedSummary = product.summary?.trim() ?? "";
+
+  if (normalizedName.length < 3 || !/[a-z0-9]/i.test(normalizedName)) {
+    blockingIssues.push("name must be descriptive and contain at least 3 alphanumeric characters.");
+  }
+
+  if (normalizedCategory.length === 0) {
+    blockingIssues.push("category is required.");
+  }
+
+  if (normalizedFamily.length === 0) {
+    blockingIssues.push("family is required.");
+  }
+
+  if (!PRODUCT_PRICING_MODES.includes(product.pricing_mode)) {
+    blockingIssues.push("pricing_mode is invalid.");
+  } else if (product.pricing_mode === "fixed") {
+    if (product.price_crc == null) {
+      blockingIssues.push("pricing_mode=fixed requires price_crc.");
+    }
+    if (product.price_from_crc != null) {
+      blockingIssues.push("pricing_mode=fixed must not include price_from_crc.");
+    }
+  } else if (product.pricing_mode === "from") {
+    if (product.price_from_crc == null) {
+      blockingIssues.push("pricing_mode=from requires price_from_crc.");
+    }
+    if (product.price_crc != null) {
+      blockingIssues.push("pricing_mode=from must not include price_crc.");
+    }
+  } else if (product.pricing_mode === "variable") {
+    if (product.price_crc == null) {
+      blockingIssues.push("pricing_mode=variable requires price_crc as base price.");
+    }
+    if (product.price_from_crc != null) {
+      blockingIssues.push("pricing_mode=variable must not include price_from_crc.");
+    }
+  }
+
+  if ((product.price_crc ?? 0) < 0) {
+    blockingIssues.push("price_crc must be greater than or equal to 0.");
+  }
+  if ((product.price_from_crc ?? 0) < 0) {
+    blockingIssues.push("price_from_crc must be greater than or equal to 0.");
+  }
+
+  if (product.min_qty == null || product.min_qty < 1) {
+    blockingIssues.push("min_qty must be greater than or equal to 1.");
+  }
+
+  if (!product.is_active) {
+    blockingIssues.push("is_active must be true for NOVA publication.");
+  }
+
+  if (!product.is_agent_visible) {
+    blockingIssues.push("is_agent_visible must be true for NOVA publication.");
+  }
+
+  if (normalizedSummary.length === 0) {
+    blockingIssues.push("summary is required.");
+  } else if (normalizedSummary.length < 20) {
+    warnings.push("summary is very short; discovery quality may degrade.");
+  }
+
+  if (input.discoveryTerms.length === 0) {
+    blockingIssues.push(`at least one active search term is required. ${NOVA_SEARCH_TERM_QUALITY_RULE_EN}`);
+  } else if (input.discoveryTerms.length < 2) {
+    warnings.push("only one discovery term is configured; consider adding more aliases.");
+  }
+
+  if (normalizedVariant.length > 0) {
+    const loweredVariant = normalizedVariant.toLowerCase();
+    if (loweredVariant === normalizedName.toLowerCase()) {
+      blockingIssues.push("variant_label must not be identical to name.");
+    }
+    if (loweredVariant === normalizedFamily.toLowerCase()) {
+      blockingIssues.push("variant_label must add detail beyond family.");
+    }
+    if (loweredVariant === normalizedCategory.toLowerCase()) {
+      blockingIssues.push("variant_label must add detail beyond category.");
+    }
+    if (normalizedVariant.length < 3) {
+      warnings.push("variant_label is very short; verify naming coherence.");
+    }
+  }
+
+  return {
+    isNovaReady: blockingIssues.length === 0,
+    blockingIssues,
+    warnings,
+  };
+}
+
+function assertNovaPublicationIfAgentVisible(input: {
+  product: ProductNovaValidationRow;
+  discoveryTerms: string[];
+  operation: string;
+}) {
+  const validation = validateProductForNovaPublication({
+    product: input.product,
+    discoveryTerms: input.discoveryTerms,
+  });
+
+  if (input.product.is_agent_visible && !validation.isNovaReady) {
+    throw badRequest(
+      "Product cannot remain agent-visible because it does not satisfy NOVA publication requirements.",
+      {
+        operation: input.operation,
+        field: "is_agent_visible",
+        novaValidation: validation,
+      },
+    );
+  }
+}
+
 function normalizeCreatePayload(payload: CreateProductInput): CreateProductInput {
   return {
     ...payload,
@@ -986,6 +1253,11 @@ function normalizeCreatePayload(payload: CreateProductInput): CreateProductInput
 }
 
 function buildCreateDefaults(input: CreateProductInput): CreateProductInput {
+  const isDiscountable = input.is_discountable ?? false;
+  const discountVisibility =
+    input.discount_visibility ??
+    (isDiscountable ? PRODUCT_DEFAULTS.discount_visibility : "never");
+
   return {
     ...input,
     is_active: input.is_active ?? true,
@@ -993,18 +1265,19 @@ function buildCreateDefaults(input: CreateProductInput): CreateProductInput {
     allows_name: input.allows_name ?? false,
     includes_design_adjustment_count: input.includes_design_adjustment_count ?? 0,
     extra_adjustment_has_cost: input.extra_adjustment_has_cost ?? false,
-    requires_design_approval: input.requires_design_approval ?? false,
+    requires_design_approval:
+      input.requires_design_approval ?? PRODUCT_DEFAULTS.requires_design_approval,
     is_full_color: input.is_full_color ?? false,
     is_premium: input.is_premium ?? false,
-    is_discountable: input.is_discountable ?? false,
-    discount_visibility: input.discount_visibility ?? "never",
+    is_discountable: isDiscountable,
+    discount_visibility: discountVisibility,
     search_boost: input.search_boost ?? 0,
     sort_order: input.sort_order ?? 0,
   };
 }
 
 async function validateCategoryAndFamilyAgainstCatalog(
-  db: ReturnType<typeof resolveDb>,
+  db: Prisma.TransactionClient | PrismaClient,
   input: { category: string; family: string },
 ) {
   const [row] = await db.$queryRaw<Array<{ category_exists: boolean; family_exists: boolean }>>(Prisma.sql`
@@ -1083,7 +1356,7 @@ function generateProductSkuBase(input: {
 }
 
 async function resolveUniqueProductId(
-  db: ReturnType<typeof resolveDb>,
+  db: Prisma.TransactionClient | PrismaClient,
   baseId: string,
 ): Promise<string> {
   const rows = await db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
@@ -1110,7 +1383,7 @@ async function resolveUniqueProductId(
 }
 
 async function resolveUniqueProductSku(
-  db: ReturnType<typeof resolveDb>,
+  db: Prisma.TransactionClient | PrismaClient,
   baseSku: string,
 ): Promise<string> {
   const rows = await db.$queryRaw<Array<{ sku: string }>>(Prisma.sql`
@@ -1179,18 +1452,28 @@ function validateCreatePayload(input: CreateProductInput) {
   validateMergedProductForUpdate({
     id: "new_product",
     name: input.name,
+    category: input.category,
+    family: input.family,
+    variant_label: input.variant_label ?? null,
+    summary: input.summary ?? null,
     pricing_mode: input.pricing_mode,
     price_crc: input.price_crc ?? null,
     price_from_crc: input.price_from_crc ?? null,
     min_qty: input.min_qty,
+    is_active: input.is_active ?? true,
+    is_agent_visible: input.is_agent_visible ?? true,
     is_discountable: input.is_discountable ?? false,
-    discount_visibility: input.discount_visibility ?? "never",
+    discount_visibility:
+      input.discount_visibility ??
+      (input.is_discountable ? PRODUCT_DEFAULTS.discount_visibility : "never"),
   });
 }
 
 function shouldRefreshSearchIndex(payload: UpdateProductInput): boolean {
   return (
     payload.name !== undefined ||
+    payload.category !== undefined ||
+    payload.family !== undefined ||
     payload.summary !== undefined ||
     payload.details !== undefined ||
     payload.search_boost !== undefined
@@ -1211,14 +1494,20 @@ export async function updateProduct(
     throw badRequest("No editable fields were provided.");
   }
 
-  const [current] = await db.$queryRaw<ProductUpdateValidationRow[]>(Prisma.sql`
+  const [current] = await db.$queryRaw<ProductNovaValidationRow[]>(Prisma.sql`
     SELECT
       id,
       name,
+      category,
+      family,
+      variant_label,
+      summary,
       pricing_mode,
       price_crc,
       price_from_crc,
       min_qty,
+      is_active,
+      is_agent_visible,
       is_discountable,
       discount_visibility
     FROM public.mwl_products
@@ -1230,9 +1519,14 @@ export async function updateProduct(
     throw notFound("Product not found.", { productId });
   }
 
-  const mergedValidation: ProductUpdateValidationRow = {
+  const mergedValidation: ProductNovaValidationRow = {
     id: current.id,
     name: sanitized.name ?? current.name,
+    category: sanitized.category ?? current.category,
+    family: sanitized.family ?? current.family,
+    variant_label:
+      sanitized.variant_label !== undefined ? sanitized.variant_label : current.variant_label,
+    summary: sanitized.summary !== undefined ? sanitized.summary : current.summary,
     pricing_mode: sanitized.pricing_mode ?? current.pricing_mode,
     price_crc:
       sanitized.price_crc !== undefined ? sanitized.price_crc : current.price_crc,
@@ -1241,6 +1535,11 @@ export async function updateProduct(
         ? sanitized.price_from_crc
         : current.price_from_crc,
     min_qty: sanitized.min_qty !== undefined ? sanitized.min_qty : current.min_qty,
+    is_active: sanitized.is_active !== undefined ? sanitized.is_active : current.is_active,
+    is_agent_visible:
+      sanitized.is_agent_visible !== undefined
+        ? sanitized.is_agent_visible
+        : current.is_agent_visible,
     is_discountable:
       sanitized.is_discountable !== undefined
         ? sanitized.is_discountable
@@ -1252,6 +1551,22 @@ export async function updateProduct(
   };
 
   validateMergedProductForUpdate(mergedValidation);
+  if (sanitized.category !== undefined || sanitized.family !== undefined) {
+    await validateCategoryAndFamilyAgainstCatalog(db, {
+      category: mergedValidation.category,
+      family: mergedValidation.family,
+    });
+  }
+  const discoveryTerms = await listNovaDiscoveryTerms(db, {
+    productId,
+    family: mergedValidation.family,
+    category: mergedValidation.category,
+  });
+  assertNovaPublicationIfAgentVisible({
+    product: mergedValidation,
+    discoveryTerms,
+    operation: "update_product",
+  });
 
   const setClauses: Prisma.Sql[] = [];
   for (const [field, value] of updateEntries) {
@@ -1266,7 +1581,17 @@ export async function updateProduct(
   `);
 
   if (shouldRefreshSearchIndex(sanitized)) {
-    await refreshSearchIndexSafely(db, { productId, reason: "product_update" });
+    const refreshResult = await refreshSearchIndexSafely(db, {
+      productId,
+      reason: "product_update",
+    });
+    if (!refreshResult.success && mergedValidation.is_agent_visible) {
+      throwOnFailedNovaIndexRefresh({
+        productId,
+        reason: "product_update",
+        refresh: refreshResult,
+      });
+    }
   }
 
   return getProductDetail(productId, options);
@@ -1301,6 +1626,34 @@ export async function createProduct(
     idBase: uniqueId,
   });
   const uniqueSku = await resolveUniqueProductSku(db, baseSku);
+  const createValidation: ProductNovaValidationRow = {
+    id: uniqueId,
+    name: normalized.name,
+    category: normalized.category,
+    family: normalized.family,
+    variant_label: normalized.variant_label ?? null,
+    summary: normalized.summary ?? null,
+    pricing_mode: normalized.pricing_mode,
+    price_crc: normalized.price_crc ?? null,
+    price_from_crc: normalized.price_from_crc ?? null,
+    min_qty: normalized.min_qty,
+    is_active: normalized.is_active ?? true,
+    is_agent_visible: normalized.is_agent_visible ?? true,
+    is_discountable: normalized.is_discountable ?? false,
+    discount_visibility:
+      normalized.discount_visibility ??
+      (normalized.is_discountable ? PRODUCT_DEFAULTS.discount_visibility : "never"),
+  };
+  const createDiscoveryTerms = await listNovaDiscoveryTerms(db, {
+    productId: uniqueId,
+    family: normalized.family,
+    category: normalized.category,
+  });
+  assertNovaPublicationIfAgentVisible({
+    product: createValidation,
+    discoveryTerms: createDiscoveryTerms,
+    operation: "create_product",
+  });
 
   await db.$executeRaw(Prisma.sql`
     INSERT INTO public.mwl_products (
@@ -1356,11 +1709,14 @@ export async function createProduct(
       ${normalized.allows_name ?? false},
       ${normalized.includes_design_adjustment_count ?? 0},
       ${normalized.extra_adjustment_has_cost ?? false},
-      ${normalized.requires_design_approval ?? false},
+      ${normalized.requires_design_approval ?? PRODUCT_DEFAULTS.requires_design_approval},
       ${normalized.is_full_color ?? false},
       ${normalized.is_premium ?? false},
       ${normalized.is_discountable ?? false},
-      ${normalized.discount_visibility ?? "never"},
+      ${
+        normalized.discount_visibility ??
+        (normalized.is_discountable ? PRODUCT_DEFAULTS.discount_visibility : "never")
+      },
       ${normalized.pricing_mode},
       ${normalized.summary ?? null},
       ${normalized.details ?? null},
@@ -1375,8 +1731,260 @@ export async function createProduct(
     )
   `);
 
-  await refreshSearchIndexSafely(db, { productId: uniqueId, reason: "product_create" });
+  const createRefresh = await refreshSearchIndexSafely(db, {
+    productId: uniqueId,
+    reason: "product_create",
+  });
+  if (!createRefresh.success && (normalized.is_agent_visible ?? true)) {
+    throwOnFailedNovaIndexRefresh({
+      productId: uniqueId,
+      reason: "product_create",
+      refresh: createRefresh,
+    });
+  }
   return getProductDetail(uniqueId, options);
+}
+
+export async function saveProduct(
+  payload: SaveProductInput,
+  options?: ServiceOptions,
+): Promise<SaveProductResult> {
+  const db = resolveDb(options);
+  const normalizedCore = buildCreateDefaults(normalizeCreatePayload(payload.product));
+  const normalizedAliases = normalizeAliasesForSave(payload.aliases);
+  const normalizedSearchTerms = normalizeSearchTermsForSave(payload.search_terms);
+  const normalizedImages = normalizeImagesForSave(payload.images);
+  const publicationMode = payload.publication_mode;
+
+  if (publicationMode !== "internal" && publicationMode !== "nova") {
+    throw badRequest("publication_mode must be either \"internal\" or \"nova\".", {
+      field: "publication_mode",
+      value: publicationMode,
+    });
+  }
+
+  validateCreatePayload(normalizedCore);
+
+  const productId = await db.$transaction(async (tx) => {
+    let resolvedProductId = payload.product_id?.trim() || "";
+    const targetAgentVisibility = publicationMode === "nova";
+
+    if (resolvedProductId) {
+      const [existing] = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT id
+        FROM public.mwl_products
+        WHERE id = ${resolvedProductId}
+        LIMIT 1
+      `);
+
+      if (!existing) {
+        throw notFound("Product not found.", { productId: resolvedProductId });
+      }
+
+      await validateCategoryAndFamilyAgainstCatalog(tx, {
+        category: normalizedCore.category,
+        family: normalizedCore.family,
+      });
+
+      await tx.$executeRaw(Prisma.sql`
+        UPDATE public.mwl_products
+        SET
+          family = ${normalizedCore.family},
+          name = ${normalizedCore.name},
+          category = ${normalizedCore.category},
+          variant_label = ${normalizedCore.variant_label ?? null},
+          size_label = ${normalizedCore.size_label ?? null},
+          material = ${normalizedCore.material ?? null},
+          base_color = ${normalizedCore.base_color ?? null},
+          print_type = ${normalizedCore.print_type ?? null},
+          personalization_area = ${normalizedCore.personalization_area ?? null},
+          price_crc = ${normalizedCore.price_crc ?? null},
+          price_from_crc = ${normalizedCore.price_from_crc ?? null},
+          min_qty = ${normalizedCore.min_qty},
+          allows_name = ${normalizedCore.allows_name ?? false},
+          includes_design_adjustment_count = ${normalizedCore.includes_design_adjustment_count ?? 0},
+          extra_adjustment_has_cost = ${normalizedCore.extra_adjustment_has_cost ?? false},
+          requires_design_approval = ${normalizedCore.requires_design_approval ?? PRODUCT_DEFAULTS.requires_design_approval},
+          is_full_color = ${normalizedCore.is_full_color ?? false},
+          is_premium = ${normalizedCore.is_premium ?? false},
+          is_discountable = ${normalizedCore.is_discountable ?? false},
+          discount_visibility = ${
+            normalizedCore.discount_visibility ??
+            (normalizedCore.is_discountable ? PRODUCT_DEFAULTS.discount_visibility : "never")
+          },
+          pricing_mode = ${normalizedCore.pricing_mode},
+          summary = ${normalizedCore.summary ?? null},
+          details = ${normalizedCore.details ?? null},
+          notes = ${normalizedCore.notes ?? null},
+          is_active = ${normalizedCore.is_active ?? true},
+          is_agent_visible = ${targetAgentVisibility},
+          sort_order = ${normalizedCore.sort_order ?? 0},
+          search_boost = ${normalizedCore.search_boost ?? 0},
+          updated_at = NOW()
+        WHERE id = ${resolvedProductId}
+      `);
+    } else {
+      await validateCategoryAndFamilyAgainstCatalog(tx, {
+        category: normalizedCore.category,
+        family: normalizedCore.family,
+      });
+
+      const baseId = generateProductIdBase({
+        category: normalizedCore.category,
+        family: normalizedCore.family,
+        name: normalizedCore.name,
+        variant_label: normalizedCore.variant_label,
+      });
+      const uniqueId = await resolveUniqueProductId(tx, baseId);
+      const baseSku = generateProductSkuBase({
+        category: normalizedCore.category,
+        family: normalizedCore.family,
+        name: normalizedCore.name,
+        variant_label: normalizedCore.variant_label,
+        idBase: uniqueId,
+      });
+      const uniqueSku = await resolveUniqueProductSku(tx, baseSku);
+
+      await tx.$executeRaw(Prisma.sql`
+        INSERT INTO public.mwl_products (
+          id,
+          sku,
+          family,
+          name,
+          category,
+          variant_label,
+          size_label,
+          material,
+          base_color,
+          print_type,
+          personalization_area,
+          price_crc,
+          price_from_crc,
+          min_qty,
+          allows_name,
+          includes_design_adjustment_count,
+          extra_adjustment_has_cost,
+          requires_design_approval,
+          is_full_color,
+          is_premium,
+          is_discountable,
+          discount_visibility,
+          pricing_mode,
+          summary,
+          details,
+          notes,
+          source_type,
+          source_ref,
+          is_active,
+          is_agent_visible,
+          sort_order,
+          search_boost,
+          updated_at
+        )
+        VALUES (
+          ${uniqueId},
+          ${uniqueSku},
+          ${normalizedCore.family},
+          ${normalizedCore.name},
+          ${normalizedCore.category},
+          ${normalizedCore.variant_label ?? null},
+          ${normalizedCore.size_label ?? null},
+          ${normalizedCore.material ?? null},
+          ${normalizedCore.base_color ?? null},
+          ${normalizedCore.print_type ?? null},
+          ${normalizedCore.personalization_area ?? null},
+          ${normalizedCore.price_crc ?? null},
+          ${normalizedCore.price_from_crc ?? null},
+          ${normalizedCore.min_qty},
+          ${normalizedCore.allows_name ?? false},
+          ${normalizedCore.includes_design_adjustment_count ?? 0},
+          ${normalizedCore.extra_adjustment_has_cost ?? false},
+          ${normalizedCore.requires_design_approval ?? PRODUCT_DEFAULTS.requires_design_approval},
+          ${normalizedCore.is_full_color ?? false},
+          ${normalizedCore.is_premium ?? false},
+          ${normalizedCore.is_discountable ?? false},
+          ${
+            normalizedCore.discount_visibility ??
+            (normalizedCore.is_discountable ? PRODUCT_DEFAULTS.discount_visibility : "never")
+          },
+          ${normalizedCore.pricing_mode},
+          ${normalizedCore.summary ?? null},
+          ${normalizedCore.details ?? null},
+          ${normalizedCore.notes ?? null},
+          ${"manual"},
+          ${null},
+          ${normalizedCore.is_active ?? true},
+          ${targetAgentVisibility},
+          ${normalizedCore.sort_order ?? 0},
+          ${normalizedCore.search_boost ?? 0},
+          NOW()
+        )
+      `);
+
+      resolvedProductId = uniqueId;
+    }
+
+    const productValidationBeforeAliases = await getProductNovaValidationRow(tx, resolvedProductId);
+
+    await syncAliasesInTransaction(tx, {
+      productId: resolvedProductId,
+      aliases: normalizedAliases,
+      productName: productValidationBeforeAliases.name,
+    });
+    await syncSearchTermsInTransaction(tx, {
+      productId: resolvedProductId,
+      terms: normalizedSearchTerms,
+    });
+    await syncImagesInTransaction(tx, {
+      productId: resolvedProductId,
+      images: normalizedImages,
+    });
+
+    const productValidation = await getProductNovaValidationRow(tx, resolvedProductId);
+    const discoveryTerms = await listNovaDiscoveryTerms(tx, {
+      productId: resolvedProductId,
+      family: productValidation.family,
+      category: productValidation.category,
+    });
+    assertNovaPublicationIfAgentVisible({
+      product: productValidation,
+      discoveryTerms,
+      operation: "save_product",
+    });
+
+    return resolvedProductId;
+  });
+
+  const saveRefresh = await refreshSearchIndexSafely(db, {
+    productId,
+    reason: "product_save_unified",
+  });
+  const product = await getProductDetail(productId, options);
+  const isReadyForNova = product.is_agent_visible;
+
+  if (!saveRefresh.success && isReadyForNova) {
+    throwOnFailedNovaIndexRefresh({
+      productId,
+      reason: "product_save_unified",
+      refresh: saveRefresh,
+    });
+  }
+
+  return {
+    product,
+    save_state:
+      saveRefresh.success && isReadyForNova
+        ? "saved_and_published_to_nova"
+        : saveRefresh.success
+          ? "saved_internal_not_published"
+          : "save_failed_index_refresh",
+    publication_mode: isReadyForNova ? "nova" : "internal",
+    index_refresh: {
+      attempted: true,
+      status: saveRefresh.success ? "succeeded" : "failed",
+      reason: "product_save_unified",
+    },
+  };
 }
 
 export async function addProductImage(
@@ -1674,6 +2282,9 @@ function normalizeSearchTermInput(input: {
   if (term.length > 120) {
     throw badRequest("term is too long.", { field: "term", maxLength: 120 });
   }
+  if ((input.is_active ?? true) && !isSearchTermUsefulForNova(term)) {
+    throw badRequest(NOVA_SEARCH_TERM_QUALITY_RULE_EN, { field: "term" });
+  }
 
   const priority = input.priority ?? 100;
   if (priority < 1 || priority > 1000) {
@@ -1698,50 +2309,387 @@ function normalizeSearchTermInput(input: {
   };
 }
 
+function normalizeAliasesForSave(input: SaveProductAliasInput[] | undefined): string[] {
+  if (!input) {
+    return [];
+  }
+
+  const unique = new Map<string, string>();
+  for (const entry of input) {
+    const alias = normalizeRequiredText(entry.alias, "alias");
+    if (alias.length > 120) {
+      throw badRequest("alias is too long.", { field: "alias", maxLength: 120 });
+    }
+
+    const key = alias.toLowerCase();
+    if (unique.has(key)) {
+      throw badRequest("aliases must be unique (case-insensitive).", {
+        field: "aliases",
+        alias,
+      });
+    }
+
+    unique.set(key, alias);
+  }
+
+  return Array.from(unique.values());
+}
+
+function normalizeSearchTermsForSave(
+  input: SaveProductSearchTermInput[] | undefined,
+): Array<ReturnType<typeof normalizeSearchTermInput> & { id: number | null }> {
+  if (!input) {
+    return [];
+  }
+
+  const normalizedTerms: Array<ReturnType<typeof normalizeSearchTermInput> & { id: number | null }> = [];
+  const seenTerms = new Set<string>();
+
+  for (const entry of input) {
+    const normalized = normalizeSearchTermInput({
+      term: entry.term,
+      term_type: entry.term_type ?? "alias",
+      priority: entry.priority,
+      is_active: entry.is_active,
+      notes: entry.notes,
+    });
+
+    const termKey = normalized.term.toLowerCase();
+    if (seenTerms.has(termKey)) {
+      throw badRequest("search terms must be unique (case-insensitive).", {
+        field: "search_terms",
+        term: normalized.term,
+      });
+    }
+
+    const rawId = entry.id ?? null;
+    const normalizedId =
+      typeof rawId === "number" && Number.isInteger(rawId) && rawId > 0 ? rawId : null;
+
+    seenTerms.add(termKey);
+    normalizedTerms.push({
+      ...normalized,
+      id: normalizedId,
+    });
+  }
+
+  return normalizedTerms;
+}
+
+function normalizeImagesForSave(
+  input: SaveProductImageInput[] | undefined,
+): Array<{
+  id: number | null;
+  storage_bucket: string;
+  storage_path: string;
+  alt_text: string | null | undefined;
+  is_primary: boolean;
+  sort_order: number;
+}> {
+  if (!input) {
+    return [];
+  }
+
+  const normalizedImages: Array<{
+    id: number | null;
+    storage_bucket: string;
+    storage_path: string;
+    alt_text: string | null | undefined;
+    is_primary: boolean;
+    sort_order: number;
+  }> = [];
+
+  let firstPrimaryIndex: number | null = null;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const entry = input[index]!;
+    const rawId = entry.id ?? null;
+    const id = typeof rawId === "number" && Number.isInteger(rawId) && rawId > 0 ? rawId : null;
+    const storageBucket = normalizeRequiredText(
+      entry.storage_bucket?.trim() || "mwl-products",
+      "storage_bucket",
+    );
+    const storagePath = normalizeRequiredText(entry.storage_path, "storage_path");
+    const altText = normalizeAltText(entry.alt_text);
+
+    let sortOrder = entry.sort_order ?? index;
+    if (!Number.isInteger(sortOrder) || sortOrder < 0) {
+      throw badRequest("sort_order must be an integer greater than or equal to 0.", {
+        field: "images.sort_order",
+        value: entry.sort_order,
+      });
+    }
+
+    const wantsPrimary = entry.is_primary === true;
+    if (wantsPrimary && firstPrimaryIndex === null) {
+      firstPrimaryIndex = index;
+    }
+
+    normalizedImages.push({
+      id,
+      storage_bucket: storageBucket,
+      storage_path: storagePath,
+      alt_text: altText,
+      is_primary: wantsPrimary,
+      sort_order: sortOrder,
+    });
+  }
+
+  if (firstPrimaryIndex !== null) {
+    normalizedImages.forEach((image, index) => {
+      image.is_primary = index === firstPrimaryIndex;
+    });
+  }
+
+  return normalizedImages;
+}
+
+async function syncAliasesInTransaction(
+  tx: Prisma.TransactionClient,
+  input: { productId: string; aliases: string[]; productName: string },
+) {
+  const hasInvalidAlias = input.aliases.some(
+    (alias) => alias.trim().toLowerCase() === input.productName.trim().toLowerCase(),
+  );
+  if (hasInvalidAlias) {
+    throw badRequest("alias should not be identical to product name.", { field: "aliases" });
+  }
+
+  await tx.$executeRaw(Prisma.sql`
+    DELETE FROM public.mwl_product_aliases
+    WHERE product_id = ${input.productId}
+  `);
+
+  if (input.aliases.length === 0) {
+    return;
+  }
+
+  await tx.$executeRaw(Prisma.sql`
+    INSERT INTO public.mwl_product_aliases (product_id, alias)
+    SELECT ${input.productId}, alias_value
+    FROM unnest(${input.aliases}::text[]) AS alias_value
+  `);
+}
+
+async function syncSearchTermsInTransaction(
+  tx: Prisma.TransactionClient,
+  input: {
+    productId: string;
+    terms: Array<ReturnType<typeof normalizeSearchTermInput> & { id: number | null }>;
+  },
+) {
+  const existingTerms = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+    SELECT id::integer AS id
+    FROM public.mwl_product_search_terms
+    WHERE product_id = ${input.productId}
+  `);
+  const existingIds = new Set(existingTerms.map((row) => row.id));
+
+  for (const term of input.terms) {
+    if (term.id != null && !existingIds.has(term.id)) {
+      throw badRequest("A provided search term id does not belong to this product.", {
+        field: "search_terms.id",
+        termId: term.id,
+      });
+    }
+  }
+
+  const keepIds = input.terms.map((term) => term.id).filter((id): id is number => id != null);
+
+  if (keepIds.length > 0) {
+    await tx.$executeRaw(Prisma.sql`
+      DELETE FROM public.mwl_product_search_terms
+      WHERE product_id = ${input.productId}
+        AND id <> ALL(${keepIds}::int[])
+    `);
+  } else {
+    await tx.$executeRaw(Prisma.sql`
+      DELETE FROM public.mwl_product_search_terms
+      WHERE product_id = ${input.productId}
+    `);
+  }
+
+  for (const term of input.terms) {
+    if (term.id != null) {
+      await tx.$executeRaw(Prisma.sql`
+        UPDATE public.mwl_product_search_terms
+        SET
+          term = ${term.term},
+          term_type = ${term.term_type},
+          priority = ${term.priority},
+          is_active = ${term.is_active},
+          notes = ${term.notes}
+        WHERE id = ${term.id} AND product_id = ${input.productId}
+      `);
+      continue;
+    }
+
+    await tx.$executeRaw(Prisma.sql`
+      INSERT INTO public.mwl_product_search_terms (
+        product_id,
+        family,
+        category,
+        term,
+        term_type,
+        priority,
+        is_active,
+        notes
+      )
+      VALUES (
+        ${input.productId},
+        NULL,
+        NULL,
+        ${term.term},
+        ${term.term_type},
+        ${term.priority},
+        ${term.is_active},
+        ${term.notes}
+      )
+    `);
+  }
+}
+
+async function syncImagesInTransaction(
+  tx: Prisma.TransactionClient,
+  input: {
+    productId: string;
+    images: Array<{
+      id: number | null;
+      storage_bucket: string;
+      storage_path: string;
+      alt_text: string | null | undefined;
+      is_primary: boolean;
+      sort_order: number;
+    }>;
+  },
+) {
+  const existingImages = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+    SELECT id::integer AS id
+    FROM public.mwl_product_images
+    WHERE product_id = ${input.productId}
+  `);
+  const existingIds = new Set(existingImages.map((row) => row.id));
+
+  for (const image of input.images) {
+    if (image.id != null && !existingIds.has(image.id)) {
+      throw badRequest("A provided image id does not belong to this product.", {
+        field: "images.id",
+        imageId: image.id,
+      });
+    }
+  }
+
+  const keepIds = input.images.map((image) => image.id).filter((id): id is number => id != null);
+  if (keepIds.length > 0) {
+    await tx.$executeRaw(Prisma.sql`
+      DELETE FROM public.mwl_product_images
+      WHERE product_id = ${input.productId}
+        AND id <> ALL(${keepIds}::int[])
+    `);
+  } else {
+    await tx.$executeRaw(Prisma.sql`
+      DELETE FROM public.mwl_product_images
+      WHERE product_id = ${input.productId}
+    `);
+  }
+
+  for (let index = 0; index < input.images.length; index += 1) {
+    const image = input.images[index]!;
+
+    if (image.id != null) {
+      await tx.$executeRaw(Prisma.sql`
+        UPDATE public.mwl_product_images
+        SET
+          storage_bucket = ${image.storage_bucket},
+          storage_path = ${image.storage_path},
+          alt_text = ${image.alt_text ?? null},
+          is_primary = ${image.is_primary},
+          sort_order = ${image.sort_order}
+        WHERE id = ${image.id} AND product_id = ${input.productId}
+      `);
+      continue;
+    }
+
+    await tx.$executeRaw(Prisma.sql`
+      INSERT INTO public.mwl_product_images (
+        product_id,
+        storage_bucket,
+        storage_path,
+        alt_text,
+        is_primary,
+        sort_order
+      )
+      VALUES (
+        ${input.productId},
+        ${image.storage_bucket},
+        ${image.storage_path},
+        ${image.alt_text ?? null},
+        ${image.is_primary},
+        ${image.sort_order}
+      )
+    `);
+  }
+
+  await reindexProductImageSortOrder(tx, input.productId);
+}
+
 export async function addProductSearchTerm(
   productId: string,
   payload: AddProductSearchTermInput,
   options?: ServiceOptions,
 ): Promise<ProductDetail> {
   const db = resolveDb(options);
-  await ensureProductExists(db, productId);
-
   const normalized = normalizeSearchTermInput(payload);
 
-  const [duplicate] = await db.$queryRaw<Array<{ id: number }>>(Prisma.sql`
-    SELECT id::integer AS id
-    FROM public.mwl_product_search_terms
-    WHERE product_id = ${productId}
-      AND LOWER(term) = LOWER(${normalized.term})
-    LIMIT 1
-  `);
+  await db.$transaction(async (tx) => {
+    const product = await getProductNovaValidationRow(tx, productId);
 
-  if (duplicate) {
-    throw badRequest("search term already exists for this product.", { field: "term" });
-  }
+    const [duplicate] = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+      SELECT id::integer AS id
+      FROM public.mwl_product_search_terms
+      WHERE product_id = ${productId}
+        AND LOWER(term) = LOWER(${normalized.term})
+      LIMIT 1
+    `);
 
-  await db.$executeRaw(Prisma.sql`
-    INSERT INTO public.mwl_product_search_terms (
-      product_id,
-      family,
-      category,
-      term,
-      term_type,
-      priority,
-      is_active,
-      notes
-    )
-    VALUES (
-      ${productId},
-      NULL,
-      NULL,
-      ${normalized.term},
-      ${normalized.term_type},
-      ${normalized.priority},
-      ${normalized.is_active},
-      ${normalized.notes}
-    )
-  `);
+    if (duplicate) {
+      throw badRequest("search term already exists for this product.", { field: "term" });
+    }
+
+    await tx.$executeRaw(Prisma.sql`
+      INSERT INTO public.mwl_product_search_terms (
+        product_id,
+        family,
+        category,
+        term,
+        term_type,
+        priority,
+        is_active,
+        notes
+      )
+      VALUES (
+        ${productId},
+        NULL,
+        NULL,
+        ${normalized.term},
+        ${normalized.term_type},
+        ${normalized.priority},
+        ${normalized.is_active},
+        ${normalized.notes}
+      )
+    `);
+
+    const discoveryTerms = await listNovaDiscoveryTerms(tx, {
+      productId,
+      family: product.family,
+      category: product.category,
+    });
+    assertNovaPublicationIfAgentVisible({
+      product,
+      discoveryTerms,
+      operation: "search_term_add",
+    });
+  });
 
   await refreshSearchIndexSafely(db, { productId, reason: "search_term_add" });
   return getProductDetail(productId, options);
@@ -1755,63 +2703,77 @@ export async function updateProductSearchTerm(
 ): Promise<ProductDetail> {
   const db = resolveDb(options);
 
-  const [existing] = await db.$queryRaw<Array<{
-    id: number;
-    product_id: string | null;
-    term: string;
-    term_type: "alias";
-    priority: number;
-    is_active: boolean;
-    notes: string | null;
-  }>>(Prisma.sql`
-    SELECT
-      id::integer AS id,
-      product_id,
-      term,
-      term_type,
-      priority,
-      is_active,
-      notes
-    FROM public.mwl_product_search_terms
-    WHERE id = ${termId}
-    LIMIT 1
-  `);
+  await db.$transaction(async (tx) => {
+    const product = await getProductNovaValidationRow(tx, productId);
+    const [existing] = await tx.$queryRaw<Array<{
+      id: number;
+      product_id: string | null;
+      term: string;
+      term_type: "alias";
+      priority: number;
+      is_active: boolean;
+      notes: string | null;
+    }>>(Prisma.sql`
+      SELECT
+        id::integer AS id,
+        product_id,
+        term,
+        term_type,
+        priority,
+        is_active,
+        notes
+      FROM public.mwl_product_search_terms
+      WHERE id = ${termId}
+      LIMIT 1
+    `);
 
-  if (!existing || existing.product_id !== productId) {
-    throw notFound("Product search term not found for this product.", { productId, termId });
-  }
+    if (!existing || existing.product_id !== productId) {
+      throw notFound("Product search term not found for this product.", { productId, termId });
+    }
 
-  const merged = normalizeSearchTermInput({
-    term: payload.term ?? existing.term,
-    term_type: payload.term_type ?? existing.term_type,
-    priority: payload.priority ?? existing.priority,
-    notes: payload.notes !== undefined ? payload.notes : existing.notes,
-    is_active: payload.is_active ?? existing.is_active,
+    const merged = normalizeSearchTermInput({
+      term: payload.term ?? existing.term,
+      term_type: payload.term_type ?? existing.term_type,
+      priority: payload.priority ?? existing.priority,
+      notes: payload.notes !== undefined ? payload.notes : existing.notes,
+      is_active: payload.is_active ?? existing.is_active,
+    });
+
+    const [duplicate] = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+      SELECT id::integer AS id
+      FROM public.mwl_product_search_terms
+      WHERE product_id = ${productId}
+        AND LOWER(term) = LOWER(${merged.term})
+        AND id <> ${termId}
+      LIMIT 1
+    `);
+
+    if (duplicate) {
+      throw badRequest("search term already exists for this product.", { field: "term" });
+    }
+
+    await tx.$executeRaw(Prisma.sql`
+      UPDATE public.mwl_product_search_terms
+      SET
+        term = ${merged.term},
+        term_type = ${merged.term_type},
+        priority = ${merged.priority},
+        is_active = ${merged.is_active},
+        notes = ${merged.notes}
+      WHERE id = ${termId} AND product_id = ${productId}
+    `);
+
+    const discoveryTerms = await listNovaDiscoveryTerms(tx, {
+      productId,
+      family: product.family,
+      category: product.category,
+    });
+    assertNovaPublicationIfAgentVisible({
+      product,
+      discoveryTerms,
+      operation: "search_term_update",
+    });
   });
-
-  const [duplicate] = await db.$queryRaw<Array<{ id: number }>>(Prisma.sql`
-    SELECT id::integer AS id
-    FROM public.mwl_product_search_terms
-    WHERE product_id = ${productId}
-      AND LOWER(term) = LOWER(${merged.term})
-      AND id <> ${termId}
-    LIMIT 1
-  `);
-
-  if (duplicate) {
-    throw badRequest("search term already exists for this product.", { field: "term" });
-  }
-
-  await db.$executeRaw(Prisma.sql`
-    UPDATE public.mwl_product_search_terms
-    SET
-      term = ${merged.term},
-      term_type = ${merged.term_type},
-      priority = ${merged.priority},
-      is_active = ${merged.is_active},
-      notes = ${merged.notes}
-    WHERE id = ${termId} AND product_id = ${productId}
-  `);
 
   await refreshSearchIndexSafely(db, { productId, reason: "search_term_update" });
   return getProductDetail(productId, options);
@@ -1824,21 +2786,35 @@ export async function deleteProductSearchTerm(
 ): Promise<ProductDetail> {
   const db = resolveDb(options);
 
-  const [found] = await db.$queryRaw<Array<{ id: number }>>(Prisma.sql`
-    SELECT id::integer AS id
-    FROM public.mwl_product_search_terms
-    WHERE id = ${termId} AND product_id = ${productId}
-    LIMIT 1
-  `);
+  await db.$transaction(async (tx) => {
+    const product = await getProductNovaValidationRow(tx, productId);
+    const [found] = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
+      SELECT id::integer AS id
+      FROM public.mwl_product_search_terms
+      WHERE id = ${termId} AND product_id = ${productId}
+      LIMIT 1
+    `);
 
-  if (!found) {
-    throw notFound("Product search term not found for this product.", { productId, termId });
-  }
+    if (!found) {
+      throw notFound("Product search term not found for this product.", { productId, termId });
+    }
 
-  await db.$executeRaw(Prisma.sql`
-    DELETE FROM public.mwl_product_search_terms
-    WHERE id = ${termId} AND product_id = ${productId}
-  `);
+    await tx.$executeRaw(Prisma.sql`
+      DELETE FROM public.mwl_product_search_terms
+      WHERE id = ${termId} AND product_id = ${productId}
+    `);
+
+    const discoveryTerms = await listNovaDiscoveryTerms(tx, {
+      productId,
+      family: product.family,
+      category: product.category,
+    });
+    assertNovaPublicationIfAgentVisible({
+      product,
+      discoveryTerms,
+      operation: "search_term_delete",
+    });
+  });
 
   await refreshSearchIndexSafely(db, { productId, reason: "search_term_delete" });
   return getProductDetail(productId, options);

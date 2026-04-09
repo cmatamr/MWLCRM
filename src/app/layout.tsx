@@ -5,7 +5,7 @@ import { QueryProvider } from "@/providers/query-provider";
 import "@/app/globals.css";
 
 export const metadata: Metadata = {
-  title: "Made With Love CRM",
+  title: "RevenueCore by 4 + [ UNO ]",
   description: "CRM comercial modular para clientes, órdenes y campañas.",
 };
 

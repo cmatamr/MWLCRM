@@ -13,6 +13,7 @@ export * from "./use-products-catalog";
 export * from "./use-products-performance";
 export * from "./use-product-detail";
 export * from "./use-product-search-media";
+export * from "./use-save-product";
 export * from "./use-update-product";
 export * from "./use-reject-payment-receipt";
 export * from "./use-update-payment-receipt";

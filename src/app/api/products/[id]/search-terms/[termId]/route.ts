@@ -1,6 +1,10 @@
 import { badRequest, handleRouteError, ok, type RouteContext } from "@/server/api/http";
 import { requireRole } from "@/server/api/auth";
 import { deleteProductSearchTerm, updateProductSearchTerm } from "@/server/services/products";
+import {
+  isSearchTermUsefulForNova,
+  NOVA_SEARCH_TERM_QUALITY_RULE_EN,
+} from "@/lib/products/search-term-quality";
 import { z } from "zod";
 
 const searchTermTypeEnum = z.enum(["alias"]);
@@ -15,6 +19,13 @@ const updateSearchTermSchema = z
     is_active: z.boolean().optional(),
     notes: z.string().max(500).optional().nullable(),
   })
+  .refine(
+    (value) =>
+      value.term === undefined ||
+      value.is_active === false ||
+      isSearchTermUsefulForNova(value.term),
+    { message: NOVA_SEARCH_TERM_QUALITY_RULE_EN, path: ["term"] },
+  )
   .strict()
   .refine((value) => Object.values(value).some((fieldValue) => fieldValue !== undefined), {
     message: "At least one search term field must be provided.",
