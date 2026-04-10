@@ -8,7 +8,7 @@ type FunnelStageCardProps = {
 
 export function FunnelStageCard({ stage }: FunnelStageCardProps) {
   return (
-    <article className="rounded-[28px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+    <article className="rounded-[28px] border border-white/70 bg-white/90 p-6 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)]">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">

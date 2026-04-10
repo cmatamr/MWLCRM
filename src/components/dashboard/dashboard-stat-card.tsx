@@ -20,9 +20,9 @@ const metricHrefMap: Partial<Record<DashboardMetric["key"], string>> = {
 export function DashboardStatCard({ metric, className }: DashboardStatCardProps) {
   const href = metricHrefMap[metric.key];
   const cardClassName = cn(
-    "group block rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur transition-all duration-200",
+    "group block rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)] backdrop-blur transition-all duration-200",
     href
-      ? "cursor-pointer hover:scale-[1.01] hover:shadow-[0_24px_70px_rgba(15,23,42,0.12)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      ? "cursor-pointer hover:scale-[1.01] hover:shadow-[0_46px_78px_-30px_rgba(2,6,23,0.34),0_20px_40px_-16px_rgba(2,6,23,0.24)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       : "",
     className,
   );

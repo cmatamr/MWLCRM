@@ -2388,7 +2388,7 @@ export function ProductsPageClient() {
 
   return (
     <div className="space-y-8">
-      <div className="space-y-6 rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+      <div className="space-y-6 rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)]">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <PageHeader
             title="Products"
@@ -2650,25 +2650,25 @@ export function ProductsPageClient() {
 
       {currentMode === "catalog" ? (
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <article className="rounded-[24px] border border-white/70 bg-white/90 p-5 text-center shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
+          <article className="rounded-[24px] border border-white/70 bg-white/90 p-5 text-center shadow-[0_30px_56px_-26px_rgba(2,6,23,0.24),0_12px_26px_-14px_rgba(2,6,23,0.17)]">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               Productos activos
             </p>
             <p className="mt-2 text-3xl font-semibold text-slate-950">{catalogKpis.activeProducts}</p>
           </article>
-          <article className="rounded-[24px] border border-white/70 bg-white/90 p-5 text-center shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
+          <article className="rounded-[24px] border border-white/70 bg-white/90 p-5 text-center shadow-[0_30px_56px_-26px_rgba(2,6,23,0.24),0_12px_26px_-14px_rgba(2,6,23,0.17)]">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               Visibles al agente
             </p>
             <p className="mt-2 text-3xl font-semibold text-slate-950">{catalogKpis.agentVisibleProducts}</p>
           </article>
-          <article className="rounded-[24px] border border-amber-200/80 bg-amber-50/80 p-5 text-center shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
+          <article className="rounded-[24px] border border-amber-200/80 bg-amber-50/80 p-5 text-center shadow-[0_30px_56px_-26px_rgba(2,6,23,0.24),0_12px_26px_-14px_rgba(2,6,23,0.17)]">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">
               Con alertas de integridad
             </p>
             <p className="mt-2 text-3xl font-semibold text-amber-900">{catalogKpis.withAlerts}</p>
           </article>
-          <article className="rounded-[24px] border border-rose-200/80 bg-rose-50/80 p-5 text-center shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
+          <article className="rounded-[24px] border border-rose-200/80 bg-rose-50/80 p-5 text-center shadow-[0_30px_56px_-26px_rgba(2,6,23,0.24),0_12px_26px_-14px_rgba(2,6,23,0.17)]">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-rose-700">
               Sin imagen principal
             </p>
@@ -2677,7 +2677,7 @@ export function ProductsPageClient() {
         </section>
       ) : (
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <article className="rounded-[24px] border border-white/70 bg-white/90 p-5 shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
+          <article className="rounded-[24px] border border-white/70 bg-white/90 p-5 shadow-[0_30px_56px_-26px_rgba(2,6,23,0.24),0_12px_26px_-14px_rgba(2,6,23,0.17)]">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               Unidades vendidas
             </p>
@@ -2685,7 +2685,7 @@ export function ProductsPageClient() {
               {(performanceData?.summary.units_sold_total ?? 0).toLocaleString("es-CR")}
             </p>
           </article>
-          <article className="rounded-[24px] border border-white/70 bg-white/90 p-5 shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
+          <article className="rounded-[24px] border border-white/70 bg-white/90 p-5 shadow-[0_30px_56px_-26px_rgba(2,6,23,0.24),0_12px_26px_-14px_rgba(2,6,23,0.17)]">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               Ingresos
             </p>
@@ -2693,7 +2693,7 @@ export function ProductsPageClient() {
               {formatCurrencyCRC(performanceData?.summary.revenue_total_crc ?? 0)}
             </p>
           </article>
-          <article className="rounded-[24px] border border-amber-200/80 bg-amber-50/80 p-5 shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
+          <article className="rounded-[24px] border border-amber-200/80 bg-amber-50/80 p-5 shadow-[0_30px_56px_-26px_rgba(2,6,23,0.24),0_12px_26px_-14px_rgba(2,6,23,0.17)]">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">
               Productos sin ventas
             </p>
@@ -2701,7 +2701,7 @@ export function ProductsPageClient() {
               {performanceData?.summary.products_without_sales ?? 0}
             </p>
           </article>
-          <article className="rounded-[24px] border border-rose-200/80 bg-rose-50/80 p-5 shadow-[0_14px_38px_rgba(15,23,42,0.08)]">
+          <article className="rounded-[24px] border border-rose-200/80 bg-rose-50/80 p-5 shadow-[0_30px_56px_-26px_rgba(2,6,23,0.24),0_12px_26px_-14px_rgba(2,6,23,0.17)]">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-rose-700">
               Alertas comerciales
             </p>
@@ -2715,7 +2715,7 @@ export function ProductsPageClient() {
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.75fr)_minmax(320px,0.85fr)] xl:items-stretch">
         <div className={`space-y-6 ${currentMode === "catalog" ? "xl:h-full" : ""}`}>
           {currentMode === "catalog" ? (
-            <section className="rounded-[30px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] xl:flex xl:h-full xl:flex-col">
+            <section className="rounded-[30px] border border-white/70 bg-white/90 p-5 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)] xl:flex xl:h-full xl:flex-col">
               <div className="overflow-x-auto xl:flex-1">
                 <table className="min-w-full divide-y divide-border/70 text-left">
                   <thead>
@@ -2728,7 +2728,7 @@ export function ProductsPageClient() {
                       <th className="px-3 py-3">Agente</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border/60">
+                  <tbody>
                     {isCatalogLoading ? (
                       <TableEmptyStateRow
                         colSpan={6}
@@ -2748,8 +2748,10 @@ export function ProductsPageClient() {
                       return (
                         <tr
                           key={row.id}
-                          className={`cursor-pointer text-sm text-slate-700 transition hover:bg-slate-50 ${
-                            isSelected ? "bg-slate-50/80" : ""
+                          className={`cursor-pointer text-sm text-slate-700 transition first:border-t-0 hover:bg-slate-50 ${
+                            isSelected
+                              ? "drop-shadow-[0_12px_22px_rgba(15,23,42,0.12)] [&>td]:bg-slate-200/75 [&>td:first-child]:rounded-l-[18px] [&>td:last-child]:rounded-r-[18px]"
+                              : "border-t border-border/60"
                           }`}
                           onClick={() => requestSelectProduct(row.id)}
                         >
@@ -2855,7 +2857,7 @@ export function ProductsPageClient() {
               ) : null}
             </section>
           ) : (
-            <section className="rounded-[30px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+            <section className="rounded-[30px] border border-white/70 bg-white/90 p-5 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)]">
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-border/70 text-left">
                   <thead>
@@ -2869,7 +2871,7 @@ export function ProductsPageClient() {
                       <th className="px-3 py-3">Ultima actualizacion</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border/60">
+                  <tbody>
                     {isPerformanceLoading ? (
                       <TableEmptyStateRow
                         colSpan={7}
@@ -2880,8 +2882,10 @@ export function ProductsPageClient() {
                     {performanceRows.map((row) => (
                       <tr
                         key={row.id}
-                        className={`cursor-pointer text-sm text-slate-700 transition hover:bg-slate-50 ${
-                          row.id === selectedProductId ? "bg-slate-50/80" : ""
+                        className={`cursor-pointer text-sm text-slate-700 transition first:border-t-0 hover:bg-slate-50 ${
+                          row.id === selectedProductId
+                            ? "drop-shadow-[0_12px_22px_rgba(15,23,42,0.12)] [&>td]:bg-slate-200/75 [&>td:first-child]:rounded-l-[18px] [&>td:last-child]:rounded-r-[18px]"
+                            : "border-t border-border/60"
                         }`}
                         onClick={() => requestSelectProduct(row.id)}
                       >
@@ -2941,7 +2945,7 @@ export function ProductsPageClient() {
         <aside className={`min-w-0 space-y-6 ${currentMode === "catalog" ? "xl:h-full" : ""}`}>
           {currentMode === "catalog" ? (
             <>
-              <section className="min-w-0 rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] xl:h-full">
+              <section className="min-w-0 rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)] xl:h-full">
                 {!selectedProductId ? (
                   <StateDisplay
                     compact
@@ -4027,7 +4031,7 @@ export function ProductsPageClient() {
             </>
           ) : (
             <>
-              <section className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+              <section className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)]">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary/70">
@@ -4098,7 +4102,7 @@ export function ProductsPageClient() {
                 </div>
               </section>
 
-              <section className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+              <section className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)]">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary/70">
                   Tendencia de ventas
                 </p>
@@ -4111,7 +4115,7 @@ export function ProductsPageClient() {
                 </div>
               </section>
 
-              <section className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+              <section className="rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)]">
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary/70">
                   Insights rapidos
                 </p>
@@ -4542,8 +4546,8 @@ export function ProductsPageClient() {
         <div className="flex items-start gap-2">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <p>
-            Performance ahora usa datos reales agregados por `order_items.product_id` y estados
-            vendibles de `orders`. Margen y stock se muestran como N/D mientras no exista fuente real.
+            Performance muestra el comportamiento comercial real de cada producto. Si algún
+            indicador todavía no está disponible, se verá como N/D hasta contar con información suficiente.
           </p>
         </div>
       </section>

@@ -20,7 +20,7 @@ export function CustomerHeaderCard({ customer }: CustomerHeaderCardProps) {
   const statusBadge = getCustomerStatusBadge(customer.customerStatus);
 
   return (
-    <section className="overflow-hidden rounded-[32px] border border-white/70 bg-white shadow-panel">
+    <section className="overflow-hidden rounded-[32px] border border-white/70 bg-white shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)]">
       <div className="bg-hero-grid p-6 md:p-8">
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex items-start gap-4">

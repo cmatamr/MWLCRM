@@ -169,7 +169,7 @@ export function CustomersPageClient({ channelOptions }: CustomersPageClientProps
         </section>
       ) : null}
 
-      <section className="rounded-[28px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+      <section className="rounded-[28px] border border-white/70 bg-white/90 p-6 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)]">
         <form
           key={searchParamsKey}
           className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_repeat(3,minmax(0,0.7fr))]"
@@ -254,7 +254,7 @@ export function CustomersPageClient({ channelOptions }: CustomersPageClientProps
         }
       />
 
-      <section className="flex flex-col gap-4 rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_20px_60px_rgba(15,23,42,0.08)] sm:flex-row sm:items-center sm:justify-between">
+      <section className="flex flex-col gap-4 rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)] sm:flex-row sm:items-center sm:justify-between">
         <div className="text-sm text-muted-foreground">
           Pagina {data.pagination.page} de {data.pagination.totalPages}
         </div>

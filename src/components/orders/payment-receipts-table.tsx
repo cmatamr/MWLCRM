@@ -661,8 +661,74 @@ export function PaymentReceiptsTable({ orderId, receipts }: PaymentReceiptsTable
               </p>
             </div>
 
-            <div className="mt-5 rounded-[20px] border border-border/70 bg-slate-50/70 px-4 py-3 text-sm text-slate-700">
-              Comprobante <span className="font-semibold text-slate-950">#{receiptPendingValidationConfirm.id.slice(0, 8)}</span>
+            <div className="mt-5 space-y-4 rounded-[20px] border border-border/70 bg-slate-50/70 px-4 py-4 text-sm text-slate-700">
+              <p>
+                Comprobante{" "}
+                <span className="font-semibold text-slate-950">
+                  #{receiptPendingValidationConfirm.id.slice(0, 8)}
+                </span>
+              </p>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    Monto
+                  </p>
+                  <p className="mt-1 font-medium text-slate-950">
+                    {receiptPendingValidationConfirm.amountCrc != null
+                      ? formatCurrencyCRC(receiptPendingValidationConfirm.amountCrc)
+                      : "Sin monto detectado"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    Banco / Tipo
+                  </p>
+                  <p className="mt-1 font-medium text-slate-950">
+                    {receiptPendingValidationConfirm.bank ?? "Banco no detectado"} ·{" "}
+                    {receiptPendingValidationConfirm.transferType ?? "Tipo no detectado"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    Referencia
+                  </p>
+                  <p className="mt-1 font-medium text-slate-950">
+                    {receiptPendingValidationConfirm.reference ?? "Sin referencia"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    Fecha / Hora
+                  </p>
+                  <p className="mt-1 font-medium text-slate-950">
+                    {receiptPendingValidationConfirm.receiptDate
+                      ? formatCalendarDate(receiptPendingValidationConfirm.receiptDate)
+                      : "Sin fecha"}
+                    {receiptPendingValidationConfirm.receiptTime
+                      ? ` · ${receiptPendingValidationConfirm.receiptTime}`
+                      : ""}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    Remitente
+                  </p>
+                  <p className="mt-1 font-medium text-slate-950">
+                    {receiptPendingValidationConfirm.senderName ?? "No detectado"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    Destino
+                  </p>
+                  <p className="mt-1 font-medium text-slate-950">
+                    {receiptPendingValidationConfirm.destinationPhone ??
+                      receiptPendingValidationConfirm.recipientName ??
+                      "No detectado"}
+                  </p>
+                </div>
+              </div>
             </div>
 
             <div className="mt-6 flex justify-end gap-3">

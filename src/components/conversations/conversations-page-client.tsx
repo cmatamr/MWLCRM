@@ -105,7 +105,7 @@ export function ConversationsPageClient() {
         {summaryCards.map((item) => (
           <article
             key={item.label}
-            className="rounded-[24px] border border-white/70 bg-white/90 p-4 shadow-[0_20px_60px_rgba(15,23,42,0.06)]"
+            className="rounded-[24px] border border-white/70 bg-white/90 p-4 shadow-[0_34px_62px_-30px_rgba(2,6,23,0.24),0_14px_30px_-16px_rgba(2,6,23,0.17)]"
           >
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
               {item.label}
@@ -138,11 +138,15 @@ export function ConversationsPageClient() {
         <>
           <ConversationHeader conversation={selectedConversation} />
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)] xl:[--conversation-detail-height:760px]">
             <MessageList messages={selectedConversation.messages} />
-            <div className="space-y-6">
-              <ObjectionsList objections={selectedConversation.objections} />
-              <StateChangesList stateChanges={selectedConversation.stateChanges} />
+            <div className="flex min-h-0 flex-col gap-6 xl:h-[var(--conversation-detail-height)]">
+              <div className="min-h-0 flex-1">
+                <ObjectionsList objections={selectedConversation.objections} />
+              </div>
+              <div className="min-h-0 flex-1">
+                <StateChangesList stateChanges={selectedConversation.stateChanges} />
+              </div>
             </div>
           </div>
         </>

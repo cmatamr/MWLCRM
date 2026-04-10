@@ -8,7 +8,7 @@ export function DashboardWidgetPlaceholder({
   description,
 }: DashboardWidgetPlaceholderProps) {
   return (
-    <section className="flex min-h-[220px] flex-col justify-between rounded-[32px] border border-dashed border-border/80 bg-white/60 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.05)]">
+    <section className="flex min-h-[220px] flex-col justify-between rounded-[32px] border border-dashed border-border/80 bg-white/60 p-6 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.22),0_16px_34px_-16px_rgba(2,6,23,0.15)]">
       <div className="space-y-2">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/55">
           Widget

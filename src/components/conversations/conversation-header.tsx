@@ -39,7 +39,7 @@ export function ConversationHeader({ conversation }: ConversationHeaderProps) {
   ];
 
   return (
-    <section className="overflow-hidden rounded-[32px] border border-white/70 bg-white shadow-panel">
+    <section className="overflow-hidden rounded-[32px] border border-white/70 bg-white shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)]">
       <div className="bg-hero-grid p-6 md:p-8">
         <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
           <div className="space-y-4">
