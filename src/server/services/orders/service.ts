@@ -10,6 +10,7 @@ import {
   calculateOrderItemsSubtotalCrc,
   orderStatusesRequiringValidatedReceipt,
 } from "@/domain/crm/orders";
+import { formatCalendarDate, formatCurrencyCRC } from "@/domain/crm/formatters";
 import {
   createPaginationMeta,
   isUuid,
@@ -356,6 +357,103 @@ function normalizeReceiptDateInput(value: string | null | undefined) {
   return value ? new Date(`${value}T00:00:00.000Z`) : null;
 }
 
+function buildValidatedReceiptSummary(input: {
+  receiptId: string;
+  amountCrc: number | null;
+  bank: string | null;
+  transferType: string | null;
+  reference: string | null;
+  receiptDate: Date | null;
+  receiptTime: string | null;
+  senderName: string | null;
+  destinationPhone: string | null;
+  recipientName: string | null;
+}) {
+  const amount =
+    input.amountCrc != null ? formatCurrencyCRC(input.amountCrc) : "Sin monto detectado";
+  const dateAndTime = `${input.receiptDate ? formatCalendarDate(input.receiptDate) : "Sin fecha"}${
+    input.receiptTime ? ` · ${input.receiptTime}` : ""
+  }`;
+  const destination = input.destinationPhone ?? input.recipientName ?? "No detectado";
+
+  return [
+    `Comprobante #${input.receiptId.slice(0, 8)}`,
+    `Monto: ${amount}`,
+    `Banco / Tipo: ${input.bank ?? "Banco no detectado"} · ${input.transferType ?? "Tipo no detectado"}`,
+    `Referencia: ${input.reference ?? "Sin referencia"}`,
+    `Fecha / Hora: ${dateAndTime}`,
+    `Remitente: ${input.senderName ?? "No detectado"}`,
+    `Destino: ${destination}`,
+  ].join("\n");
+}
+
+async function appendValidatedReceiptSystemMessageTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    leadThreadId: string;
+    performedBy: string | null;
+    receiptId: string;
+    amountCrc: number | null;
+    bank: string | null;
+    transferType: string | null;
+    reference: string | null;
+    receiptDate: Date | null;
+    receiptTime: string | null;
+    senderName: string | null;
+    destinationPhone: string | null;
+    recipientName: string | null;
+  },
+) {
+  const actor = normalizeOptionalText(input.performedBy) ?? "CRM";
+  const summary = buildValidatedReceiptSummary(input);
+  const text = `Comprobante aprobado por ${actor}.\n\n${summary}`;
+
+  await tx.$executeRaw`
+    with provider_choice as (
+      select
+        case
+          when exists (
+            select 1
+            from pg_type t
+            join pg_enum e
+              on e.enumtypid = t.oid
+            where t.typnamespace = 'public'::regnamespace
+              and t.typname = 'provider_type'
+              and e.enumlabel = 'CRM'
+          ) then 'CRM'
+          when exists (
+            select 1
+            from pg_type t
+            join pg_enum e
+              on e.enumtypid = t.oid
+            where t.typnamespace = 'public'::regnamespace
+              and t.typname = 'provider_type'
+              and e.enumlabel = 'crm'
+          ) then 'crm'
+          else 'ycloud'
+        end as provider_value
+    )
+    insert into public.messages (
+      lead_thread_id,
+      sender_type,
+      text,
+      attachments,
+      provider,
+      received_ts,
+      created_at
+    )
+    values (
+      ${input.leadThreadId}::uuid,
+      'system'::public.sender_type,
+      ${text}::text,
+      '[]'::jsonb,
+      (select provider_value::public.provider_type from provider_choice),
+      now(),
+      now()
+    );
+  `;
+}
+
 async function appendOrderActivityForReceiptEvent(
   tx: Prisma.TransactionClient,
   input: {
@@ -395,6 +493,14 @@ async function getScopedReceiptOrThrow(
       receiptKey: true,
       status: true,
       amountCrc: true,
+      bank: true,
+      transferType: true,
+      reference: true,
+      receiptDate: true,
+      receiptTime: true,
+      senderName: true,
+      recipientName: true,
+      destinationPhone: true,
       deletedAt: true,
     },
   });
@@ -433,6 +539,7 @@ async function ensureOrderExists(
       id: true,
       status: true,
       paymentStatus: true,
+      leadThreadId: true,
     },
   });
 
@@ -443,6 +550,41 @@ async function ensureOrderExists(
   }
 
   return order;
+}
+
+async function transitionLeadToWonForValidatedReceiptTx(
+  tx: Prisma.TransactionClient,
+  input: {
+    leadThreadId: string;
+    orderId: string;
+    receiptId: string;
+    performedBy?: string | null;
+  },
+) {
+  const changedBy = normalizeOptionalText(input.performedBy) ?? "crm:payment_receipt_validation";
+  const reason = "Payment receipt validated and order moved to in_production from CRM.";
+  const evidenceExcerpt = `order_id=${input.orderId}; receipt_id=${input.receiptId}; action=validate_receipt`;
+  const evidenceJson = JSON.stringify({
+    order_id: input.orderId,
+    receipt_id: input.receiptId,
+    action: "validate_receipt",
+    source: "crm",
+  });
+
+  await tx.$executeRaw`
+    select public.apply_funnel_stage_transition(
+      ${input.leadThreadId}::uuid,
+      'won'::public.lead_stage_type,
+      'human'::public.funnel_stage_source_enum,
+      ${1}::numeric,
+      ${reason}::text,
+      ${changedBy}::text,
+      null::uuid,
+      null::uuid,
+      ${evidenceExcerpt}::text,
+      ${evidenceJson}::jsonb
+    );
+  `;
 }
 
 export async function recomputeOrderPaymentState(
@@ -1924,7 +2066,7 @@ export async function validatePaymentReceipt(
   const db = resolveDb(options);
 
   return db.$transaction(async (tx) => {
-    await ensureOrderExists(tx, input.orderId);
+    const orderBeforeValidation = await ensureOrderExists(tx, input.orderId);
     const receipt = await getScopedReceiptOrThrow(tx, input);
 
     if (receipt.status === PaymentReceiptStatusEnum.validated) {
@@ -1977,6 +2119,49 @@ export async function validatePaymentReceipt(
     });
 
     await recomputeOrderPaymentStateTx(tx, input.orderId);
+    const orderAfterRecompute = await tx.order.findUnique({
+      where: {
+        id: input.orderId,
+      },
+      select: {
+        status: true,
+        leadThreadId: true,
+      },
+    });
+
+    if (!orderAfterRecompute) {
+      throw new PaymentReceiptError("ORDER_NOT_FOUND", "Order not found.", {
+        orderId: input.orderId,
+      });
+    }
+
+    const movedToProductionInThisOperation =
+      orderBeforeValidation.status !== OrderStatusEnum.in_production &&
+      orderAfterRecompute.status === OrderStatusEnum.in_production;
+
+    if (movedToProductionInThisOperation) {
+      await transitionLeadToWonForValidatedReceiptTx(tx, {
+        leadThreadId: orderAfterRecompute.leadThreadId,
+        orderId: input.orderId,
+        receiptId: input.receiptId,
+        performedBy: input.performedBy,
+      });
+    }
+
+    await appendValidatedReceiptSystemMessageTx(tx, {
+      leadThreadId: orderAfterRecompute.leadThreadId,
+      performedBy: normalizeOptionalText(input.performedBy),
+      receiptId: receipt.id,
+      amountCrc: receipt.amountCrc,
+      bank: receipt.bank,
+      transferType: receipt.transferType,
+      reference: receipt.reference,
+      receiptDate: receipt.receiptDate,
+      receiptTime: receipt.receiptTime,
+      senderName: receipt.senderName,
+      destinationPhone: receipt.destinationPhone,
+      recipientName: receipt.recipientName,
+    });
 
     await appendOrderActivityForReceiptEvent(tx, {
       orderId: input.orderId,

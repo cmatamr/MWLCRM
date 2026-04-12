@@ -8,14 +8,18 @@ export async function POST(
   context: RouteContext<{ id: string; receiptId: string }>,
 ) {
   try {
-    await requireRole("admin");
+    const session = await requireRole("admin");
     const params = paymentReceiptRouteParamsSchema.parse(await context.params);
     const body = paymentReceiptReviewActionSchema.parse(await request.json());
+    const performedBy =
+      session.profile.full_name?.trim() ||
+      session.user.email?.trim() ||
+      body.performedBy.trim();
 
     const order = await validatePaymentReceipt({
       orderId: params.id,
       receiptId: params.receiptId,
-      performedBy: body.performedBy,
+      performedBy,
       internalNotes: body.internalNotes,
     });
 

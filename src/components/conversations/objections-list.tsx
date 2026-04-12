@@ -26,7 +26,7 @@ export function ObjectionsList({ objections }: ObjectionsListProps) {
         </div>
       </div>
 
-      <div className="mt-6 space-y-3">
+      <div className="mt-6 min-h-0 flex-1 space-y-3 overflow-y-auto">
         {objections.length > 0 ? (
           objections.map((objection) => (
             <article
@@ -67,7 +67,7 @@ export function ObjectionsList({ objections }: ObjectionsListProps) {
           <InlineStateDisplay
             title="No se detectaron objeciones"
             description="Esta conversación no tiene señales comerciales clasificadas como objeciones."
-            className="border-dashed border-border bg-slate-50/70 shadow-none"
+            className="flex h-full items-center justify-center border-dashed border-border bg-slate-50/70 text-center shadow-none [&_h3]:text-lg [&_h3]:leading-tight md:[&_h3]:text-xl [&_p]:text-xs [&_p]:leading-5 md:[&_p]:text-sm md:[&_p]:leading-6 [&_svg]:h-5 [&_svg]:w-5 [&>div]:w-full [&>div>div:first-child]:h-11 [&>div>div:first-child]:w-11 [&>div>div:first-child]:rounded-xl"
           />
         )}
       </div>

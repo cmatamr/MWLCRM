@@ -53,6 +53,9 @@ enum OrderStatusEnum {
 enum ProviderType {
   ycloud
   chatwoot
+  crm      @map("CRM")
+  ig       @map("IG")
+  fb       @map("FB")
 
   @@map("provider_type")
 }
@@ -209,7 +212,7 @@ model OrderItem {
   deliveryDate        DateTime?   @map("delivery_date") @db.Date
   createdAt           DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   itemNotes           String?     @map("item_notes")
-  order               Order       @relation(fields: [orderId], references: [id], onDelete: Cascade, map: "order_items_order_id_fkey")
+  order               Order       @relation(fields: [orderId], references: [id], onDelete: Restrict, map: "order_items_order_id_fkey")
   product             MwlProduct? @relation(fields: [productId], references: [id], onDelete: SetNull, map: "order_items_product_id_fkey")
 
   @@unique([orderId, productId], map: "uq_order_items_order_product")

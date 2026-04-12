@@ -57,6 +57,8 @@ export function ConversationsTable({
                 conversations.map((conversation) => {
                   const isSelected = conversation.id === selectedConversationId;
                   const leadStageBadge = getLeadStageBadge(conversation.leadStage);
+                  const interactionPreview =
+                    conversation.lastMessagePreview?.trim() || "Sin preview del último mensaje.";
 
                   return (
                     <tr
@@ -97,9 +99,23 @@ export function ConversationsTable({
                           <p className="text-sm font-medium text-slate-950">
                             {formatDateTime(conversation.lastInteractionAt)}
                           </p>
-                          <p className="max-w-xs text-sm leading-6 text-muted-foreground">
-                            {conversation.lastMessagePreview?.trim() || "Sin preview del último mensaje."}
-                          </p>
+                          <div className="group/preview relative max-w-xs">
+                            <p
+                              className="text-sm leading-6 text-muted-foreground"
+                              style={{
+                                display: "-webkit-box",
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: "vertical",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                            >
+                              {interactionPreview}
+                            </p>
+                            <div className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-80 max-w-[min(24rem,80vw)] rounded-2xl border border-white/80 bg-white/95 px-3 py-2 text-xs leading-5 text-slate-700 opacity-0 shadow-[0_26px_46px_-24px_rgba(2,6,23,0.55),0_12px_24px_-14px_rgba(2,6,23,0.35),inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-[3px] transition-opacity duration-150 group-hover/preview:opacity-100 group-focus-within/preview:opacity-100">
+                              {interactionPreview}
+                            </div>
+                          </div>
                         </div>
                       </td>
                       <td className="px-4 py-4 align-top text-sm font-medium text-slate-950">
