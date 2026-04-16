@@ -70,11 +70,13 @@ export function TableEmptyStateRow({
   title,
   description,
   helper,
+  isLoading = false,
 }: {
   colSpan: number;
   title: string;
   description: string;
   helper?: string;
+  isLoading?: boolean;
 }) {
   return (
     <tr>
@@ -85,6 +87,17 @@ export function TableEmptyStateRow({
             description={description}
             className="border-dashed border-border bg-slate-50/70 shadow-none"
           />
+          {isLoading ? (
+            <div className="flex flex-col items-center gap-2 px-2 pt-1" aria-live="polite" aria-busy="true">
+              <span
+                className="h-5 w-5 animate-spin rounded-full border-2 border-slate-300 border-t-slate-800"
+                aria-hidden="true"
+              />
+              <div className="h-1.5 w-44 overflow-hidden rounded-full bg-slate-200/90">
+                <div className="h-full w-2/3 animate-pulse rounded-full bg-slate-700" />
+              </div>
+            </div>
+          ) : null}
           {helper ? (
             <p className="px-2 text-center text-sm text-muted-foreground">{helper}</p>
           ) : null}

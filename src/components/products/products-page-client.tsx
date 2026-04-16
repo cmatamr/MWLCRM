@@ -2732,8 +2732,9 @@ export function ProductsPageClient() {
                     {isCatalogLoading ? (
                       <TableEmptyStateRow
                         colSpan={6}
-                        title="Cargando catalogo real"
-                        description="Consultando mwl_products_with_primary_image..."
+                        title="Cargando catalogo"
+                        description="Preparando productos para mostrar en pantalla."
+                        isLoading
                       />
                     ) : null}
                     {catalogRows.map((row) => {
