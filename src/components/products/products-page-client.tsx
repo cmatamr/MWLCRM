@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import {
   AlertTriangle,
   ChevronLeft,
@@ -26,6 +27,7 @@ import type {
 } from "@/components/products/types";
 import {
   useProductDetail,
+  useProductSkuPreview,
   useSaveProduct,
   useProductsCatalog,
   useProductsPerformance,
@@ -34,6 +36,11 @@ import { Button } from "@/components/ui/button";
 import { StateDisplay, TableEmptyStateRow } from "@/components/ui/state-display";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
+import {
+  getFriendlyDiscountVisibilityLabel,
+  getFriendlyFieldLabel,
+  getFriendlyPricingModeLabel,
+} from "@/lib/ui-labels";
 import { FetcherError } from "@/lib/fetcher";
 import {
   isSearchTermUsefulForNova,
@@ -68,6 +75,7 @@ type CreateProductDraft = {
   category: string;
   variant_label: string;
   size_label: string;
+  material: string;
   search_terms_raw: string;
   publication_mode: "internal" | "nova";
   pricing_mode: ProductPricingMode;
@@ -75,7 +83,6 @@ type CreateProductDraft = {
   price_from_crc: string;
   min_qty: string;
   is_active: boolean;
-  is_agent_visible: boolean;
   allows_name: boolean;
   requires_design_approval: boolean;
   is_discountable: boolean;
@@ -214,6 +221,7 @@ const defaultCreateDraft: CreateProductDraft = {
   category: "",
   variant_label: "",
   size_label: "",
+  material: "",
   search_terms_raw: "",
   publication_mode: "internal",
   pricing_mode: "fixed",
@@ -221,7 +229,6 @@ const defaultCreateDraft: CreateProductDraft = {
   price_from_crc: "",
   min_qty: "1",
   is_active: true,
-  is_agent_visible: false,
   allows_name: false,
   requires_design_approval: false,
   is_discountable: false,
@@ -377,11 +384,27 @@ function toFriendlyOperationalMessage(rawMessage: string): string {
   }
 
   if (
+    lower.includes("unable to generate sku: category code mapping not found") ||
+    lower.includes("unable to generate sku: family code mapping not found")
+  ) {
+    return "No se pudo generar el SKU: falta mapping en catalog_sku_code_dictionary (scope business/mwl).";
+  }
+
+  if (
     lower.includes("cannot remain agent-visible") ||
     lower.includes("no se puede publicar al agente") ||
     lower.includes("no publicable para nova")
   ) {
     return "Este producto todavia no esta listo para publicarse en NOVA.";
+  }
+
+  if (
+    lower.includes("invalid request parameters") ||
+    lower.includes("invalid request parameter") ||
+    lower.includes("bad request") ||
+    lower.includes("request validation failed")
+  ) {
+    return "Hay datos incompletos o inválidos. Revisa nombre, categoría, familia, modalidad de precio, cantidad mínima, resumen y términos de búsqueda.";
   }
 
   if (lower.includes("is_active must be true")) {
@@ -521,15 +544,7 @@ function getPriceValue(product: ProductPriceShape) {
 }
 
 function getPriceModeLabel(pricingMode: ProductPricingMode) {
-  if (pricingMode === "fixed") {
-    return "fixed";
-  }
-
-  if (pricingMode === "from") {
-    return "from";
-  }
-
-  return "variable";
+  return getFriendlyPricingModeLabel(pricingMode);
 }
 
 function getFormattedPrice(product: ProductPriceShape) {
@@ -1199,12 +1214,12 @@ function buildCreatePayloadFromDraft(draft: CreateProductDraft): SaveProductInpu
     family: draft.family.trim(),
     variant_label: draft.variant_label.trim() || null,
     size_label: draft.size_label.trim() || null,
+    material: draft.material.trim() || null,
     pricing_mode: draft.pricing_mode,
     price_crc: toDecimalOrNull(draft.price_crc),
     price_from_crc: toDecimalOrNull(draft.price_from_crc),
     min_qty: toNumberOrNull(draft.min_qty) ?? 1,
     is_active: draft.is_active,
-    is_agent_visible: false,
     allows_name: draft.allows_name,
     requires_design_approval: draft.requires_design_approval,
     is_discountable: draft.is_discountable,
@@ -1308,6 +1323,9 @@ export function ProductsPageClient() {
   const [editBaseline, setEditBaseline] = useState<ProductDetail | null>(null);
   const [isDiscardChangesOpen, setIsDiscardChangesOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [showCreateHelpPopup, setShowCreateHelpPopup] = useState(false);
+  const [showCreateDetailsPopup, setShowCreateDetailsPopup] = useState(false);
+  const [showEditHelpPopup, setShowEditHelpPopup] = useState(false);
   const [isEditingCreatePriceCrc, setIsEditingCreatePriceCrc] = useState(false);
   const [isEditingCreatePriceFromCrc, setIsEditingCreatePriceFromCrc] = useState(false);
   const [createDraft, setCreateDraft] = useState<CreateProductDraft>(defaultCreateDraft);
@@ -1337,6 +1355,19 @@ export function ProductsPageClient() {
   const [tempIdSeed, setTempIdSeed] = useState(-1);
 
   const { saveProduct, isPending: isSavingProduct } = useSaveProduct();
+
+  useEffect(() => {
+    if (!isCreateOpen) {
+      setShowCreateHelpPopup(false);
+      setShowCreateDetailsPopup(false);
+    }
+  }, [isCreateOpen]);
+
+  useEffect(() => {
+    if (!isEditOpen) {
+      setShowEditHelpPopup(false);
+    }
+  }, [isEditOpen]);
 
   const catalogQueryParams = useMemo<ListCatalogProductsParams>(() => {
     return {
@@ -1444,6 +1475,9 @@ export function ProductsPageClient() {
 
   const categoryOptions = catalogData?.filters.categories ?? [];
   const familyOptions = catalogData?.filters.families ?? [];
+  const variantOptions = catalogData?.filters.variants ?? [];
+  const materialOptions = catalogData?.filters.materials ?? [];
+  const sizeOptions = catalogData?.filters.sizes ?? [];
 
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
@@ -1662,29 +1696,77 @@ export function ProductsPageClient() {
     );
   }, [performanceMetric, topProductsByPeriod]);
 
-  const createPreviewSku = useMemo(() => {
-    const normalizePreviewToken = (value: string) =>
-      value
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "_")
-        .replace(/^_+|_+$/g, "");
-
-    const skuChunks = [
+  const createSkuPreviewInput = useMemo(
+    () => ({
+      category: createDraft.category,
+      family: createDraft.family,
+      variant_label: createDraft.variant_label || null,
+      size_label: createDraft.size_label || null,
+      material: createDraft.material || null,
+    }),
+    [
       createDraft.category,
       createDraft.family,
-      createDraft.name,
       createDraft.variant_label,
-    ]
-      .map(normalizePreviewToken)
-      .filter(Boolean)
-      .map((chunk) => chunk.slice(0, 3).toUpperCase());
+      createDraft.size_label,
+      createDraft.material,
+    ],
+  );
+  const shouldRequestCreateSkuPreview =
+    isCreateOpen &&
+    createDraft.category.trim().length > 0 &&
+    createDraft.family.trim().length > 0;
+  const {
+    data: createSkuPreview,
+    error: createSkuPreviewError,
+    isFetching: isFetchingCreateSkuPreview,
+  } = useProductSkuPreview(createSkuPreviewInput, shouldRequestCreateSkuPreview);
 
-    return skuChunks.length > 0 ? `MWL-${skuChunks.join("-")}` : "MWL-";
-  }, [createDraft.category, createDraft.family, createDraft.name, createDraft.variant_label]);
+  const createSkuPreviewValue = useMemo(() => {
+    if (!shouldRequestCreateSkuPreview) {
+      return "";
+    }
+
+    return createSkuPreview?.sku ?? "";
+  }, [createSkuPreview?.sku, shouldRequestCreateSkuPreview]);
+
+  const createSkuPreviewWarning = useMemo(() => {
+    if (!isCreateOpen) {
+      return null;
+    }
+
+    if (!createDraft.category.trim() || !createDraft.family.trim()) {
+      return "Completa categoria y familia para generar el SKU.";
+    }
+
+    if (isFetchingCreateSkuPreview) {
+      return "Generando SKU con diccionario canonico...";
+    }
+
+    if (createSkuPreviewError) {
+      return toFriendlyOperationalMessage(createSkuPreviewError.message);
+    }
+
+    if (!createSkuPreview?.sku) {
+      return "No se pudo generar el SKU con los datos actuales.";
+    }
+
+    return null;
+  }, [
+    createDraft.category,
+    createDraft.family,
+    createSkuPreview?.sku,
+    createSkuPreviewError,
+    isCreateOpen,
+    isFetchingCreateSkuPreview,
+  ]);
   const createDraftNovaValidation = useMemo(
     () => validateCreateDraftForNova(createDraft),
     [createDraft],
+  );
+  const createDraftParsedSearchTerms = useMemo(
+    () => parseSearchTermsRawInput(createDraft.search_terms_raw),
+    [createDraft.search_terms_raw],
   );
   const createDraftOperationalFeedback = useMemo(
     () =>
@@ -1695,6 +1777,40 @@ export function ProductsPageClient() {
       }),
     [createDraftNovaValidation],
   );
+  const createIdentitySectionReady = useMemo(
+    () =>
+      Boolean(
+        createDraft.name.trim() &&
+          createDraft.category.trim() &&
+          createDraft.family.trim() &&
+          createSkuPreviewValue.trim(),
+      ),
+    [createDraft.category, createDraft.family, createDraft.name, createSkuPreviewValue],
+  );
+  const createPricingSectionReady = useMemo(() => {
+    const hasMinQty = Boolean(createDraft.min_qty.trim());
+    const hasPrice =
+      createDraft.pricing_mode === "from"
+        ? Boolean(createDraft.price_from_crc.trim())
+        : Boolean(createDraft.price_crc.trim());
+
+    return hasMinQty && hasPrice;
+  }, [
+    createDraft.min_qty,
+    createDraft.price_crc,
+    createDraft.price_from_crc,
+    createDraft.pricing_mode,
+  ]);
+  const createNovaContentSectionReady = useMemo(
+    () =>
+      Boolean(
+        createDraft.summary.trim() && createDraftNovaValidation.usableSearchTerms.length > 0,
+      ),
+    [createDraft.summary, createDraftNovaValidation.usableSearchTerms.length],
+  );
+  const canPublishCreateDraftToNova = createDraftNovaValidation.isNovaReady;
+  const isCreateFixedPricingMode = createDraft.pricing_mode === "fixed";
+  const isCreateFromPricingMode = createDraft.pricing_mode === "from";
 
   const resolveProductName = (productId: string | null) => {
     if (!productId) {
@@ -1718,6 +1834,9 @@ export function ProductsPageClient() {
     }
 
     const snapshot = cloneProductForDraft(selectedProductBase);
+    if (!snapshot.is_discountable) {
+      snapshot.discount_visibility = "never";
+    }
     setEditBaseline(snapshot);
     setEditDraft(snapshot);
     setCatalogTab("general");
@@ -1954,6 +2073,26 @@ export function ProductsPageClient() {
     }
 
     const payload = buildCreatePayloadFromDraft(createDraft);
+    if (isFetchingCreateSkuPreview) {
+      setCreateStatusMessage("Generando SKU con diccionario canonico. Espera un momento.");
+      setCreateFeedbackItems([
+        {
+          severity: "warning",
+          message: "El preview de SKU aun se esta resolviendo con catalog_sku_code_dictionary.",
+        },
+      ]);
+      return;
+    }
+
+    if (createSkuPreviewError || !createSkuPreview?.sku) {
+      const message = createSkuPreviewError
+        ? toFriendlyOperationalMessage(createSkuPreviewError.message)
+        : "No se pudo generar un SKU valido con catalog_sku_code_dictionary (scope business/mwl).";
+      setCreateStatusMessage(message);
+      setCreateFeedbackItems([{ severity: "error", message }]);
+      return;
+    }
+
     setCreateFeedbackItems([]);
     setCreateStatusMessage("Creando producto...");
 
@@ -2003,6 +2142,33 @@ export function ProductsPageClient() {
       const fallbackMessage =
         error instanceof Error ? error.message : "No se pudo crear el producto.";
       const friendlyMessage = toFriendlyOperationalMessage(fallbackMessage);
+      const normalizedFallbackMessage = fallbackMessage.trim().toLowerCase();
+      const isGenericInvalidParamsError =
+        normalizedFallbackMessage.includes("invalid request parameters") ||
+        normalizedFallbackMessage.includes("bad request");
+
+      if (isGenericInvalidParamsError) {
+        const actionableFeedback = createDraftOperationalFeedback.filter(
+          (item) => item.severity !== "info",
+        );
+
+        if (actionableFeedback.length > 0) {
+          setCreateStatusMessage("Hay datos por corregir antes de guardar/publicar.");
+          setCreateFeedbackItems(actionableFeedback);
+          return;
+        }
+
+        setCreateStatusMessage("Hay datos incompletos o inconsistentes en el formulario.");
+        setCreateFeedbackItems([
+          {
+            severity: "error",
+            message:
+              "Revisa nombre, categoría, familia, modalidad de precio, cantidad mínima, resumen y términos de búsqueda.",
+          },
+        ]);
+        return;
+      }
+
       setCreateStatusMessage(friendlyMessage);
       setCreateFeedbackItems([{ severity: "error", message: friendlyMessage }]);
     }
@@ -2352,7 +2518,7 @@ export function ProductsPageClient() {
           }
         : current,
     );
-    setSearchMetaMessage("alt_text actualizado en draft");
+    setSearchMetaMessage("Texto alternativo actualizado en borrador.");
   }
 
   async function handleUpdateImageSort(imageId: number, sortOrder: number) {
@@ -2389,21 +2555,12 @@ export function ProductsPageClient() {
   return (
     <div className="space-y-8">
       <div className="space-y-6 rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)]">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <PageHeader
-            title="Products"
-            description="Catalog conectado a datos reales de mwl_products para lectura operativa y control de integridad."
+            title="Productos"
+            description="Catálogo conectado a datos reales para lectura operativa y control de integridad."
           />
-          <div className="flex w-full flex-col gap-3 md:w-auto md:flex-row">
-            <label className="relative w-full md:min-w-[360px]">
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Buscar por id, sku, nombre, family, category o aliases"
-                className="h-11 w-full rounded-2xl border border-border bg-white pl-11 pr-4 text-sm text-slate-950 outline-none transition focus:border-primary"
-              />
-            </label>
+          <div className="flex w-full flex-col gap-3 md:w-auto">
             <Button
               type="button"
               className="gap-2"
@@ -2413,7 +2570,13 @@ export function ProductsPageClient() {
                 setIsCreateOpen(true);
               }}
             >
-              + Nuevo producto
+              Nuevo Producto
+            </Button>
+            <Button type="button" asChild variant="outline" className="gap-2">
+              <Link href="/products/promotions">Crear Promoción</Link>
+            </Button>
+            <Button type="button" asChild variant="outline" className="gap-2">
+              <Link href="/products/promotions">Ver Promociones</Link>
             </Button>
           </div>
         </div>
@@ -2430,7 +2593,7 @@ export function ProductsPageClient() {
                     : "text-slate-700 hover:bg-slate-100"
                 }`}
               >
-                Catalog
+                Catálogo
               </button>
               <button
                 type="button"
@@ -2453,7 +2616,7 @@ export function ProductsPageClient() {
                 }
                 className="h-10 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
               >
-                <option value="all">Category: todas</option>
+                <option value="all">Categoría: todas</option>
                 {categoryOptions.map((category) => (
                   <option key={category} value={category}>
                     {category}
@@ -2468,7 +2631,7 @@ export function ProductsPageClient() {
                 }
                 className="h-10 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
               >
-                <option value="all">Family: todas</option>
+                <option value="all">Familia: todas</option>
                 {familyOptions.map((family) => (
                   <option key={family} value={family}>
                     {family}
@@ -2516,10 +2679,10 @@ export function ProductsPageClient() {
                 }
                 className="h-10 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
               >
-                <option value="all">Pricing: todos</option>
-                <option value="fixed">fixed</option>
-                <option value="from">from</option>
-                <option value="variable">variable</option>
+                <option value="all">Precio: todos</option>
+                <option value="fixed">{getFriendlyPricingModeLabel("fixed")}</option>
+                <option value="from">{getFriendlyPricingModeLabel("from")}</option>
+                <option value="variable">{getFriendlyPricingModeLabel("variable")}</option>
               </select>
 
               <select
@@ -2532,32 +2695,43 @@ export function ProductsPageClient() {
                 }
                 className="h-10 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
               >
-                <option value="none">Mas filtros</option>
+                <option value="none">Más filtros</option>
                 <option value="integrity_alerts">Solo alertas de integridad</option>
-                <option value="high_boost">Solo search_boost alto</option>
+                <option value="high_boost">Solo alta prioridad de búsqueda</option>
               </select>
             </div>
           </div>
 
           <div>
-            <button
-              type="button"
-              onClick={() => setShowAdvancedSearch((current) => !current)}
-              className="inline-flex items-center gap-2 rounded-full border border-border bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-700 transition hover:bg-slate-50"
-            >
-              Filtros de busqueda avanzada
-              {showAdvancedSearch ? (
-                <ChevronUp className="h-4 w-4" />
-              ) : (
-                <ChevronDown className="h-4 w-4" />
-              )}
-            </button>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedSearch((current) => !current)}
+                className="inline-flex items-center gap-2 rounded-full border border-border bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-700 transition hover:bg-slate-50"
+              >
+                Filtros de búsqueda avanzada
+                {showAdvancedSearch ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+              </button>
+              <label className="relative w-full lg:max-w-[460px]">
+                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Buscar por ID, SKU, nombre, familia, categoría o alias"
+                  className="h-11 w-full rounded-2xl border border-border bg-white pl-11 pr-4 text-sm text-slate-950 outline-none transition focus:border-primary"
+                />
+              </label>
+            </div>
 
             {showAdvancedSearch ? (
               <div className="mt-3 grid gap-3 rounded-2xl border border-border/70 bg-slate-50/70 p-4 sm:grid-cols-2 xl:grid-cols-4">
                 <label className="space-y-2">
                   <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                    category
+                    Categoría
                   </span>
                   <select
                     value={filters.category}
@@ -2577,7 +2751,7 @@ export function ProductsPageClient() {
 
                 <label className="space-y-2">
                   <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                    max_price_crc
+                    {getFriendlyFieldLabel("max_price_crc")}
                   </span>
                   <input
                     value={filters.max_price_crc}
@@ -2592,7 +2766,7 @@ export function ProductsPageClient() {
 
                 <label className="space-y-2">
                   <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                    min_qty
+                    {getFriendlyFieldLabel("min_qty")}
                   </span>
                   <input
                     value={filters.min_qty}
@@ -2607,22 +2781,21 @@ export function ProductsPageClient() {
 
                 <label className="space-y-2">
                   <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                    exact_product_id
+                    {getFriendlyFieldLabel("exact_product_id")}
                   </span>
                   <input
                     value={filters.exact_product_id}
                     onChange={(event) =>
                       setFilters((current) => ({ ...current, exact_product_id: event.target.value }))
                     }
-                    placeholder="Ej: bag_confitero_20x25_std"
+                    placeholder="Ej: SKU exacto del producto"
                     className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                   />
                 </label>
 
                 <div className="sm:col-span-2 xl:col-span-4">
                   <p className="text-xs leading-5 text-muted-foreground">
-                    Los filtros de esta vista se envian al backend real para consulta en
-                    `mwl_products_with_primary_image`.
+                    Los filtros se aplican sobre el catálogo real para mostrar resultados actualizados.
                   </p>
                 </div>
               </div>
@@ -2722,7 +2895,7 @@ export function ProductsPageClient() {
                     <tr className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                       <th className="px-3 py-3">Producto</th>
                       <th className="px-3 py-3">SKU</th>
-                      <th className="px-3 py-3">Categoria / Family</th>
+                      <th className="px-3 py-3">Categoría / Familia</th>
                       <th className="px-3 py-3">Precio</th>
                       <th className="px-3 py-3">Estado</th>
                       <th className="px-3 py-3">Agente</th>
@@ -2819,7 +2992,7 @@ export function ProductsPageClient() {
                       <TableEmptyStateRow
                         colSpan={6}
                         title="No hay productos para este filtro"
-                        description="Ajusta query, category, min_qty o exact_product_id para volver a ver resultados."
+                        description="Ajusta búsqueda, categoría, cantidad mínima o identificador exacto para ver resultados."
                       />
                     ) : null}
                   </tbody>
@@ -2976,7 +3149,7 @@ export function ProductsPageClient() {
                   <div className="min-w-0 space-y-5">
                     <div className="space-y-1">
                       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary/70">
-                        Product detail
+                        Detalle del producto
                       </p>
                       <h3 className="text-xl font-semibold tracking-tight text-slate-950">
                         {selectedProductBase.name}
@@ -2984,7 +3157,7 @@ export function ProductsPageClient() {
                       <p className="text-xs text-muted-foreground">{selectedProductBase.id}</p>
                       {selectedProductBase.ui_created_locally ? (
                         <StatusBadge tone="warning" className="mt-2">
-                          Draft local UI
+                          Borrador local
                         </StatusBadge>
                       ) : null}
                     </div>
@@ -2994,7 +3167,7 @@ export function ProductsPageClient() {
                         <p className="mt-1 text-sm font-medium text-slate-950">{selectedProductBase.sku}</p>
                       </div>
                       <div className="rounded-xl border border-border/70 bg-slate-50/70 p-3">
-                        <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">Categoria / Family</p>
+                        <p className="text-xs uppercase tracking-[0.1em] text-muted-foreground">Categoría / Familia</p>
                         <p className="mt-1 text-sm font-medium text-slate-950">
                           {selectedProductBase.category} / {selectedProductBase.family}
                         </p>
@@ -3022,22 +3195,22 @@ export function ProductsPageClient() {
                       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                         Resumen operativo
                       </p>
-                      <p className="text-sm text-slate-900">{selectedProductBase.summary ?? "Sin summary."}</p>
-                      <p className="text-sm text-slate-700">{selectedProductBase.details ?? "Sin details."}</p>
-                      <p className="text-xs text-muted-foreground">{selectedProductBase.notes ?? "Sin notes."}</p>
+                      <p className="text-sm text-slate-900">{selectedProductBase.summary ?? "Sin resumen."}</p>
+                      <p className="text-sm text-slate-700">{selectedProductBase.details ?? "Sin detalle."}</p>
+                      <p className="text-xs text-muted-foreground">{selectedProductBase.notes ?? "Sin notas."}</p>
                     </div>
 
                     <div className="space-y-2 rounded-2xl border border-border/70 bg-slate-50/70 p-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                        Busqueda y multimedia
+                        Búsqueda y multimedia
                       </p>
                       <p className="text-sm text-slate-800">
-                        aliases: {selectedProductBase.search_meta.alias_entries.length}
+                        Alias: {selectedProductBase.search_meta.alias_entries.length}
                       </p>
                       <p className="text-sm text-slate-800">
-                        search_terms: {selectedProductBase.search_meta.search_terms.length}
+                        Términos de búsqueda: {selectedProductBase.search_meta.search_terms.length}
                       </p>
-                      <p className="text-sm text-slate-800">imagenes: {selectedProductBase.images.length}</p>
+                      <p className="text-sm text-slate-800">Imágenes: {selectedProductBase.images.length}</p>
                     </div>
 
                     <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-slate-50/70 p-3">
@@ -3045,7 +3218,7 @@ export function ProductsPageClient() {
                         Vista solo lectura. Edita desde modal para aplicar cambios de forma controlada.
                       </p>
                       <Button type="button" onClick={openEditModal}>
-                        Editar producto
+                        Editar Producto
                       </Button>
                     </div>
 
@@ -3059,91 +3232,95 @@ export function ProductsPageClient() {
                         }}
                       >
                         <section
-                          className="flex h-[76vh] w-full max-w-4xl flex-col rounded-[30px] border border-white/80 bg-white p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]"
+                          className="flex h-[82vh] w-full max-w-5xl flex-col rounded-[30px] border border-white/80 bg-white p-5 shadow-[0_30px_90px_rgba(15,23,42,0.18)] sm:p-6"
                           onMouseDown={(event) => event.stopPropagation()}
                         >
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="space-y-1">
-                              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary/70">
-                                Editar producto
-                              </p>
-                              <h3 className="text-xl font-semibold tracking-tight text-slate-950">
-                                {selectedProduct?.name}
-                              </h3>
-                              <p className="text-xs text-muted-foreground">{selectedProduct?.id}</p>
-                              <p className="text-xs text-muted-foreground">SKU: {selectedProduct?.sku}</p>
-                            </div>
-                            {selectedPrimaryImageSrc ? (
-                              <div className="relative h-24 w-24 overflow-hidden rounded-2xl border border-border/70 bg-slate-100">
-                                {!thumbnailLoadErrors[`edit-header:${selectedProduct.id}:${selectedPrimaryImageSrc}`] ? (
-                                  <Image
-                                    src={selectedPrimaryImageSrc}
-                                    alt={selectedPrimaryImage.alt_text ?? `Imagen ${selectedProduct.name}`}
-                                    fill
-                                    sizes="96px"
-                                    className="object-cover"
-                                    onError={() =>
-                                      setThumbnailLoadErrors((current) => ({
-                                        ...current,
-                                        [`edit-header:${selectedProduct.id}:${selectedPrimaryImageSrc}`]: true,
-                                      }))
-                                    }
-                                  />
-                                ) : (
-                                  <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                                    <ImageIcon className="h-5 w-5" />
-                                  </div>
-                                )}
+                          <div className="border-b border-border/70 pb-4">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="space-y-1">
+                                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary/70">
+                                  Editar producto
+                                </p>
+                                <h3 className="text-xl font-semibold tracking-tight text-slate-950">
+                                  {selectedProduct?.name}
+                                </h3>
+                                <p className="text-xs text-muted-foreground">{selectedProduct?.id}</p>
+                                <p className="text-xs text-muted-foreground">SKU: {selectedProduct?.sku}</p>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowEditHelpPopup(true)}
+                                  className="text-xs font-semibold text-sky-700 transition hover:text-sky-800"
+                                >
+                                  ¿Necesitas ayuda? Ver guía de edición
+                                </button>
                               </div>
-                            ) : null}
-                          </div>
-
-                          <div className="mt-4 space-y-3">
-                            {editNovaOperationalAssessment ? (
-                              <div className="rounded-2xl border border-border/70 bg-slate-50/80 p-3">
-                                <div className="flex flex-wrap items-center justify-between gap-2">
-                                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70">
-                                    Estado operativo NOVA
-                                  </p>
+                              <div className="flex items-start gap-3">
+                                {editNovaOperationalAssessment ? (
                                   <StatusBadge tone={editNovaOperationalAssessment.statusTone}>
                                     {editNovaOperationalAssessment.statusLabel}
                                   </StatusBadge>
-                                </div>
-                                <p className="mt-2 text-xs text-muted-foreground">
-                                  Search terms activos: {editNovaOperationalAssessment.activeDiscoveryTerms}
-                                </p>
-                                <FeedbackList items={editOperationalFeedback} className="mt-2" />
+                                ) : null}
+                                {selectedPrimaryImageSrc ? (
+                                  <div className="relative h-20 w-20 overflow-hidden rounded-2xl border border-border/70 bg-slate-100">
+                                    {!thumbnailLoadErrors[`edit-header:${selectedProduct.id}:${selectedPrimaryImageSrc}`] ? (
+                                      <Image
+                                        src={selectedPrimaryImageSrc}
+                                        alt={selectedPrimaryImage.alt_text ?? `Imagen ${selectedProduct.name}`}
+                                        fill
+                                        sizes="80px"
+                                        className="object-cover"
+                                        onError={() =>
+                                          setThumbnailLoadErrors((current) => ({
+                                            ...current,
+                                            [`edit-header:${selectedProduct.id}:${selectedPrimaryImageSrc}`]: true,
+                                          }))
+                                        }
+                                      />
+                                    ) : (
+                                      <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                        <ImageIcon className="h-5 w-5" />
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : null}
                               </div>
-                            ) : null}
-
-                          <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-slate-50/70 p-3">
-                            <p className="text-xs text-muted-foreground">
-                              {editNovaContractError ??
-                                (localValidationError
-                                  ? toFriendlyOperationalMessage(localValidationError)
-                                  : null) ??
-                                saveStatusMessage ??
-                                "Cambios locales. Nada se guarda hasta presionar Guardar cambios."}
-                            </p>
-                            <div className="flex items-center gap-2">
-                              <Button type="button" variant="outline" onClick={requestCloseEditModal}>
-                                Cancelar
-                              </Button>
-                              <Button
-                                type="button"
-                                onClick={handleSaveChanges}
-                                disabled={
-                                  !hasPendingChanges ||
-                                  Boolean(localValidationError) ||
-                                  Boolean(editNovaContractError) ||
-                                  isSavingProduct
-                                }
-                              >
-                                {isSavingProduct ? "Guardando..." : "Guardar cambios"}
-                              </Button>
                             </div>
-                          </div>
-                            <FeedbackList items={saveFeedbackItems} />
+                            <div className="mt-3 flex flex-col gap-2 rounded-xl border border-border/70 bg-slate-50/80 p-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="space-y-2">
+                                {editNovaOperationalAssessment ? (
+                                  <p className="text-xs text-muted-foreground">
+                                    Search terms activos: {editNovaOperationalAssessment.activeDiscoveryTerms}
+                                  </p>
+                                ) : null}
+                                <p className="text-xs text-muted-foreground">
+                                  {editNovaContractError ??
+                                    (localValidationError
+                                      ? toFriendlyOperationalMessage(localValidationError)
+                                      : null) ??
+                                    saveStatusMessage ??
+                                    "Cambios locales. Nada se guarda hasta presionar Guardar cambios."}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Button type="button" variant="outline" onClick={requestCloseEditModal}>
+                                  Cancelar
+                                </Button>
+                                <Button
+                                  type="button"
+                                  onClick={handleSaveChanges}
+                                  disabled={
+                                    !hasPendingChanges ||
+                                    Boolean(localValidationError) ||
+                                    Boolean(editNovaContractError) ||
+                                    isSavingProduct
+                                  }
+                                >
+                                  {isSavingProduct ? "Guardando..." : "Guardar cambios"}
+                                </Button>
+                              </div>
+                            </div>
+                            <FeedbackList items={editOperationalFeedback} className="mt-3" />
+                            <FeedbackList items={saveFeedbackItems} className="mt-2" />
                           </div>
 
                           <div className="mt-4 flex flex-wrap gap-2">
@@ -3165,9 +3342,12 @@ export function ProductsPageClient() {
 
                           <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
                           {catalogTab === "general" ? (
-                            <fieldset className="space-y-3">
+                            <fieldset className="space-y-4">
+                              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70">
+                                Identidad del producto
+                              </p>
                               <label className="space-y-1">
-                                <span className="text-xs text-muted-foreground">name</span>
+                                  <span className="text-xs text-muted-foreground">Nombre</span>
                                 <input
                                   value={selectedProduct?.name ?? ""}
                                   onChange={(event) =>
@@ -3177,66 +3357,64 @@ export function ProductsPageClient() {
                                 />
                               </label>
                               <div className="grid gap-3 sm:grid-cols-2">
-                                <label className="space-y-1">
-                                  <span className="text-xs text-muted-foreground">category</span>
-                                  <input
-                                    value={selectedProduct?.category ?? ""}
-                                    onChange={(event) =>
-                                      updateSelectedProductField("category", event.target.value)
-                                    }
-                                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                                  />
-                                </label>
-                                <label className="space-y-1">
-                                  <span className="text-xs text-muted-foreground">family</span>
-                                  <input
-                                    value={selectedProduct?.family ?? ""}
-                                    onChange={(event) =>
-                                      updateSelectedProductField("family", event.target.value)
-                                    }
-                                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                                  />
-                                </label>
+                                <SuggestionInput
+                                  label="Categoría"
+                                  value={selectedProduct?.category ?? ""}
+                                  options={categoryOptions}
+                                  createOptionLabel="Crear categoría"
+                                  onChange={(nextValue) =>
+                                    updateSelectedProductField("category", nextValue)
+                                  }
+                                />
+                                <SuggestionInput
+                                  label="Familia"
+                                  value={selectedProduct?.family ?? ""}
+                                  options={familyOptions}
+                                  createOptionLabel="Crear familia"
+                                  onChange={(nextValue) =>
+                                    updateSelectedProductField("family", nextValue)
+                                  }
+                                />
                               </div>
                               <div className="grid gap-3 sm:grid-cols-2">
+                                <SuggestionInput
+                                  label={getFriendlyFieldLabel("variant_label")}
+                                  value={selectedProduct?.variant_label ?? ""}
+                                  options={variantOptions}
+                                  createOptionLabel="Crear variante"
+                                  onChange={(nextValue) =>
+                                    updateSelectedProductField(
+                                      "variant_label",
+                                      nextValue.trim() ? nextValue : null,
+                                    )
+                                  }
+                                />
+                                <SuggestionInput
+                                  label={getFriendlyFieldLabel("size_label")}
+                                  value={selectedProduct?.size_label ?? ""}
+                                  options={sizeOptions}
+                                  createOptionLabel="Crear tamaño"
+                                  onChange={(nextValue) =>
+                                    updateSelectedProductField(
+                                      "size_label",
+                                      nextValue.trim() ? nextValue : null,
+                                    )
+                                  }
+                                />
+                                <SuggestionInput
+                                  label="Material"
+                                  value={selectedProduct?.material ?? ""}
+                                  options={materialOptions}
+                                  createOptionLabel="Crear material"
+                                  onChange={(nextValue) =>
+                                    updateSelectedProductField(
+                                      "material",
+                                      nextValue.trim() ? nextValue : null,
+                                    )
+                                  }
+                                />
                                 <label className="space-y-1">
-                                  <span className="text-xs text-muted-foreground">variant_label</span>
-                                  <input
-                                    value={selectedProduct?.variant_label ?? ""}
-                                    onChange={(event) =>
-                                      updateSelectedProductField(
-                                        "variant_label",
-                                        event.target.value || null,
-                                      )
-                                    }
-                                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                                  />
-                                </label>
-                                <label className="space-y-1">
-                                  <span className="text-xs text-muted-foreground">size_label</span>
-                                  <input
-                                    value={selectedProduct?.size_label ?? ""}
-                                    onChange={(event) =>
-                                      updateSelectedProductField(
-                                        "size_label",
-                                        event.target.value || null,
-                                      )
-                                    }
-                                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                                  />
-                                </label>
-                                <label className="space-y-1">
-                                  <span className="text-xs text-muted-foreground">material</span>
-                                  <input
-                                    value={selectedProduct?.material ?? ""}
-                                    onChange={(event) =>
-                                      updateSelectedProductField("material", event.target.value || null)
-                                    }
-                                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                                  />
-                                </label>
-                                <label className="space-y-1">
-                                  <span className="text-xs text-muted-foreground">base_color</span>
+                                  <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("base_color")}</span>
                                   <input
                                     value={selectedProduct?.base_color ?? ""}
                                     onChange={(event) =>
@@ -3246,8 +3424,11 @@ export function ProductsPageClient() {
                                   />
                                 </label>
                               </div>
+                              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70">
+                                Contenido para NOVA
+                              </p>
                               <label className="space-y-1">
-                                <span className="text-xs text-muted-foreground">summary</span>
+                                <span className="text-xs text-muted-foreground">Resumen</span>
                                 <textarea
                                   value={selectedProduct?.summary ?? ""}
                                   onChange={(event) =>
@@ -3258,20 +3439,20 @@ export function ProductsPageClient() {
                                 />
                               </label>
                               <label className="space-y-1">
-                                <span className="text-xs text-muted-foreground">details</span>
+                                <span className="text-xs text-muted-foreground">Detalle</span>
                                 <textarea
                                   value={selectedProduct?.details ?? ""}
                                   onChange={(event) =>
                                     updateSelectedProductField("details", event.target.value || null)
                                   }
-                                  rows={3}
+                                  rows={2}
                                   className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
                                 />
                               </label>
-                              <div className="space-y-2 rounded-2xl border border-border/70 bg-slate-50/80 p-3">
+                              <div className="space-y-2 rounded-xl border border-border/70 bg-slate-50/70 p-3">
                                 <div className="flex items-center justify-between gap-2">
                                   <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                                    Search terms para NOVA
+                                    Términos de búsqueda para NOVA
                                   </p>
                                   <StatusBadge tone="info">
                                     {getActiveDiscoveryTerms(selectedProduct).length} activos
@@ -3286,7 +3467,7 @@ export function ProductsPageClient() {
                                         term: event.target.value,
                                       }))
                                     }
-                                    placeholder="Agregar search term"
+                                    placeholder="Agregar término de búsqueda"
                                     className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                                   />
                                   <Button
@@ -3317,13 +3498,13 @@ export function ProductsPageClient() {
                                     ))
                                   ) : (
                                     <p className="text-xs text-muted-foreground">
-                                      Sin search terms. Agrega al menos uno para mantener publicable en NOVA.
+                                      Sin términos de búsqueda. Agrega al menos uno para mantener publicable en NOVA.
                                     </p>
                                   )}
                                 </div>
                               </div>
                               <label className="space-y-1">
-                                <span className="text-xs text-muted-foreground">notes</span>
+                                <span className="text-xs text-muted-foreground">Notas</span>
                                 <textarea
                                   value={selectedProduct?.notes ?? ""}
                                   onChange={(event) =>
@@ -3339,7 +3520,7 @@ export function ProductsPageClient() {
                           {catalogTab === "precios" ? (
                       <fieldset className="space-y-3">
                         <label className="space-y-1">
-                          <span className="text-xs text-muted-foreground">pricing_mode</span>
+                          <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("pricing_mode")}</span>
                           <select
                             value={selectedProduct.pricing_mode}
                             onChange={(event) =>
@@ -3350,14 +3531,14 @@ export function ProductsPageClient() {
                             }
                             className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                           >
-                            <option value="fixed">fixed</option>
-                            <option value="from">from</option>
-                            <option value="variable">variable</option>
+                            <option value="fixed">{getFriendlyPricingModeLabel("fixed")}</option>
+                            <option value="from">{getFriendlyPricingModeLabel("from")}</option>
+                            <option value="variable">{getFriendlyPricingModeLabel("variable")}</option>
                           </select>
                         </label>
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">price_crc</span>
+                            <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("price_crc")}</span>
                             <input
                               value={selectedProduct.price_crc ?? ""}
                               onChange={(event) =>
@@ -3371,7 +3552,7 @@ export function ProductsPageClient() {
                             />
                           </label>
                           <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">price_from_crc</span>
+                            <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("price_from_crc")}</span>
                             <input
                               value={selectedProduct.price_from_crc ?? ""}
                               onChange={(event) =>
@@ -3385,7 +3566,7 @@ export function ProductsPageClient() {
                             />
                           </label>
                           <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">min_qty</span>
+                            <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("min_qty")}</span>
                             <input
                               value={selectedProduct.min_qty ?? ""}
                               onChange={(event) =>
@@ -3399,7 +3580,7 @@ export function ProductsPageClient() {
                             />
                           </label>
                           <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">discount_visibility</span>
+                            <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("discount_visibility")}</span>
                             <select
                               value={selectedProduct.discount_visibility}
                               onChange={(event) =>
@@ -3408,14 +3589,15 @@ export function ProductsPageClient() {
                                   event.target.value as ProductDetail["discount_visibility"],
                                 )
                               }
+                              disabled={!selectedProduct.is_discountable}
                               className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             >
-                              <option value="never">never</option>
+                              <option value="never">{getFriendlyDiscountVisibilityLabel("never")}</option>
                               <option value="only_if_customer_requests">
-                                only_if_customer_requests
+                                {getFriendlyDiscountVisibilityLabel("only_if_customer_requests")}
                               </option>
-                              <option value="internal_only">internal_only</option>
-                              <option value="always">always</option>
+                              <option value="internal_only">{getFriendlyDiscountVisibilityLabel("internal_only")}</option>
+                              <option value="always">{getFriendlyDiscountVisibilityLabel("always")}</option>
                             </select>
                           </label>
                         </div>
@@ -3424,14 +3606,23 @@ export function ProductsPageClient() {
                             <input
                               type="checkbox"
                               checked={selectedProduct.is_discountable}
-                              onChange={(event) =>
-                                updateSelectedProductField(
-                                  "is_discountable",
-                                  event.target.checked,
-                                )
-                              }
+                              onChange={(event) => {
+                                setEditDraft((current) =>
+                                  current
+                                    ? {
+                                        ...current,
+                                        is_discountable: event.target.checked,
+                                        discount_visibility: event.target.checked
+                                          ? current.discount_visibility
+                                          : "never",
+                                      }
+                                    : current,
+                                );
+                                setSaveStatusMessage(null);
+                                setSaveFeedbackItems([]);
+                              }}
                             />
-                            is_discountable
+                            {getFriendlyFieldLabel("is_discountable")}
                           </label>
                           <label className="inline-flex items-center gap-2 text-sm text-slate-800">
                             <input
@@ -3441,7 +3632,7 @@ export function ProductsPageClient() {
                                 updateSelectedProductField("is_premium", event.target.checked)
                               }
                             />
-                            is_premium
+                            Es premium
                           </label>
                           <label className="inline-flex items-center gap-2 text-sm text-slate-800">
                             <input
@@ -3451,7 +3642,7 @@ export function ProductsPageClient() {
                                 updateSelectedProductField("is_full_color", event.target.checked)
                               }
                             />
-                            is_full_color
+                            Impresión a color completo
                           </label>
                         </div>
                       </fieldset>
@@ -3461,7 +3652,7 @@ export function ProductsPageClient() {
                       <fieldset className="min-w-0 space-y-3">
                         <div className="rounded-2xl border border-border/70 bg-slate-50/80 p-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                            aliases
+                            Alias
                           </p>
                           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                             <input
@@ -3500,14 +3691,14 @@ export function ProductsPageClient() {
                                 </div>
                               ))
                             ) : (
-                              <p className="text-sm text-muted-foreground">Sin aliases cargados.</p>
+                              <p className="text-sm text-muted-foreground">Sin alias registrados.</p>
                             )}
                           </div>
                         </div>
 
                         <div className="rounded-2xl border border-border/70 bg-slate-50/80 p-3">
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                            search terms
+                            {getFriendlyFieldLabel("search_terms")}
                           </p>
                           <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-2">
                             <input
@@ -3518,7 +3709,7 @@ export function ProductsPageClient() {
                                   term: event.target.value,
                                 }))
                               }
-                              placeholder="term"
+                              placeholder="Término"
                               className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             />
                             <input
@@ -3529,7 +3720,7 @@ export function ProductsPageClient() {
                                   priority: event.target.value,
                                 }))
                               }
-                              placeholder="priority"
+                              placeholder="Prioridad"
                               inputMode="numeric"
                               className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             />
@@ -3593,7 +3784,7 @@ export function ProductsPageClient() {
                                           void handleUpdateSearchTerm(term.id, { notes: notes || null });
                                         }
                                       }}
-                                      placeholder="Sin notas. Agrega contexto opcional para este termino."
+                                      placeholder="Sin notas. Agrega contexto opcional para este término."
                                       className="h-9 w-full min-w-0 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
                                     />
                                     <label className="inline-flex items-center gap-2 text-xs">
@@ -3606,7 +3797,7 @@ export function ProductsPageClient() {
                                           })
                                         }
                                       />
-                                      activo
+                                      Activo
                                     </label>
                                     <Button
                                       type="button"
@@ -3621,14 +3812,14 @@ export function ProductsPageClient() {
                                 </div>
                               ))
                             ) : (
-                              <p className="text-muted-foreground">Sin search_terms del producto.</p>
+                              <p className="text-muted-foreground">Sin términos de búsqueda del producto.</p>
                             )}
                           </div>
                         </div>
 
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">search_boost</span>
+                            <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("search_boost")}</span>
                             <input
                               value={selectedProduct.search_boost}
                               onChange={(event) =>
@@ -3642,7 +3833,7 @@ export function ProductsPageClient() {
                             />
                           </label>
                           <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">source_type</span>
+                            <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("source_type")}</span>
                             <input
                               value={selectedProduct.source_type}
                               readOnly
@@ -3652,7 +3843,7 @@ export function ProductsPageClient() {
                         </div>
 
                         <label className="space-y-1">
-                          <span className="text-xs text-muted-foreground">source_ref</span>
+                          <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("source_ref")}</span>
                           <input
                             value={selectedProduct.source_ref ?? ""}
                             readOnly
@@ -3662,18 +3853,18 @@ export function ProductsPageClient() {
 
                         <div className="flex flex-wrap gap-2">
                           <StatusBadge tone={selectedProduct.search_meta.exact_match ? "success" : "neutral"}>
-                            exact_match: {selectedProduct.search_meta.exact_match ? "true" : "false"}
+                            {getFriendlyFieldLabel("exact_match")}: {selectedProduct.search_meta.exact_match ? "Sí" : "No"}
                           </StatusBadge>
                           <StatusBadge tone={selectedProduct.search_meta.direct_match ? "info" : "neutral"}>
-                            direct_match: {selectedProduct.search_meta.direct_match ? "true" : "false"}
+                            {getFriendlyFieldLabel("direct_match")}: {selectedProduct.search_meta.direct_match ? "Sí" : "No"}
                           </StatusBadge>
-                          <StatusBadge>match_quality: {selectedProduct.search_meta.match_quality}</StatusBadge>
-                          <StatusBadge>score: {selectedProduct.search_meta.score.toFixed(2)}</StatusBadge>
+                          <StatusBadge>{getFriendlyFieldLabel("match_quality")}: {selectedProduct.search_meta.match_quality}</StatusBadge>
+                          <StatusBadge>Puntaje: {selectedProduct.search_meta.score.toFixed(2)}</StatusBadge>
                         </div>
 
                         <p className="text-xs text-muted-foreground">
                           {searchMetaMessage ??
-                            "Cambios de aliases/search_terms persisten en tablas reales y refrescan el indice de busqueda."}
+                            "Los cambios en alias y términos de búsqueda se guardan en los datos reales y actualizan el índice."}
                         </p>
                       </fieldset>
                     ) : null}
@@ -3682,19 +3873,19 @@ export function ProductsPageClient() {
                       <div className="min-w-0 space-y-3">
                         <div className="rounded-2xl border border-border/70 bg-slate-50 p-4">
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                            Primary image
+                            Imagen principal
                           </p>
                           {selectedProduct.search_meta.storage_bucket &&
                           selectedProduct.search_meta.storage_path ? (
                             <div className="mt-3 space-y-1 text-sm text-slate-800">
                               <p className="break-all">
-                                primary_image_bucket: {selectedProduct.search_meta.storage_bucket}
+                                {getFriendlyFieldLabel("primary_image_bucket")}: {selectedProduct.search_meta.storage_bucket}
                               </p>
                               <p className="break-all">
-                                primary_image_path: {selectedProduct.search_meta.storage_path}
+                                {getFriendlyFieldLabel("primary_image_path")}: {selectedProduct.search_meta.storage_path}
                               </p>
                               <p className="break-all">
-                                primary_image_alt: {selectedProduct.search_meta.alt_text ?? "Sin alt_text"}
+                                {getFriendlyFieldLabel("primary_image_alt")}: {selectedProduct.search_meta.alt_text ?? "Sin texto alternativo"}
                               </p>
                             </div>
                           ) : (
@@ -3703,7 +3894,7 @@ export function ProductsPageClient() {
                         </div>
                         <div className="rounded-2xl border border-border/70 bg-slate-50 p-4">
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                            mwl_product_images
+                            Imágenes del producto
                           </p>
                           <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
                             <input
@@ -3714,7 +3905,7 @@ export function ProductsPageClient() {
                                   storage_bucket: event.target.value,
                                 }))
                               }
-                              placeholder="bucket"
+                              placeholder={getFriendlyFieldLabel("storage_bucket")}
                               className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             />
                             <input
@@ -3725,7 +3916,7 @@ export function ProductsPageClient() {
                                   storage_path: event.target.value,
                                 }))
                               }
-                              placeholder="storage_path"
+                              placeholder={getFriendlyFieldLabel("storage_path")}
                               className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             />
                             <input
@@ -3736,7 +3927,7 @@ export function ProductsPageClient() {
                                   alt_text: event.target.value,
                                 }))
                               }
-                              placeholder="alt_text"
+                              placeholder={getFriendlyFieldLabel("alt_text")}
                               className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             />
                             <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
@@ -3748,7 +3939,7 @@ export function ProductsPageClient() {
                                     sort_order: event.target.value,
                                   }))
                                 }
-                                placeholder="sort"
+                                placeholder={getFriendlyFieldLabel("sort_order")}
                                 inputMode="numeric"
                                 className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                               />
@@ -3774,7 +3965,7 @@ export function ProductsPageClient() {
                                 }))
                               }
                             />
-                            marcar como primaria
+                            Marcar como principal
                           </label>
                           <div className="mt-3 space-y-2 text-sm">
                             {selectedProduct.images.length > 0 ? (
@@ -3815,7 +4006,7 @@ export function ProductsPageClient() {
                                           void handleUpdateImageAlt(image.id, nextAlt);
                                         }
                                       }}
-                                      placeholder="alt_text"
+                                      placeholder={getFriendlyFieldLabel("alt_text")}
                                       className="h-9 w-full min-w-0 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
                                     />
                                     <input
@@ -3827,12 +4018,12 @@ export function ProductsPageClient() {
                                         }
                                       }}
                                       inputMode="numeric"
-                                      placeholder="sort_order"
+                                      placeholder={getFriendlyFieldLabel("sort_order")}
                                       className="h-9 w-full min-w-0 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
                                     />
                                   </div>
                                   <p className="mt-1 text-xs text-muted-foreground">
-                                    {image.is_primary ? "primary" : "secondary"} · creado{" "}
+                                    {image.is_primary ? "principal" : "secundaria"} · creada{" "}
                                     {formatDateTime(image.created_at)}
                                   </p>
                                 </div>
@@ -3844,7 +4035,7 @@ export function ProductsPageClient() {
                         </div>
                         <p className="text-xs text-muted-foreground">
                           {searchMetaMessage ??
-                            "Si eliminas la primaria y quedan imagenes, se promueve automaticamente la de menor sort_order."}
+                            "Si eliminas la principal y quedan imágenes, se promueve automáticamente la de menor orden de visualización."}
                         </p>
                       </div>
                     ) : null}
@@ -3860,7 +4051,7 @@ export function ProductsPageClient() {
                                 updateSelectedProductField("allows_name", event.target.checked)
                               }
                             />
-                            allows_name
+                            {getFriendlyFieldLabel("allows_name")}
                           </label>
                           <label className="inline-flex items-center gap-2 text-sm text-slate-800">
                             <input
@@ -3873,7 +4064,7 @@ export function ProductsPageClient() {
                                 )
                               }
                             />
-                            extra_adjustment_has_cost
+                            {getFriendlyFieldLabel("extra_adjustment_has_cost")}
                           </label>
                           <label className="inline-flex items-center gap-2 text-sm text-slate-800">
                             <input
@@ -3886,7 +4077,7 @@ export function ProductsPageClient() {
                                 )
                               }
                             />
-                            requires_design_approval
+                            {getFriendlyFieldLabel("requires_design_approval")}
                           </label>
                           <label className="inline-flex items-center gap-2 text-sm text-slate-800">
                             <input
@@ -3896,7 +4087,7 @@ export function ProductsPageClient() {
                                 updateSelectedProductField("is_active", event.target.checked)
                               }
                             />
-                            is_active
+                            {getFriendlyFieldLabel("is_active")}
                           </label>
                           <label className="inline-flex items-center gap-2 text-sm text-slate-800">
                             <input
@@ -3909,13 +4100,13 @@ export function ProductsPageClient() {
                                 )
                               }
                             />
-                            is_agent_visible
+                            {getFriendlyFieldLabel("is_agent_visible")}
                           </label>
                         </div>
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="space-y-1">
                             <span className="text-xs text-muted-foreground">
-                              includes_design_adjustment_count
+                              {getFriendlyFieldLabel("includes_design_adjustment_count")}
                             </span>
                             <input
                               value={selectedProduct.includes_design_adjustment_count}
@@ -3930,7 +4121,7 @@ export function ProductsPageClient() {
                             />
                           </label>
                           <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">sort_order</span>
+                            <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("sort_order")}</span>
                             <input
                               value={selectedProduct.sort_order}
                               onChange={(event) =>
@@ -3976,7 +4167,7 @@ export function ProductsPageClient() {
                               onChange={(event) => setSkuControlEnabled(event.target.checked)}
                               disabled
                             />
-                            Habilitar edicion controlada de sku
+                            Habilitar edición controlada de SKU
                           </label>
                           <div className="mt-3 flex gap-2">
                             <input
@@ -3997,7 +4188,7 @@ export function ProductsPageClient() {
                         </div>
 
                         <label className="space-y-1">
-                          <span className="text-xs text-muted-foreground">source_type</span>
+                          <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("source_type")}</span>
                           <input
                             value={selectedProduct.source_type}
                             readOnly
@@ -4005,7 +4196,7 @@ export function ProductsPageClient() {
                           />
                         </label>
                         <label className="space-y-1">
-                          <span className="text-xs text-muted-foreground">source_ref</span>
+                          <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("source_ref")}</span>
                           <input
                             value={selectedProduct.source_ref ?? ""}
                             readOnly
@@ -4013,7 +4204,7 @@ export function ProductsPageClient() {
                           />
                         </label>
                         <label className="space-y-1">
-                          <span className="text-xs text-muted-foreground">updated_at</span>
+                          <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("updated_at")}</span>
                           <input
                             value={formatDateTime(selectedProduct.updated_at)}
                             readOnly
@@ -4023,6 +4214,77 @@ export function ProductsPageClient() {
                       </div>
                           ) : null}
                           </div>
+
+                          {showEditHelpPopup ? (
+                            <div
+                              className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 p-4"
+                              onClick={(event) => {
+                                if (event.target === event.currentTarget) {
+                                  setShowEditHelpPopup(false);
+                                }
+                              }}
+                            >
+                              <section className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_24px_48px_-24px_rgba(2,6,23,0.35)]">
+                                <div className="flex items-center justify-between gap-3">
+                                  <h4 className="text-lg font-semibold text-slate-900">
+                                    Guía: Editar Producto ({catalogTabs.find((tab) => tab.id === catalogTab)?.label ?? "General"})
+                                  </h4>
+                                  <Button type="button" variant="outline" size="sm" onClick={() => setShowEditHelpPopup(false)}>
+                                    Cerrar
+                                  </Button>
+                                </div>
+                                <div className="mt-4 space-y-3 text-sm text-slate-700">
+                                  {catalogTab === "general" ? (
+                                    <>
+                                      <p><strong>Nombre, familia y categoría:</strong> Usa valores comerciales claros y consistentes para facilitar búsqueda y reportes.</p>
+                                      <p><strong>Variante y tamaño:</strong> Agrega solo diferenciadores reales del producto; si no aplica, déjalo vacío.</p>
+                                      <p><strong>Resumen:</strong> Es clave para publicación NOVA; escribe un texto corto, útil y directo.</p>
+                                      <p><strong>Términos de búsqueda:</strong> Mantén términos relevantes y activos para sostener el descubrimiento del producto.</p>
+                                    </>
+                                  ) : null}
+                                  {catalogTab === "precios" ? (
+                                    <>
+                                      <p><strong>Modalidad de precio:</strong> Precio fijo, precio desde o precio variable según el caso.</p>
+                                      <p><strong>Precio y precio desde:</strong> Completa según el modo elegido para evitar inconsistencias comerciales.</p>
+                                      <p><strong>Cantidad mínima:</strong> Define el mínimo real de venta para evitar cotizaciones inválidas.</p>
+                                      <p><strong>Visibilidad de descuento y permiso de descuento:</strong> Alinea esta combinación con la política comercial del producto.</p>
+                                    </>
+                                  ) : null}
+                                  {catalogTab === "busqueda" ? (
+                                    <>
+                                      <p><strong>Alias:</strong> Agrega variaciones reales del nombre que los clientes sí usan.</p>
+                                      <p><strong>Términos de búsqueda:</strong> Prioriza términos específicos y activos para mejorar el posicionamiento.</p>
+                                      <p><strong>Prioridad:</strong> Menor número implica más prioridad en el motor de búsqueda.</p>
+                                      <p><strong>Prioridad de búsqueda:</strong> Úsala solo cuando exista una justificación comercial.</p>
+                                    </>
+                                  ) : null}
+                                  {catalogTab === "multimedia" ? (
+                                    <>
+                                      <p><strong>Imagen principal:</strong> Mantén una imagen principal válida para evitar respuestas sin contexto visual.</p>
+                                      <p><strong>Contenedor y ruta del archivo:</strong> Deben apuntar a archivos existentes en el repositorio de imágenes.</p>
+                                      <p><strong>Texto alternativo:</strong> Describe la imagen de forma breve para mejorar el contexto del catálogo.</p>
+                                      <p><strong>Orden de visualización:</strong> Ordena de menor a mayor para controlar prioridad visual.</p>
+                                    </>
+                                  ) : null}
+                                  {catalogTab === "reglas" ? (
+                                    <>
+                                      <p><strong>Activo:</strong> Si está inactivo, no debería operar comercialmente.</p>
+                                      <p><strong>Visible para el agente:</strong> Actívalo solo cuando el producto esté listo para el agente.</p>
+                                      <p><strong>Personalización y aprobación de diseño:</strong> Ajusta estas opciones según el flujo real.</p>
+                                      <p><strong>Orden de visualización:</strong> Úsalo para priorizar cuando compita con productos similares.</p>
+                                    </>
+                                  ) : null}
+                                  {catalogTab === "seguridad" ? (
+                                    <>
+                                      <p><strong>ID y campos de origen:</strong> Son campos de trazabilidad; se mantienen de solo lectura.</p>
+                                      <p><strong>sku:</strong> Su edición controlada está deshabilitada para proteger integridad operativa.</p>
+                                      <p><strong>Última actualización:</strong> Permite verificar cuándo se aplicó el último cambio.</p>
+                                    </>
+                                  ) : null}
+                                </div>
+                              </section>
+                            </div>
+                          ) : null}
                         </section>
                       </div>
                     ) : null}
@@ -4186,360 +4448,601 @@ export function ProductsPageClient() {
 
       {isCreateOpen ? (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 backdrop-blur-[2px]"
+          className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/30 px-4 py-6 backdrop-blur-[2px]"
           role="dialog"
           aria-modal="true"
         >
-          <div className="w-full max-w-2xl rounded-[30px] border border-white/80 bg-white p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
-            <div className="space-y-1">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary/70">
-                NUEVO PRODUCTO
-              </p>
-              <h3 className="text-2xl font-semibold tracking-tight text-slate-950">
-                Agrega un producto a tu catálogo
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                Flujo de publicación NOVA: crea interno o publica al agente solo cuando cumple el contrato.
-              </p>
+          <div className="w-full max-w-[1240px] rounded-[30px] border border-white/80 bg-white p-5 shadow-[0_30px_90px_rgba(15,23,42,0.18)] sm:p-6">
+            <div className="border-b border-border/70 pb-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary/80">
+                    Nuevo producto
+                  </p>
+                  <h3 className="text-2xl font-semibold tracking-tight text-slate-950">
+                    Agrega un producto a tu catálogo
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Flujo NOVA: crea interno o publica solo cuando cumple contrato.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCreateHelpPopup(true)}
+                  className="text-xs font-semibold text-sky-700 transition hover:text-sky-800"
+                >
+                  ¿Necesitas ayuda?
+                </button>
+              </div>
             </div>
 
-            <div className="mt-5 max-h-[64vh] space-y-5 overflow-y-auto pr-1">
-              <section className="rounded-2xl border border-border/70 bg-slate-50/70 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70">
-                    Estado de Preparacion
-                  </p>
+            <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(0,2.05fr)_minmax(320px,1fr)] lg:items-stretch">
+              <div className="space-y-4 pr-1">
+                <section className="space-y-3 rounded-2xl border border-border/70 bg-slate-50/55 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/80">
+                      1. Identidad del producto
+                    </p>
+                    <StatusBadge tone={createIdentitySectionReady ? "success" : "neutral"}>
+                      {createIdentitySectionReady ? "Completo" : "Pendiente"}
+                    </StatusBadge>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="space-y-1">
+                      <span className="text-xs text-muted-foreground">Nombre del producto</span>
+                      <input
+                        value={createDraft.name}
+                        onChange={(event) =>
+                          setCreateDraft((current) => ({ ...current, name: event.target.value }))
+                        }
+                        className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs text-muted-foreground">SKU (autogenerado)</span>
+                      <div className="flex h-10 w-full items-center rounded-xl border border-border bg-slate-100 px-3 text-sm font-medium text-slate-700">
+                        {createSkuPreviewValue || "Se genera al seleccionar categoría y familia"}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        Generado automáticamente según tu selección.
+                      </p>
+                      {createSkuPreviewWarning ? (
+                        <p className="text-xs text-amber-700">{createSkuPreviewWarning}</p>
+                      ) : null}
+                    </label>
+                    <SuggestionInput
+                      label="Categoría"
+                      value={createDraft.category}
+                      options={categoryOptions}
+                      placeholder="Ej. Hogar, Ropa"
+                      createOptionLabel="Crear categoría"
+                      onChange={(nextValue) =>
+                        setCreateDraft((current) => ({ ...current, category: nextValue }))
+                      }
+                    />
+                    <SuggestionInput
+                      label="Familia"
+                      value={createDraft.family}
+                      options={familyOptions}
+                      placeholder="Ej. Bolsos escolares, Caminata"
+                      createOptionLabel="Crear familia"
+                      onChange={(nextValue) =>
+                        setCreateDraft((current) => ({ ...current, family: nextValue }))
+                      }
+                    />
+                    <SuggestionInput
+                      label={getFriendlyFieldLabel("variant_label")}
+                      value={createDraft.variant_label}
+                      options={variantOptions}
+                      placeholder="Ej. premium, escarchado"
+                      createOptionLabel="Crear variante"
+                      onChange={(nextValue) =>
+                        setCreateDraft((current) => ({ ...current, variant_label: nextValue }))
+                      }
+                    />
+                    <SuggestionInput
+                      label={getFriendlyFieldLabel("size_label")}
+                      value={createDraft.size_label}
+                      options={sizeOptions}
+                      placeholder="Ej. 20x25 cm"
+                      createOptionLabel="Crear tamaño"
+                      onChange={(nextValue) =>
+                        setCreateDraft((current) => ({ ...current, size_label: nextValue }))
+                      }
+                    />
+                    <SuggestionInput
+                      label="Material"
+                      value={createDraft.material}
+                      options={materialOptions}
+                      placeholder="Ej. plástico, tela poliester"
+                      createOptionLabel="Crear material"
+                      onChange={(nextValue) =>
+                        setCreateDraft((current) => ({ ...current, material: nextValue }))
+                      }
+                    />
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground">Publicar al agente NOVA</span>
+                      <select
+                        value={createDraft.publication_mode === "nova" ? "true" : "false"}
+                        onChange={(event) =>
+                          setCreateDraft((current) => ({
+                            ...current,
+                            publication_mode: event.target.value === "true" ? "nova" : "internal",
+                          }))
+                        }
+                        className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                        title={
+                          !canPublishCreateDraftToNova
+                            ? "Solo aplica cuando cumple validaciones NOVA"
+                            : undefined
+                        }
+                      >
+                        <option value="false">False</option>
+                        <option value="true" disabled={!canPublishCreateDraftToNova}>
+                          True
+                        </option>
+                      </select>
+                      {!canPublishCreateDraftToNova ? (
+                        <p className="text-xs text-muted-foreground">
+                          Solo aplica cuando cumple validaciones NOVA.
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-3 rounded-2xl border border-border/70 bg-slate-50/55 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/80">
+                      2. Precio y reglas comerciales
+                    </p>
+                    <StatusBadge tone={createPricingSectionReady ? "success" : "neutral"}>
+                      {createPricingSectionReady ? "Completo" : "Pendiente"}
+                    </StatusBadge>
+                  </div>
+                  <div className="grid gap-3 lg:grid-cols-3">
+                    <label className="space-y-1">
+                      <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("pricing_mode")}</span>
+                      <select
+                        value={createDraft.pricing_mode}
+                        onChange={(event) =>
+                          setCreateDraft((current) => ({
+                            ...current,
+                            pricing_mode: event.target.value as ProductPricingMode,
+                          }))
+                        }
+                        className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                      >
+                        <option value="fixed">{getFriendlyPricingModeLabel("fixed")}</option>
+                        <option value="from">{getFriendlyPricingModeLabel("from")}</option>
+                        <option value="variable">{getFriendlyPricingModeLabel("variable")}</option>
+                      </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("price_crc")}</span>
+                      <input
+                        value={
+                          isEditingCreatePriceCrc
+                            ? createDraft.price_crc
+                            : formatDecimalDisplay(createDraft.price_crc)
+                        }
+                        onChange={(event) =>
+                          setCreateDraft((current) => ({
+                            ...current,
+                            price_crc: normalizeDecimalRawInput(event.target.value),
+                          }))
+                        }
+                        onFocus={() => setIsEditingCreatePriceCrc(true)}
+                        onBlur={() => handleCreatePriceBlur("price_crc")}
+                        inputMode="decimal"
+                        disabled={!isCreateFixedPricingMode}
+                        placeholder="Ej. 2 500.00"
+                        className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("price_from_crc")}</span>
+                      <input
+                        value={
+                          isEditingCreatePriceFromCrc
+                            ? createDraft.price_from_crc
+                            : formatDecimalDisplay(createDraft.price_from_crc)
+                        }
+                        onChange={(event) =>
+                          setCreateDraft((current) => ({
+                            ...current,
+                            price_from_crc: normalizeDecimalRawInput(event.target.value),
+                          }))
+                        }
+                        onFocus={() => setIsEditingCreatePriceFromCrc(true)}
+                        onBlur={() => handleCreatePriceBlur("price_from_crc")}
+                        inputMode="decimal"
+                        disabled={!isCreateFromPricingMode}
+                        placeholder="Ej. 15 567.64"
+                        className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                      />
+                    </label>
+                    <div className="space-y-3 lg:col-span-3 lg:space-y-0">
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,220px)_minmax(0,320px)_minmax(0,220px)] lg:items-end">
+                        <label className="space-y-1">
+                          <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("min_qty")}</span>
+                          <input
+                            value={createDraft.min_qty}
+                            onChange={(event) =>
+                              setCreateDraft((current) => ({ ...current, min_qty: event.target.value }))
+                            }
+                            inputMode="numeric"
+                            className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                          />
+                        </label>
+                        <label className="space-y-1 sm:col-span-2 lg:col-span-1">
+                          <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("discount_visibility")}</span>
+                          <select
+                            value={createDraft.discount_visibility}
+                            onChange={(event) =>
+                              setCreateDraft((current) => ({
+                                ...current,
+                                discount_visibility: event.target.value as ProductDiscountVisibility,
+                              }))
+                            }
+                            disabled={!createDraft.is_discountable}
+                            className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary disabled:bg-slate-100"
+                          >
+                            <option value="never">{getFriendlyDiscountVisibilityLabel("never")}</option>
+                            <option value="only_if_customer_requests">
+                              {getFriendlyDiscountVisibilityLabel("only_if_customer_requests")}
+                            </option>
+                            <option value="internal_only">{getFriendlyDiscountVisibilityLabel("internal_only")}</option>
+                            <option value="always">{getFriendlyDiscountVisibilityLabel("always")}</option>
+                          </select>
+                        </label>
+                        <label className="inline-flex h-10 items-center gap-2 rounded-xl border border-border/80 bg-white px-3 text-sm text-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={createDraft.is_discountable}
+                            onChange={(event) =>
+                              setCreateDraft((current) => ({
+                                ...current,
+                                is_discountable: event.target.checked,
+                                discount_visibility: event.target.checked
+                                  ? current.discount_visibility
+                                  : "never",
+                              }))
+                            }
+                          />
+                          {getFriendlyFieldLabel("is_discountable")}
+                        </label>
+                      </div>
+                    </div>
+                    <div className="space-y-2 lg:col-span-3">
+                      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                        <label className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-border/80 bg-white px-3 py-2 text-sm text-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={createDraft.is_active}
+                            onChange={(event) =>
+                              setCreateDraft((current) => ({
+                                ...current,
+                                is_active: event.target.checked,
+                              }))
+                            }
+                          />
+                          {getFriendlyFieldLabel("is_active")}
+                        </label>
+                        <label className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-border/80 bg-white px-3 py-2 text-sm text-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={createDraft.allows_name}
+                            onChange={(event) =>
+                              setCreateDraft((current) => ({ ...current, allows_name: event.target.checked }))
+                            }
+                          />
+                          {getFriendlyFieldLabel("allows_name")}
+                        </label>
+                        <label className="inline-flex items-center gap-2 whitespace-nowrap rounded-xl border border-border/80 bg-white px-3 py-2 text-sm text-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={createDraft.requires_design_approval}
+                            onChange={(event) =>
+                              setCreateDraft((current) => ({
+                                ...current,
+                                requires_design_approval: event.target.checked,
+                              }))
+                            }
+                          />
+                          {getFriendlyFieldLabel("requires_design_approval")}
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-3 rounded-2xl border border-border/70 bg-slate-50/55 p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/80">
+                      3. Contenido para NOVA
+                    </p>
+                    <StatusBadge tone={createNovaContentSectionReady ? "success" : "neutral"}>
+                      {createNovaContentSectionReady ? "Completo" : "Pendiente"}
+                    </StatusBadge>
+                  </div>
+                  <div className="grid gap-3 lg:grid-cols-3">
+                    <label className="space-y-1">
+                      <span className="text-xs text-muted-foreground">Resumen</span>
+                      <textarea
+                        value={createDraft.summary}
+                        onChange={(event) =>
+                          setCreateDraft((current) => ({ ...current, summary: event.target.value }))
+                        }
+                        rows={4}
+                        className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs text-muted-foreground">Detalle</span>
+                      <textarea
+                        value={createDraft.details}
+                        onChange={(event) =>
+                          setCreateDraft((current) => ({ ...current, details: event.target.value }))
+                        }
+                        rows={4}
+                        className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("search_terms")}</span>
+                      <textarea
+                        value={createDraft.search_terms_raw}
+                        onChange={(event) =>
+                          setCreateDraft((current) => ({ ...current, search_terms_raw: event.target.value }))
+                        }
+                        rows={4}
+                        placeholder="Agregar términos separados por coma y presionar Enter"
+                        className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
+                      />
+                    </label>
+                  </div>
+                </section>
+              </div>
+
+              <aside className="space-y-3 lg:sticky lg:top-0 lg:flex lg:h-full lg:flex-col lg:self-stretch">
+                <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
                   <StatusBadge tone={createDraftNovaValidation.isNovaReady ? "success" : "warning"}>
                     {createDraftNovaValidation.isNovaReady ? "Listo para NOVA" : "Incompleto para NOVA"}
                   </StatusBadge>
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Publicar al agente requiere summary, search terms con 3+ caracteres alfanumericos y 1+ letra, estado activo y coherencia de variante.
-                </p>
-              </section>
-
-              <section className="grid gap-4 sm:grid-cols-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70 sm:col-span-2">
-                  Identidad del producto
-                </p>
-                <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">Nombre del producto</span>
-                  <input
-                    value={createDraft.name}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({ ...current, name: event.target.value }))
-                    }
-                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">SKU (autogenerado)</span>
-                  <input
-                    value={createPreviewSku}
-                    readOnly
-                    className="h-10 w-full rounded-xl border border-border bg-slate-100 px-3 text-sm text-slate-700 outline-none"
-                  />
-                </label>
-                <SuggestionInput
-                  label="Family"
-                  value={createDraft.family}
-                  options={familyOptions}
-                  placeholder="Ej. chip_bags, caminata"
-                  createOptionLabel="Crear family"
-                  onChange={(nextValue) =>
-                    setCreateDraft((current) => ({ ...current, family: nextValue }))
-                  }
-                />
-                <SuggestionInput
-                  label="Category"
-                  value={createDraft.category}
-                  options={categoryOptions}
-                  placeholder="Ej. Hogar, Ropa"
-                  createOptionLabel="Crear category"
-                  onChange={(nextValue) =>
-                    setCreateDraft((current) => ({ ...current, category: nextValue }))
-                  }
-                />
-              </section>
-
-              <section className="grid gap-4 sm:grid-cols-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70 sm:col-span-2">
-                  Precio y reglas comerciales
-                </p>
-                <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">pricing_mode</span>
-                  <select
-                    value={createDraft.pricing_mode}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({
-                        ...current,
-                        pricing_mode: event.target.value as ProductPricingMode,
-                      }))
-                    }
-                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                  >
-                    <option value="fixed">fixed</option>
-                    <option value="from">from</option>
-                    <option value="variable">variable</option>
-                  </select>
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">min_qty</span>
-                  <input
-                    value={createDraft.min_qty}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({ ...current, min_qty: event.target.value }))
-                    }
-                    inputMode="numeric"
-                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">price_crc</span>
-                  <input
-                    value={
-                      isEditingCreatePriceCrc
-                        ? createDraft.price_crc
-                        : formatDecimalDisplay(createDraft.price_crc)
-                    }
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({
-                        ...current,
-                        price_crc: normalizeDecimalRawInput(event.target.value),
-                      }))
-                    }
-                    onFocus={() => setIsEditingCreatePriceCrc(true)}
-                    onBlur={() => handleCreatePriceBlur("price_crc")}
-                    inputMode="decimal"
-                    placeholder="Ej. 2 500.00"
-                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">price_from_crc</span>
-                  <input
-                    value={
-                      isEditingCreatePriceFromCrc
-                        ? createDraft.price_from_crc
-                        : formatDecimalDisplay(createDraft.price_from_crc)
-                    }
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({
-                        ...current,
-                        price_from_crc: normalizeDecimalRawInput(event.target.value),
-                      }))
-                    }
-                    onFocus={() => setIsEditingCreatePriceFromCrc(true)}
-                    onBlur={() => handleCreatePriceBlur("price_from_crc")}
-                    inputMode="decimal"
-                    placeholder="Ej. 15 567.64"
-                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                  />
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm text-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={createDraft.is_active}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({
-                        ...current,
-                        is_active: event.target.checked,
-                      }))
-                    }
-                  />
-                  is_active
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm text-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={createDraft.is_discountable}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({
-                        ...current,
-                        is_discountable: event.target.checked,
-                        discount_visibility: event.target.checked
-                          ? current.discount_visibility
-                          : "never",
-                      }))
-                    }
-                  />
-                  is_discountable
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm text-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={createDraft.allows_name}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({ ...current, allows_name: event.target.checked }))
-                    }
-                  />
-                  allows_name
-                </label>
-                <label className="inline-flex items-center gap-2 text-sm text-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={createDraft.requires_design_approval}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({
-                        ...current,
-                        requires_design_approval: event.target.checked,
-                      }))
-                    }
-                  />
-                  requires_design_approval
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">discount_visibility</span>
-                  <select
-                    value={createDraft.discount_visibility}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({
-                        ...current,
-                        discount_visibility: event.target.value as ProductDiscountVisibility,
-                      }))
-                    }
-                    disabled={!createDraft.is_discountable}
-                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary disabled:bg-slate-100"
-                  >
-                    <option value="never">never</option>
-                    <option value="only_if_customer_requests">only_if_customer_requests</option>
-                    <option value="internal_only">internal_only</option>
-                    <option value="always">always</option>
-                  </select>
-                </label>
-              </section>
-
-              <section className="grid gap-4 sm:grid-cols-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70 sm:col-span-2">
-                  Descubrimiento para NOVA
-                </p>
-                <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">variant_label</span>
-                  <input
-                    value={createDraft.variant_label}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({
-                        ...current,
-                        variant_label: event.target.value,
-                      }))
-                    }
-                    placeholder="Ej. rosado, premium, edición navidad"
-                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                  />
-                </label>
-                <label className="space-y-1">
-                  <span className="text-xs text-muted-foreground">size_label</span>
-                  <input
-                    value={createDraft.size_label}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({ ...current, size_label: event.target.value }))
-                    }
-                    placeholder="Ej. 20x25 cm"
-                    className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                  />
-                </label>
-                <label className="space-y-1 sm:col-span-2">
-                  <span className="text-xs text-muted-foreground">summary</span>
-                  <textarea
-                    value={createDraft.summary}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({ ...current, summary: event.target.value }))
-                    }
-                    rows={2}
-                    className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
-                  />
-                </label>
-                <label className="space-y-1 sm:col-span-2">
-                  <span className="text-xs text-muted-foreground">details</span>
-                  <textarea
-                    value={createDraft.details}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({ ...current, details: event.target.value }))
-                    }
-                    rows={3}
-                    className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
-                  />
-                </label>
-                <label className="space-y-1 sm:col-span-2">
-                  <span className="text-xs text-muted-foreground">search terms</span>
-                  <textarea
-                    value={createDraft.search_terms_raw}
-                    onChange={(event) =>
-                      setCreateDraft((current) => ({ ...current, search_terms_raw: event.target.value }))
-                    }
-                    rows={3}
-                    placeholder="Ej. bolso infantil, bolso cumpleaños, bolsito personalizado"
-                    className="w-full rounded-xl border border-border bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-primary"
-                  />
-                </label>
-              </section>
-
-              <section className="space-y-3 rounded-2xl border border-border/70 bg-slate-50/70 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/70">
-                  Publicacion al agente
-                </p>
-                <div className="grid gap-2 sm:grid-cols-2">
+                  <p className="mt-2 text-sm text-slate-700">
+                    Completa los campos requeridos para publicar al agente NOVA.
+                  </p>
                   <button
                     type="button"
-                    onClick={() =>
-                      setCreateDraft((current) => ({ ...current, publication_mode: "internal" }))
-                    }
-                    className={`rounded-xl border px-3 py-2 text-left text-sm transition ${
-                      createDraft.publication_mode === "internal"
-                        ? "border-slate-950 bg-white text-slate-950"
-                        : "border-border bg-white text-slate-700 hover:bg-slate-100"
-                    }`}
+                    onClick={() => setShowCreateDetailsPopup(true)}
+                    className="mt-2 text-sm font-semibold text-sky-700 transition hover:text-sky-800"
                   >
-                    Guardar como interno
+                    Ver detalles
                   </button>
+                </section>
+
+                <section className="space-y-3 rounded-2xl border border-border/70 bg-slate-50/80 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary/80">
+                    Estado de publicación NOVA
+                  </p>
+                  {createDraftNovaValidation.blockingIssues.length > 0 ? (
+                    <div className="space-y-2 rounded-xl border border-rose-200 bg-rose-50 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-[0.1em] text-rose-700">
+                        {createDraftNovaValidation.blockingIssues.length} errores bloqueantes
+                      </p>
+                      <ul className="space-y-1 text-xs text-rose-700">
+                        {createDraftNovaValidation.blockingIssues.map((issue) => (
+                          <li key={`create-blocking:${issue}`}>• {toFriendlyOperationalMessage(issue)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
+                      No hay errores bloqueantes.
+                    </div>
+                  )}
+                  <div className="rounded-xl border border-sky-200 bg-sky-50 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.1em] text-sky-700">
+                      Información
+                    </p>
+                    <p className="mt-1 text-xs text-slate-700">
+                      Search terms activos y útiles: {createDraftNovaValidation.usableSearchTerms.length}
+                    </p>
+                  </div>
+                  <div className="space-y-1.5 border-t border-border/60 pt-2 text-sm text-slate-700">
+                    <div className="flex items-center justify-between">
+                      <span>Identidad del producto</span>
+                      <span className={createIdentitySectionReady ? "text-emerald-700" : "text-slate-500"}>
+                        {createIdentitySectionReady ? "Completo" : "Pendiente"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Precio y reglas comerciales</span>
+                      <span className={createPricingSectionReady ? "text-emerald-700" : "text-slate-500"}>
+                        {createPricingSectionReady ? "Completo" : "Pendiente"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Contenido para NOVA</span>
+                      <span className={createNovaContentSectionReady ? "text-emerald-700" : "text-slate-500"}>
+                        {createNovaContentSectionReady ? "Completo" : "Pendiente"}
+                      </span>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
+                  <p className="text-sm font-semibold text-primary">¿Cómo publica NOVA?</p>
+                  <p className="mt-2 text-sm text-slate-700">
+                    El producto se crea primero como interno. Puedes publicarlo al agente NOVA cuando el estado sea &quot;Listo para NOVA&quot;.
+                  </p>
                   <button
                     type="button"
-                    onClick={() =>
-                      setCreateDraft((current) => ({ ...current, publication_mode: "nova" }))
-                    }
-                    className={`rounded-xl border px-3 py-2 text-left text-sm transition ${
-                      createDraft.publication_mode === "nova"
-                        ? "border-slate-950 bg-white text-slate-950"
-                        : "border-border bg-white text-slate-700 hover:bg-slate-100"
-                    }`}
+                    onClick={() => setShowCreateHelpPopup(true)}
+                    className="mt-2 text-sm font-semibold text-sky-700 transition hover:text-sky-800"
                   >
-                    Publicar al agente (NOVA)
+                    Ver guía rápida
                   </button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  `is_agent_visible` se decide por el flujo de publicación: interno lo deja en `false`, publicar lo activa solo si cumple NOVA.
-                </p>
-                <FeedbackList items={createDraftOperationalFeedback} />
-              </section>
+                </section>
 
-              <p className="text-xs text-muted-foreground">
-                {createStatusMessage ??
-                  "El producto se crea primero como interno y, si aplica, se publica al agente al completar validación NOVA."}
-              </p>
-              <FeedbackList items={createFeedbackItems} />
-            </div>
-            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setIsCreateOpen(false);
-                  setCreateStatusMessage(null);
-                  setCreateFeedbackItems([]);
-                }}
-                disabled={isSavingProduct}
-              >
-                Cancelar
-              </Button>
-              <Button type="button" onClick={createLocalProduct} disabled={isSavingProduct}>
-                {isSavingProduct
-                  ? "Creando..."
-                  : createDraft.publication_mode === "nova"
-                    ? "Crear y publicar al agente"
-                    : "Guardar producto interno"}
-              </Button>
+                <section className="space-y-2 rounded-2xl border border-border/70 bg-white p-3 lg:mt-auto lg:flex lg:flex-1 lg:flex-col">
+                  <Button
+                    type="button"
+                    onClick={createLocalProduct}
+                    disabled={isSavingProduct}
+                    className="h-9 w-full text-sm"
+                  >
+                    {isSavingProduct
+                      ? "Creando..."
+                      : createDraft.publication_mode === "nova"
+                        ? "Crear y publicar al agente"
+                        : "Guardar producto interno"}
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Solo se publica cuando el estado está listo.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setIsCreateOpen(false);
+                      setCreateStatusMessage(null);
+                      setCreateFeedbackItems([]);
+                    }}
+                    disabled={isSavingProduct}
+                    className="h-8 w-full text-sm"
+                  >
+                    Cancelar
+                  </Button>
+                  <div className="space-y-2 rounded-xl border border-border/70 bg-slate-50/50 p-2.5 lg:flex-1">
+                    <p className="text-xs text-muted-foreground">
+                      {createStatusMessage ??
+                        "El producto se crea primero como interno y, si aplica, se publica al agente al completar validación NOVA."}
+                    </p>
+                    <FeedbackList items={createFeedbackItems} />
+                  </div>
+                </section>
+              </aside>
             </div>
           </div>
+
+          {showCreateDetailsPopup ? (
+            <div
+              className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 p-4"
+              onClick={(event) => {
+                if (event.target === event.currentTarget) {
+                  setShowCreateDetailsPopup(false);
+                }
+              }}
+            >
+              <section className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_24px_48px_-24px_rgba(2,6,23,0.35)]">
+                <div className="flex items-center justify-between gap-3">
+                  <h4 className="text-lg font-semibold text-slate-900">Detalle del nuevo producto</h4>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setShowCreateDetailsPopup(false)}>
+                    Cerrar
+                  </Button>
+                </div>
+                <div className="mt-4 grid gap-4 text-sm text-slate-700 sm:grid-cols-2">
+                  <div className="space-y-2 rounded-xl border border-border/70 bg-slate-50/60 p-3 sm:col-span-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.1em] text-primary/80">Estado NOVA</p>
+                    <p className="text-sm">
+                      {createDraftNovaValidation.isNovaReady ? "Listo para NOVA" : "Incompleto para NOVA"}
+                    </p>
+                    {createDraftNovaValidation.blockingIssues.length > 0 ? (
+                      <ul className="space-y-1 text-xs text-rose-700">
+                        {createDraftNovaValidation.blockingIssues.map((issue) => (
+                          <li key={`detail-blocking:${issue}`}>• {toFriendlyOperationalMessage(issue)}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-1 rounded-xl border border-border/70 bg-slate-50/60 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.1em] text-primary/80">Identidad</p>
+                    <p><strong>Nombre:</strong> {createDraft.name.trim() || "Sin completar"}</p>
+                    <p><strong>Categoría:</strong> {createDraft.category.trim() || "Sin completar"}</p>
+                    <p><strong>Familia:</strong> {createDraft.family.trim() || "Sin completar"}</p>
+                    <p><strong>Variante:</strong> {createDraft.variant_label.trim() || "No aplica"}</p>
+                    <p><strong>Tamaño:</strong> {createDraft.size_label.trim() || "No aplica"}</p>
+                    <p><strong>Material:</strong> {createDraft.material.trim() || "No aplica"}</p>
+                    <p><strong>ID interno (preview):</strong> {createSkuPreview?.id_preview || "Aún no generado"}</p>
+                    <p><strong>SKU:</strong> {createSkuPreviewValue || "Aún no generado"}</p>
+                    <p><strong>Publicar al agente NOVA:</strong> {createDraft.publication_mode === "nova" ? "True" : "False"}</p>
+                  </div>
+
+                  <div className="space-y-1 rounded-xl border border-border/70 bg-slate-50/60 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.1em] text-primary/80">Precio y reglas</p>
+                    <p><strong>Modalidad:</strong> {getFriendlyPricingModeLabel(createDraft.pricing_mode)}</p>
+                    <p><strong>Precio fijo:</strong> {createDraft.price_crc.trim() || "No aplica"}</p>
+                    <p><strong>Precio desde:</strong> {createDraft.price_from_crc.trim() || "No aplica"}</p>
+                    <p><strong>Cantidad mínima:</strong> {createDraft.min_qty.trim() || "Sin completar"}</p>
+                    <p><strong>Activo:</strong> {createDraft.is_active ? "Sí" : "No"}</p>
+                    <p><strong>Permite descuento:</strong> {createDraft.is_discountable ? "Sí" : "No"}</p>
+                    <p><strong>Visibilidad descuento:</strong> {getFriendlyDiscountVisibilityLabel(createDraft.discount_visibility)}</p>
+                    <p><strong>Permite personalizar nombre:</strong> {createDraft.allows_name ? "Sí" : "No"}</p>
+                    <p><strong>Requiere aprobación de diseño:</strong> {createDraft.requires_design_approval ? "Sí" : "No"}</p>
+                  </div>
+
+                  <div className="space-y-2 rounded-xl border border-border/70 bg-slate-50/60 p-3 sm:col-span-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.1em] text-primary/80">Contenido para NOVA</p>
+                    <p><strong>Resumen:</strong> {createDraft.summary.trim() || "Sin completar"}</p>
+                    <p><strong>Detalle:</strong> {createDraft.details.trim() || "Sin completar"}</p>
+                    <div>
+                      <p><strong>Términos de búsqueda:</strong></p>
+                      {createDraftParsedSearchTerms.length > 0 ? (
+                        <div className="mt-1 flex flex-wrap gap-1.5">
+                          {createDraftParsedSearchTerms.map((term) => (
+                            <span key={`detail-term:${term}`} className="rounded-full border border-border bg-white px-2 py-0.5 text-xs">
+                              {term}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Sin términos cargados.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          ) : null}
+
+          {showCreateHelpPopup ? (
+            <div
+              className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 p-4"
+              onClick={(event) => {
+                if (event.target === event.currentTarget) {
+                  setShowCreateHelpPopup(false);
+                }
+              }}
+            >
+              <section className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_24px_48px_-24px_rgba(2,6,23,0.35)]">
+                <div className="flex items-center justify-between gap-3">
+                  <h4 className="text-lg font-semibold text-slate-900">Guía: Nuevo Producto</h4>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setShowCreateHelpPopup(false)}>
+                    Cerrar
+                  </Button>
+                </div>
+                <div className="mt-4 space-y-3 text-sm text-slate-700">
+                  <p><strong>Identidad (nombre, categoría y familia):</strong> Define la base comercial del producto. Usa nombres claros y consistentes para facilitar búsqueda y reportes.</p>
+                  <p><strong>Variante, tamaño y material:</strong> Agrega diferenciadores reales (ej. color, capacidad, medida o acabado). Si no aplican, déjalos vacíos para evitar ruido.</p>
+                  <p><strong>SKU autogenerado:</strong> El sistema lo crea automáticamente según la información seleccionada. No necesitas editarlo manualmente.</p>
+                  <p><strong>Si el SKU no se puede generar:</strong> Revisa categoría y familia. El formulario mostrará una advertencia hasta que la combinación sea válida.</p>
+                  <p><strong>Modalidad de precio (cómo elegir):</strong> Usa `Precio fijo` cuando siempre vendes al mismo monto (ej. ₡3,500). Usa `Precio desde` cuando tienes un monto base que puede subir según personalización o cantidad (ej. desde ₡2,500). Usa `Precio variable` cuando el precio se define por cotización y no quieres mostrar un monto en el formulario.</p>
+                  <p><strong>Campos de precio en el formulario:</strong> Si eliges `Precio fijo`, se activa solo el campo de precio fijo. Si eliges `Precio desde`, se activa solo el campo de precio desde. Si eliges `Precio variable`, ambos quedan desactivados para evitar confusión.</p>
+                  <p><strong>Cantidad mínima:</strong> Define el mínimo real de venta (ej. 1, 6, 12) según tu operación.</p>
+                  <p><strong>Reglas comerciales:</strong> `Activo` permite operar/publicar. `Permite descuento` habilita la visibilidad del descuento. `Permite personalizar nombre` y `Requiere aprobación de diseño` deben reflejar el flujo real del producto.</p>
+                  <p><strong>Resumen vs Detalle:</strong> `Resumen` es una frase corta de alto impacto (qué es y para qué sirve). `Detalle` amplía la información con características, usos y beneficios.</p>
+                  <p><strong>Ejemplo Resumen:</strong> &quot;Vaso plástico personalizable para eventos y promociones.&quot;</p>
+                  <p><strong>Ejemplo Detalle:</strong> &quot;Vaso de 16oz en plástico resistente, ideal para bebidas frías. Permite personalización con logo y nombre. Recomendado para eventos corporativos y cumpleaños.&quot;</p>
+                  <p><strong>Términos de búsqueda:</strong> Escríbelos separados por coma, como los buscaría un cliente (ej. &quot;vaso personalizado, vaso 16oz, vaso para eventos&quot;).</p>
+                  <p><strong>Ejemplo rápido:</strong> Nombre: &quot;Vaso personalizado 16oz&quot;; categoría: &quot;vasos&quot;; familia: &quot;vasos_personalizados&quot;; modalidad: `Precio fijo`; precio: 3500; mínimo: 6; resumen: &quot;Vaso plástico personalizable para eventos&quot;; términos: &quot;vaso personalizado, vaso 16oz, vaso evento&quot;.</p>
+                  <p><strong>Publicación al agente:</strong> Usa el selector `Publicar al agente NOVA` con valores `True/False`. `True` intenta publicar al agente; `False` guarda como interno.</p>
+                </div>
+              </section>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

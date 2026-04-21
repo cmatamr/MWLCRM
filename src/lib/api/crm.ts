@@ -43,6 +43,8 @@ import type {
   AddProductImageInput,
   ListCatalogProductsParams,
   ProductDetail as CatalogProductDetail,
+  ProductSkuPreviewInput,
+  ProductSkuPreviewResult,
   SaveProductInput,
   SaveProductResult,
   UpdateProductImageInput,
@@ -53,6 +55,12 @@ import type {
   ProductsPerformanceResponse,
   UpdateProductInput,
 } from "@/server/services/products";
+import type {
+  ListPromotionsParams,
+  PromotionDetail,
+  PromotionsListResponse,
+  SavePromotionInput,
+} from "@/server/services/promotions";
 import { buildApiUrl, fetcher, FetcherError, type QueryParams } from "@/lib/fetcher";
 
 type QueryInput = object;
@@ -218,6 +226,17 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
         ...init,
       });
     },
+    previewProductSku(input: ProductSkuPreviewInput, init?: RequestInit) {
+      return get<ProductSkuPreviewResult>("/api/products/sku-preview", undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
     addProductImage(id: string, input: AddProductImageInput, init?: RequestInit) {
       return get<CatalogProductDetail>(`/api/products/${id}/images`, undefined, {
         method: "POST",
@@ -297,6 +316,67 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
     },
     deleteProductSearchTerm(id: string, termId: number, init?: RequestInit) {
       return get<CatalogProductDetail>(`/api/products/${id}/search-terms/${termId}`, undefined, {
+        method: "DELETE",
+        ...init,
+      });
+    },
+    listPromotions(params?: ListPromotionsParams, init?: RequestInit) {
+      return get<PromotionsListResponse>("/api/promotions", {
+        page: params?.page,
+        page_size: params?.pageSize,
+        search: params?.search,
+        promo_type: params?.promoType,
+        status: params?.status,
+        agent_visible: params?.agentVisible,
+        is_enabled: params?.isEnabled,
+      }, init);
+    },
+    getPromotion(id: string, init?: RequestInit) {
+      return get<PromotionDetail>(`/api/promotions/${id}`, undefined, init);
+    },
+    createPromotion(input: SavePromotionInput, init?: RequestInit) {
+      return get<PromotionDetail>("/api/promotions", undefined, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    updatePromotion(id: string, input: SavePromotionInput, init?: RequestInit) {
+      return get<PromotionDetail>(`/api/promotions/${id}`, undefined, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    togglePromotion(id: string, isEnabled: boolean, init?: RequestInit) {
+      return get<PromotionDetail>(`/api/promotions/${id}/toggle`, undefined, {
+        method: "POST",
+        body: JSON.stringify({
+          is_enabled: isEnabled,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          ...init?.headers,
+        },
+        ...init,
+      });
+    },
+    duplicatePromotion(id: string, init?: RequestInit) {
+      return get<PromotionDetail>(`/api/promotions/${id}/duplicate`, undefined, {
+        method: "POST",
+        ...init,
+      });
+    },
+    deletePromotion(id: string, init?: RequestInit) {
+      return get<{ deleted: true; id: string }>(`/api/promotions/${id}`, undefined, {
         method: "DELETE",
         ...init,
       });

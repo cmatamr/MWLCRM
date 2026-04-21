@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { formatLeadStageLabel } from "@/domain/crm/formatters";
 import { formatCalendarDate, formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
+import { getFriendlyFieldLabel } from "@/lib/ui-labels";
 import type { OrderDetail } from "@/server/services/orders/types";
 import { StatusBadge, StatusBadgeFromViewModel } from "@/components/ui/status-badge";
 
@@ -51,10 +52,10 @@ export function OrderSummaryCard({ order }: OrderSummaryCardProps) {
       className: "xl:col-start-2 xl:row-start-3",
     },
     {
-      label: "Lead thread",
+      label: "Hilo comercial",
       value: order.conversation.leadThreadKey,
-      hint: `Stage: ${formatLeadStageLabel(order.conversation.leadStage)}`,
-      meta: `Thread ID: ${order.conversation.id}`,
+      hint: `Etapa: ${formatLeadStageLabel(order.conversation.leadStage)}`,
+      meta: `ID de conversación: ${order.conversation.id}`,
       className: "xl:col-start-3 xl:row-start-3",
     },
   ];
@@ -67,37 +68,37 @@ export function OrderSummaryCard({ order }: OrderSummaryCardProps) {
         {formatCustomerName(order.customer.name)}
       </p>
       <p className="mt-1 text-sm text-muted-foreground">
-        External ID: {order.customer.externalId ?? "No disponible"}
+        {getFriendlyFieldLabel("external_id")}: {order.customer.externalId ?? "No disponible"}
       </p>
       {order.customer.id ? (
         <Link
           href={`/customers/${order.customer.id}`}
           className="mt-3 inline-flex text-sm font-medium text-primary transition-colors hover:text-primary/80"
         >
-          Ver customer
+          Ver cliente
         </Link>
       ) : null}
     </article>
   );
 
   return (
-    <section className="overflow-hidden rounded-[32px] border border-white/70 bg-white shadow-panel">
+    <section className="dashboard-card-3d overflow-hidden">
       <div className="bg-hero-grid p-6 md:p-8">
         <div className="flex flex-col gap-6 xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,200px)_minmax(0,200px)] xl:grid-rows-[auto_auto_auto] xl:items-stretch xl:gap-x-5 xl:gap-y-3">
           <div className="space-y-4 xl:col-start-1 xl:row-span-2 xl:min-w-0">
             <div className="space-y-4">
               <div className="space-y-1">
                 <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
-                  Order overview
+                  Resumen de orden
                 </p>
                 <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-950">
                   {formatOrderShortId(order.id)}
                 </h1>
                 <p className="text-sm text-slate-600">
-                  Source: {order.source} · Legacy status: {order.statusLegacy}
+                  Origen: {order.source} · Estado heredado: {order.statusLegacy}
                 </p>
                 <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                  Order ID: {order.id}
+                  ID de orden: {order.id}
                 </p>
               </div>
 

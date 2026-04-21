@@ -90,7 +90,7 @@ export function CampaignsPageClient() {
   const nextPage = Math.min(data.pagination.totalPages, data.pagination.page + 1);
   const topCards = [
     {
-      label: "Spend",
+      label: "Inversión",
       value: formatCurrencyCRC(data.overview.totalSpendCrc),
     },
     {
@@ -98,11 +98,11 @@ export function CampaignsPageClient() {
       value: data.overview.attributedLeads.toLocaleString("es-CR"),
     },
     {
-      label: "Orders",
+      label: "Órdenes",
       value: data.overview.attributedOrders.toLocaleString("es-CR"),
     },
     {
-      label: "Revenue",
+      label: "Ingresos",
       value: formatCurrencyCRC(data.overview.attributedRevenueCrc),
     },
     {
@@ -115,7 +115,7 @@ export function CampaignsPageClient() {
     <div className="space-y-8">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <PageHeader
-          title="Campaigns"
+          title="Campañas"
           description="Vista agregada de adquisición, revenue y calidad comercial para identificar qué campañas realmente traen negocio."
         />
         <div className="rounded-2xl border border-border/70 bg-white/80 px-4 py-3 text-sm text-muted-foreground">
@@ -146,7 +146,7 @@ export function CampaignsPageClient() {
         >
           <label className="space-y-2">
             <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Search
+              Buscar
             </span>
             <input
               defaultValue={params.search ?? ""}

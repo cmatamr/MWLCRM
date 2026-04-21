@@ -30,6 +30,8 @@ import type {
   ProductSearchTermMeta,
   ProductTopPerformanceEntry,
   ProductPerformanceTrendPoint,
+  ProductSkuPreviewInput,
+  ProductSkuPreviewResult,
   ProductsPerformanceResponse,
   ProductsCatalogResponse,
   SaveProductAliasInput,
@@ -656,7 +658,17 @@ export async function listCatalogProducts(
   const pagination = normalizePagination(params);
   const whereClause = buildBaseWhere(params);
 
-  const [rows, kpiRows, categoryRows, familyRows] = await Promise.all([
+  const [
+    rows,
+    kpiRows,
+    categoryRows,
+    familyRows,
+    variantRows,
+    materialRows,
+    sizeRows,
+    dictionaryRows,
+  ] =
+    await Promise.all([
     db.$queryRaw<ProductListRawRow[]>(Prisma.sql`
       SELECT
         v.id,
@@ -727,10 +739,74 @@ export async function listCatalogProducts(
       ${whereClause}
       ORDER BY v.family ASC
     `),
+    db.$queryRaw<Array<{ variant_label: string }>>(Prisma.sql`
+      SELECT DISTINCT q.variant_label
+      FROM (
+        SELECT v.variant_label
+        ${baseFrom}
+        ${whereClause}
+      ) q
+      WHERE q.variant_label IS NOT NULL
+        AND COALESCE(BTRIM(q.variant_label), '') <> ''
+      ORDER BY q.variant_label ASC
+    `),
+    db.$queryRaw<Array<{ material: string }>>(Prisma.sql`
+      SELECT DISTINCT q.material
+      FROM (
+        SELECT v.material
+        ${baseFrom}
+        ${whereClause}
+      ) q
+      WHERE q.material IS NOT NULL
+        AND COALESCE(BTRIM(q.material), '') <> ''
+      ORDER BY q.material ASC
+    `),
+    db.$queryRaw<Array<{ size_label: string }>>(Prisma.sql`
+      SELECT DISTINCT q.size_label
+      FROM (
+        SELECT v.size_label
+        ${baseFrom}
+        ${whereClause}
+      ) q
+      WHERE q.size_label IS NOT NULL
+        AND COALESCE(BTRIM(q.size_label), '') <> ''
+      ORDER BY q.size_label ASC
+    `),
+    db.$queryRaw<Array<{ dictionary_type: SkuDictionaryType; source_key: string }>>(Prisma.sql`
+      SELECT d.dictionary_type::text AS dictionary_type, d.source_key
+      FROM public.catalog_sku_code_dictionary d
+      WHERE d.scope_type = 'business'
+        AND d.scope_key_normalized = 'mwl'
+        AND d.is_active = TRUE
+        AND d.dictionary_type = ANY(${["category", "family", "variant", "material"]}::text[])
+      ORDER BY d.dictionary_type ASC, d.sort_order ASC, d.source_key ASC
+    `),
   ]);
 
   const kpis = kpiRows[0];
   const total = toCount(kpis?.total);
+
+  const dictionaryCategories = dictionaryRows
+    .filter((row) => row.dictionary_type === "category")
+    .map((row) => row.source_key.trim())
+    .filter(Boolean);
+  const dictionaryFamilies = dictionaryRows
+    .filter((row) => row.dictionary_type === "family")
+    .map((row) => row.source_key.trim())
+    .filter(Boolean);
+  const dictionaryVariants = dictionaryRows
+    .filter((row) => row.dictionary_type === "variant")
+    .map((row) => row.source_key.trim())
+    .filter(Boolean);
+  const dictionaryMaterials = dictionaryRows
+    .filter((row) => row.dictionary_type === "material")
+    .map((row) => row.source_key.trim())
+    .filter(Boolean);
+
+  const uniqueSorted = (values: string[]) =>
+    Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((left, right) =>
+      left.localeCompare(right, "es", { sensitivity: "base" }),
+    );
 
   return {
     items: rows.map(mapCatalogRow),
@@ -740,8 +816,23 @@ export async function listCatalogProducts(
       total,
     }),
     filters: {
-      categories: categoryRows.map((row) => row.category),
-      families: familyRows.map((row) => row.family),
+      categories: uniqueSorted([
+        ...categoryRows.map((row) => row.category),
+        ...dictionaryCategories,
+      ]),
+      families: uniqueSorted([
+        ...familyRows.map((row) => row.family),
+        ...dictionaryFamilies,
+      ]),
+      variants: uniqueSorted([
+        ...variantRows.map((row) => row.variant_label),
+        ...dictionaryVariants,
+      ]),
+      materials: uniqueSorted([
+        ...materialRows.map((row) => row.material),
+        ...dictionaryMaterials,
+      ]),
+      sizes: uniqueSorted(sizeRows.map((row) => row.size_label)),
     },
     kpis: {
       activeProducts: toCount(kpis?.active_products),
@@ -1282,15 +1373,37 @@ async function validateCategoryAndFamilyAgainstCatalog(
 ) {
   const [row] = await db.$queryRaw<Array<{ category_exists: boolean; family_exists: boolean }>>(Prisma.sql`
     SELECT
-      EXISTS(
-        SELECT 1
-        FROM public.mwl_products
-        WHERE LOWER(category) = LOWER(${input.category})
+      (
+        EXISTS(
+          SELECT 1
+          FROM public.mwl_products
+          WHERE LOWER(category) = LOWER(${input.category})
+        )
+        OR EXISTS(
+          SELECT 1
+          FROM public.catalog_sku_code_dictionary d
+          WHERE d.scope_type = 'business'
+            AND d.scope_key_normalized = 'mwl'
+            AND d.dictionary_type = 'category'
+            AND d.is_active = TRUE
+            AND d.source_key_normalized = LOWER(REGEXP_REPLACE(BTRIM(${input.category}), '\\s+', '_', 'g'))
+        )
       ) AS category_exists,
-      EXISTS(
-        SELECT 1
-        FROM public.mwl_products
-        WHERE LOWER(family) = LOWER(${input.family})
+      (
+        EXISTS(
+          SELECT 1
+          FROM public.mwl_products
+          WHERE LOWER(family) = LOWER(${input.family})
+        )
+        OR EXISTS(
+          SELECT 1
+          FROM public.catalog_sku_code_dictionary d
+          WHERE d.scope_type = 'business'
+            AND d.scope_key_normalized = 'mwl'
+            AND d.dictionary_type = 'family'
+            AND d.is_active = TRUE
+            AND d.source_key_normalized = LOWER(REGEXP_REPLACE(BTRIM(${input.family}), '\\s+', '_', 'g'))
+        )
       ) AS family_exists
   `);
 
@@ -1299,60 +1412,316 @@ async function validateCategoryAndFamilyAgainstCatalog(
   }
 
   if (!row.category_exists) {
-    throw badRequest("category must match an existing catalog category.", {
+    throw badRequest("category must match catalog taxonomy (mwl products or sku dictionary).", {
       field: "category",
       category: input.category,
     });
   }
 
   if (!row.family_exists) {
-    throw badRequest("family must match an existing catalog family.", {
+    throw badRequest("family must match catalog taxonomy (mwl products or sku dictionary).", {
       field: "family",
       family: input.family,
     });
   }
 }
 
-function generateProductIdBase(input: {
-  category: string;
-  family: string;
-  name: string;
-  variant_label: string | null | undefined;
-}) {
-  const segments = [
-    normalizeSlugToken(input.category),
-    normalizeSlugToken(input.family),
-    normalizeSlugToken(input.name),
-    normalizeSlugToken(input.variant_label ?? ""),
-  ].filter(Boolean);
+type SkuDictionaryType = "category" | "family" | "variant" | "material";
 
-  const base = segments.join("_").slice(0, 84).replace(/^_+|_+$/g, "");
-  return base || "product";
+function normalizeDictionarySourceKey(value: string | null | undefined): string {
+  return (value ?? "")
+    .trim()
+    .replace(/\s+/g, "_")
+    .toLowerCase();
 }
 
-function normalizeSkuFromId(id: string): string {
-  let token = id.toUpperCase();
-  token = token.replace(/(\d+)_(\d+)(?=X|\b)/g, "$1.$2");
-  token = token.replace(/_/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "");
-  return `MWL-${token}`;
+function normalizeSkuToken(value: string | null | undefined): string {
+  const cleaned = (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9.]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return cleaned;
 }
 
-function generateProductSkuBase(input: {
-  category: string;
-  family: string;
-  name: string;
-  variant_label: string | null | undefined;
-  idBase: string;
-}) {
-  const fallbackSource = generateProductIdBase({
+function normalizeSkuSizeToken(value: string | null | undefined): string {
+  const normalized = (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/cm$/g, "")
+    .trim();
+
+  const upper = normalized.toUpperCase();
+  const protectedOz = upper.replace(/OZ/g, "§");
+  const whitelisted = protectedOz.replace(/[^0-9X.§]+/g, "");
+
+  const dimensionMatch = whitelisted.match(/^\d+(?:\.\d+)?(?:X\d+(?:\.\d+)?)+/);
+  if (dimensionMatch) {
+    return dimensionMatch[0].replace(/X+/g, "X");
+  }
+
+  const ozMatch = whitelisted.match(/^\d+(?:\.\d+)?§$/);
+  if (ozMatch) {
+    return ozMatch[0].replace("§", "OZ");
+  }
+
+  return whitelisted.replace(/§/g, "");
+}
+
+function normalizeProductIdToken(value: string | null | undefined): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+async function resolveSkuDictionaryCodes(
+  db: Prisma.TransactionClient | PrismaClient,
+  input: {
+    category: string;
+    family: string;
+    variant_label?: string | null;
+    material?: string | null;
+  },
+): Promise<{
+  categoryCode: string | null;
+  familyCode: string | null;
+  variantCode: string | null;
+  materialCode: string | null;
+}> {
+  const lookups: Array<{
+    type: SkuDictionaryType;
+    rawValue: string | null | undefined;
+    normalizedValue: string;
+  }> = [
+    {
+      type: "category" as SkuDictionaryType,
+      rawValue: input.category,
+      normalizedValue: normalizeDictionarySourceKey(input.category),
+    },
+    {
+      type: "family" as SkuDictionaryType,
+      rawValue: input.family,
+      normalizedValue: normalizeDictionarySourceKey(input.family),
+    },
+    {
+      type: "variant" as SkuDictionaryType,
+      rawValue: input.variant_label,
+      normalizedValue: normalizeDictionarySourceKey(input.variant_label),
+    },
+    {
+      type: "material" as SkuDictionaryType,
+      rawValue: input.material,
+      normalizedValue: normalizeDictionarySourceKey(input.material),
+    },
+  ].filter((entry) => entry.normalizedValue.length > 0);
+
+  if (lookups.length === 0) {
+    return {
+      categoryCode: null,
+      familyCode: null,
+      variantCode: null,
+      materialCode: null,
+    };
+  }
+
+  const dictionaryTypes = Array.from(
+    new Set(lookups.map((entry) => entry.type)),
+  ) as SkuDictionaryType[];
+  const sourceKeys = Array.from(
+    new Set(lookups.map((entry) => entry.normalizedValue)),
+  );
+
+  const rows = await db.$queryRaw<
+    Array<{
+      dictionary_type: SkuDictionaryType;
+      source_key_normalized: string;
+      code: string;
+    }>
+  >(Prisma.sql`
+    SELECT
+      d.dictionary_type::text AS dictionary_type,
+      d.source_key_normalized,
+      d.code
+    FROM public.catalog_sku_code_dictionary d
+    WHERE d.scope_type = 'business'
+      AND d.scope_key_normalized = 'mwl'
+      AND d.is_active = TRUE
+      AND d.dictionary_type = ANY(${dictionaryTypes}::text[])
+      AND d.source_key_normalized = ANY(${sourceKeys}::text[])
+  `);
+
+  const codesByKey = new Map<string, string>();
+  for (const row of rows) {
+    const code = normalizeSkuToken(row.code);
+    if (!code) {
+      continue;
+    }
+    codesByKey.set(`${row.dictionary_type}:${row.source_key_normalized}`, code);
+  }
+
+  const resolve = (type: SkuDictionaryType, rawValue: string | null | undefined): string | null => {
+    const normalizedValue = normalizeDictionarySourceKey(rawValue);
+    if (!normalizedValue) {
+      return null;
+    }
+    return codesByKey.get(`${type}:${normalizedValue}`) ?? null;
+  };
+
+  return {
+    categoryCode: resolve("category", input.category),
+    familyCode: resolve("family", input.family),
+    variantCode: resolve("variant", input.variant_label),
+    materialCode: resolve("material", input.material),
+  };
+}
+
+async function generateSkuForNewProduct(
+  db: Prisma.TransactionClient | PrismaClient,
+  input: {
+    category: string;
+    family: string;
+    variant_label?: string | null;
+    size_label?: string | null;
+    material?: string | null;
+  },
+): Promise<string> {
+  const codes = await resolveSkuDictionaryCodes(db, {
     category: input.category,
     family: input.family,
-    name: input.name,
     variant_label: input.variant_label,
+    material: input.material,
   });
 
-  const idLike = fallbackSource || input.idBase;
-  return normalizeSkuFromId(idLike).slice(0, 120);
+  if (!codes.categoryCode) {
+    throw badRequest("Unable to generate SKU: category code mapping not found.", {
+      field: "category",
+      category: input.category,
+      dictionary_scope_type: "business",
+      dictionary_scope_key: "mwl",
+    });
+  }
+
+  if (!codes.familyCode) {
+    throw badRequest("Unable to generate SKU: family code mapping not found.", {
+      field: "family",
+      family: input.family,
+      dictionary_scope_type: "business",
+      dictionary_scope_key: "mwl",
+    });
+  }
+
+  const sizeToken = normalizeSkuSizeToken(input.size_label);
+  const variantToken = codes.variantCode;
+  const tokenCandidates = [codes.categoryCode, codes.familyCode, sizeToken, variantToken];
+  const tokens = tokenCandidates.filter((value): value is string => Boolean(value));
+  const dedupedTokens = tokens.filter((token, index) => index === 0 || token !== tokens[index - 1]);
+
+  const baseSku = `MWL-${dedupedTokens.join("-")}`.slice(0, 120);
+  if (baseSku === "MWL-" || baseSku.length <= 4) {
+    throw badRequest("Unable to generate SKU: insufficient normalized data.", {
+      category: input.category,
+      family: input.family,
+      size_label: input.size_label ?? null,
+      variant_label: input.variant_label ?? null,
+    });
+  }
+
+  return baseSku;
+}
+
+async function generateProductIdBase(
+  db: Prisma.TransactionClient | PrismaClient,
+  input: {
+    category: string;
+    family: string;
+    variant_label?: string | null;
+    size_label?: string | null;
+  },
+): Promise<string> {
+  const codes = await resolveSkuDictionaryCodes(db, {
+    category: input.category,
+    family: input.family,
+    variant_label: input.variant_label,
+    material: null,
+  });
+
+  const categoryToken =
+    normalizeProductIdToken(codes.categoryCode) || normalizeProductIdToken(input.category);
+  const familyToken =
+    normalizeProductIdToken(codes.familyCode) || normalizeProductIdToken(input.family);
+  const variantTokenFromCode = normalizeProductIdToken(codes.variantCode);
+  const variantTokenFromLabel = normalizeProductIdToken(input.variant_label);
+  const variantToken = variantTokenFromCode || variantTokenFromLabel || "std";
+  const sizeToken = normalizeProductIdToken(normalizeSkuSizeToken(input.size_label));
+
+  const rawTokens = [categoryToken, familyToken];
+  if (
+    variantToken === "std" &&
+    sizeToken &&
+    sizeToken !== categoryToken &&
+    sizeToken !== familyToken
+  ) {
+    rawTokens.push(sizeToken);
+  }
+  rawTokens.push(variantToken);
+
+  // Keep semantic stability and avoid duplicated concepts in the id.
+  const dedupedTokens = rawTokens.filter(
+    (token, index, allTokens) => token && allTokens.indexOf(token) === index,
+  );
+
+  const base = dedupedTokens.join("_").slice(0, 64).replace(/^_+|_+$/g, "");
+  return base || "product_std";
+}
+
+export async function previewProductSku(
+  payload: ProductSkuPreviewInput,
+  options?: ServiceOptions,
+): Promise<ProductSkuPreviewResult> {
+  const db = resolveDb(options);
+  const category = normalizeRequiredText(payload.category, "category");
+  const family = normalizeRequiredText(payload.family, "family");
+  const variantLabel = normalizeNullableText(payload.variant_label);
+  const sizeLabel = normalizeNullableText(payload.size_label);
+  const material = normalizeNullableText(payload.material);
+
+  await validateCategoryAndFamilyAgainstCatalog(db, {
+    category,
+    family,
+  });
+
+  const baseSku = await generateSkuForNewProduct(db, {
+    category,
+    family,
+    variant_label: variantLabel ?? null,
+    size_label: sizeLabel ?? null,
+    material: material ?? null,
+  });
+  const uniqueSku = await resolveUniqueProductSku(db, baseSku);
+  const baseId = await generateProductIdBase(db, {
+    category,
+    family,
+    variant_label: variantLabel ?? null,
+    size_label: sizeLabel ?? null,
+  });
+  const uniqueId = await resolveUniqueProductId(db, baseId);
+
+  return {
+    sku: uniqueSku,
+    base_sku: baseSku,
+    id_base: baseId,
+    id_preview: uniqueId,
+    dictionary_scope_type: "business",
+    dictionary_scope_key: "mwl",
+  };
 }
 
 async function resolveUniqueProductId(
@@ -1398,15 +1767,21 @@ async function resolveUniqueProductSku(
   }
 
   const escapedBaseSku = escapeRegexLiteral(baseSku);
-  const suffixes = rows
+  const suffixes = new Set(
+    rows
     .map((row) => {
       const match = new RegExp(`^${escapedBaseSku}-(\\d+)$`).exec(row.sku);
       return match ? Number.parseInt(match[1] ?? "", 10) : null;
     })
-    .filter((value): value is number => value !== null && Number.isInteger(value) && value >= 2);
+      .filter((value): value is number => value !== null && Number.isInteger(value) && value >= 1),
+  );
 
-  const next = (suffixes.length > 0 ? Math.max(...suffixes) : 1) + 1;
-  return `${baseSku}-${next}`;
+  let next = 1;
+  while (suffixes.has(next)) {
+    next += 1;
+  }
+
+  return `${baseSku}-${String(next).padStart(2, "0")}`;
 }
 
 function validateCreatePayload(input: CreateProductInput) {
@@ -1610,20 +1985,20 @@ export async function createProduct(
     family: normalized.family,
   });
 
-  const baseId = generateProductIdBase({
+  const baseId = await generateProductIdBase(db, {
     category: normalized.category,
     family: normalized.family,
-    name: normalized.name,
     variant_label: normalized.variant_label,
+    size_label: normalized.size_label,
   });
 
   const uniqueId = await resolveUniqueProductId(db, baseId);
-  const baseSku = generateProductSkuBase({
+  const baseSku = await generateSkuForNewProduct(db, {
     category: normalized.category,
     family: normalized.family,
-    name: normalized.name,
     variant_label: normalized.variant_label,
-    idBase: uniqueId,
+    size_label: normalized.size_label,
+    material: normalized.material,
   });
   const uniqueSku = await resolveUniqueProductSku(db, baseSku);
   const createValidation: ProductNovaValidationRow = {
@@ -1829,19 +2204,19 @@ export async function saveProduct(
         family: normalizedCore.family,
       });
 
-      const baseId = generateProductIdBase({
+      const baseId = await generateProductIdBase(tx, {
         category: normalizedCore.category,
         family: normalizedCore.family,
-        name: normalizedCore.name,
         variant_label: normalizedCore.variant_label,
+        size_label: normalizedCore.size_label,
       });
       const uniqueId = await resolveUniqueProductId(tx, baseId);
-      const baseSku = generateProductSkuBase({
+      const baseSku = await generateSkuForNewProduct(tx, {
         category: normalizedCore.category,
         family: normalizedCore.family,
-        name: normalizedCore.name,
         variant_label: normalizedCore.variant_label,
-        idBase: uniqueId,
+        size_label: normalizedCore.size_label,
+        material: normalizedCore.material,
       });
       const uniqueSku = await resolveUniqueProductSku(tx, baseSku);
 

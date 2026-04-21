@@ -155,6 +155,9 @@ export interface CatalogKpis {
 export interface ProductCatalogFilterOptions {
   categories: string[];
   families: string[];
+  variants: string[];
+  materials: string[];
+  sizes: string[];
 }
 
 export interface ListCatalogProductsParams extends PaginationParams {
@@ -310,6 +313,23 @@ export interface CreateProductInput {
   discount_visibility?: ProductDiscountVisibility;
   search_boost?: number;
   sort_order?: number;
+}
+
+export interface ProductSkuPreviewInput {
+  category: string;
+  family: string;
+  variant_label?: string | null;
+  size_label?: string | null;
+  material?: string | null;
+}
+
+export interface ProductSkuPreviewResult {
+  sku: string;
+  base_sku: string;
+  id_base: string;
+  id_preview: string;
+  dictionary_scope_type: "business";
+  dictionary_scope_key: "mwl";
 }
 
 export interface AddProductImageInput {

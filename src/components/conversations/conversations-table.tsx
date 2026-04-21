@@ -3,6 +3,7 @@ import Link from "next/link";
 import { StatusBadgeFromViewModel } from "@/components/ui/status-badge";
 import { TableEmptyStateRow } from "@/components/ui/state-display";
 import { formatDateTime } from "@/lib/formatters";
+import { getFriendlyFieldLabel } from "@/lib/ui-labels";
 import type { ConversationListItem } from "@/server/services/conversations";
 
 import {
@@ -43,13 +44,13 @@ export function ConversationsTable({
             </caption>
             <thead className="bg-muted/40 text-xs uppercase tracking-[0.16em] text-muted-foreground">
               <tr>
-                <th scope="col" className="px-4 py-3 font-medium">lead_thread_id</th>
-                <th scope="col" className="px-4 py-3 font-medium">display_name</th>
-                <th scope="col" className="px-4 py-3 font-medium">channel</th>
-                <th scope="col" className="px-4 py-3 font-medium">lead_stage</th>
+                <th scope="col" className="px-4 py-3 font-medium">{getFriendlyFieldLabel("lead_thread_id")}</th>
+                <th scope="col" className="px-4 py-3 font-medium">{getFriendlyFieldLabel("display_name")}</th>
+                <th scope="col" className="px-4 py-3 font-medium">Canal</th>
+                <th scope="col" className="px-4 py-3 font-medium">{getFriendlyFieldLabel("lead_stage")}</th>
                 <th scope="col" className="px-4 py-3 font-medium">ultima interaccion</th>
-                <th scope="col" className="px-4 py-3 font-medium">total_messages</th>
-                <th scope="col" className="px-4 py-3 font-medium">objections</th>
+                <th scope="col" className="px-4 py-3 font-medium">{getFriendlyFieldLabel("total_messages")}</th>
+                <th scope="col" className="px-4 py-3 font-medium">Objeciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60 bg-white">
@@ -74,7 +75,7 @@ export function ConversationsTable({
                             {conversation.id}
                           </span>
                           <span className="block text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                            Key: {conversation.leadThreadKey}
+                            Clave: {conversation.leadThreadKey}
                           </span>
                         </Link>
                       </td>
@@ -84,7 +85,7 @@ export function ConversationsTable({
                             {conversation.contact.name ?? "Sin nombre"}
                           </p>
                           <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                            Owner: {conversation.owner}
+                            Responsable: {conversation.owner}
                           </p>
                         </div>
                       </td>

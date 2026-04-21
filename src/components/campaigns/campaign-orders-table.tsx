@@ -20,7 +20,7 @@ export function CampaignOrdersTable({ orders }: CampaignOrdersTableProps) {
     <section className="rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)]">
       <div className="space-y-2">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
-          Orders
+          Órdenes
         </p>
         <div className="space-y-1">
           <h3 className="text-2xl font-semibold tracking-tight text-slate-950">
@@ -41,12 +41,12 @@ export function CampaignOrdersTable({ orders }: CampaignOrdersTableProps) {
             <thead className="bg-muted/40 text-xs uppercase tracking-[0.16em] text-muted-foreground">
               <tr>
                 <th scope="col" className="px-4 py-3 font-medium">ID</th>
-                <th scope="col" className="px-4 py-3 font-medium">Customer</th>
-                <th scope="col" className="px-4 py-3 font-medium">Conversation</th>
-                <th scope="col" className="px-4 py-3 font-medium">Status</th>
-                <th scope="col" className="px-4 py-3 font-medium">Payment</th>
+                <th scope="col" className="px-4 py-3 font-medium">Cliente</th>
+                <th scope="col" className="px-4 py-3 font-medium">Conversación</th>
+                <th scope="col" className="px-4 py-3 font-medium">Estado</th>
+                <th scope="col" className="px-4 py-3 font-medium">Pago</th>
                 <th scope="col" className="px-4 py-3 font-medium">Total CRC</th>
-                <th scope="col" className="px-4 py-3 font-medium">Created at</th>
+                <th scope="col" className="px-4 py-3 font-medium">Creada</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60 bg-white">

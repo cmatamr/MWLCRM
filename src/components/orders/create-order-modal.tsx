@@ -442,16 +442,16 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
               </p>
               <div className="mt-4 space-y-3 text-sm text-slate-700">
                 <div className="flex items-center justify-between gap-4">
-                  <span>Source</span>
+                  <span>Origen</span>
                   <span className="font-medium text-slate-950">CRM</span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
-                  <span>Status</span>
-                  <span className="font-medium text-slate-950">pending_payment</span>
+                  <span>Estado</span>
+                  <span className="font-medium text-slate-950">Pendiente de pago</span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
-                  <span>Payment status</span>
-                  <span className="font-medium text-slate-950">pending_validation</span>
+                  <span>Estado de pago</span>
+                  <span className="font-medium text-slate-950">Pendiente de validación</span>
                 </div>
                 <div className="flex items-center justify-between gap-4">
                   <span>Total calculado</span>

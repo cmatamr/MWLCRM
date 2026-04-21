@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { formatLeadStageLabel } from "@/domain/crm/formatters";
 import { formatCalendarDate, formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
+import { getFriendlyFieldLabel } from "@/lib/ui-labels";
 import type { OrderDetail } from "@/server/services/orders/types";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, StatusBadgeFromViewModel } from "@/components/ui/status-badge";
@@ -22,7 +23,7 @@ export function OrderActionCenterCard({ order }: OrderDetailSidebarProps) {
   const paymentStatusBadge = getPaymentStatusBadge(order.paymentStatus);
 
   return (
-    <section className="rounded-[28px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)] xl:min-h-[320px]">
+    <section className="dashboard-card-3d overflow-hidden p-6 xl:min-h-[320px]">
       <div className="space-y-2">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
           Action center
@@ -52,11 +53,11 @@ export function OrderActionCenterCard({ order }: OrderDetailSidebarProps) {
           {formatCustomerName(order.customer.name)}
         </p>
         <p className="mt-1 text-sm text-muted-foreground">
-          External ID: {order.customer.externalId ?? "No disponible"}
+          {getFriendlyFieldLabel("external_id")}: {order.customer.externalId ?? "No disponible"}
         </p>
         {order.customer.id ? (
           <Button asChild variant="outline" size="sm" className="mt-4">
-            <Link href={`/customers/${order.customer.id}`}>Ver customer</Link>
+            <Link href={`/customers/${order.customer.id}`}>Ver cliente</Link>
           </Button>
         ) : null}
       </div>
@@ -70,11 +71,11 @@ export function OrderActionCenterCard({ order }: OrderDetailSidebarProps) {
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           <StatusBadge tone="info">
-            Stage: {formatLeadStageLabel(order.conversation.leadStage)}
+            Etapa: {formatLeadStageLabel(order.conversation.leadStage)}
           </StatusBadge>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          Thread ID: {order.conversation.id}
+          ID de conversación: {order.conversation.id}
         </p>
       </div>
 
@@ -93,7 +94,7 @@ export function OrderPaymentSummaryCard({ order }: OrderDetailSidebarProps) {
   const latestReceipt = order.receipts[0] ?? null;
 
   return (
-    <section className="flex h-full flex-col rounded-[28px] border border-white/70 bg-white/90 p-6 shadow-[0_20px_60px_rgba(15,23,42,0.08)]">
+    <section className="dashboard-card-3d flex h-full flex-col overflow-hidden p-6">
       <div className="space-y-1">
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
           Payment

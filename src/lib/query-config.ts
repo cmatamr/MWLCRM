@@ -10,6 +10,7 @@ import type {
   GetProductsPerformanceParams,
   ListCatalogProductsParams,
 } from "@/server/services/products";
+import type { ListPromotionsParams } from "@/server/services/promotions";
 
 function normalizeQueryKeyParams<TParams extends object | undefined>(params?: TParams) {
   return Object.fromEntries(
@@ -29,6 +30,7 @@ export const queryEndpoints = {
   conversations: "/api/conversations",
   products: "/api/products",
   productsPerformance: "/api/products/performance",
+  promotions: "/api/promotions",
 } as const;
 
 export const queryRefetchIntervals = {
@@ -43,6 +45,8 @@ export const queryRefetchIntervals = {
   products: 30000,
   productsPerformance: 30000,
   productDetail: 30000,
+  promotions: 30000,
+  promotionDetail: 30000,
 } as const;
 
 export const queryKeys = {
@@ -67,4 +71,7 @@ export const queryKeys = {
   productsPerformance: (params: GetProductsPerformanceParams) =>
     ["products", "performance", normalizeQueryKeyParams(params)] as const,
   productDetail: (id: string | null) => ["products", "detail", id] as const,
+  promotions: (params?: ListPromotionsParams) =>
+    ["promotions", normalizeQueryKeyParams(params)] as const,
+  promotionDetail: (id: string | null) => ["promotions", "detail", id] as const,
 } as const;

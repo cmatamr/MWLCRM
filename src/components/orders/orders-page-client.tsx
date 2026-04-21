@@ -141,7 +141,7 @@ export function OrdersPageClient({
 
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <PageHeader
-          title="Orders"
+          title="Órdenes"
           description="Módulo transaccional para operar pedidos, validar pagos y seguir el estado comercial con datos reales."
         />
         <div className="rounded-2xl border border-border/70 bg-white/80 px-4 py-3 text-sm text-muted-foreground">
@@ -157,7 +157,7 @@ export function OrdersPageClient({
         >
           <label className="space-y-2">
             <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Status
+              Estado de la orden
             </span>
             <select
               defaultValue={params.status ?? ""}
@@ -175,7 +175,7 @@ export function OrdersPageClient({
 
           <label className="space-y-2">
             <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Payment status
+              Estado de pago
             </span>
             <select
               defaultValue={params.paymentStatus ?? ""}

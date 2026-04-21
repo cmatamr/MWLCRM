@@ -139,17 +139,17 @@ export function CustomersPageClient({ channelOptions }: CustomersPageClientProps
         isOpen={isCreateCustomerOpen}
         onClose={() => setIsCreateCustomerOpen(false)}
         onCreated={(displayName) => {
-          setCreationFeedback(`Customer creado correctamente: ${displayName}.`);
+          setCreationFeedback(`Cliente creado correctamente: ${displayName}.`);
         }}
       />
 
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <PageHeader
-          title="Customers"
+          title="Clientes"
           description="Vista comercial de clientes construida desde contacts y enriquecida con ordenes para seguimiento real de cartera."
         />
         <div className="rounded-2xl border border-border/70 bg-white/80 px-4 py-3 text-sm text-muted-foreground">
-          {data.pagination.total} customers encontrados
+          {data.pagination.total} clientes encontrados
         </div>
       </div>
 
@@ -177,7 +177,7 @@ export function CustomersPageClient({ channelOptions }: CustomersPageClientProps
         >
           <label className="space-y-2">
             <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Buscar por nombre o external_id
+              Buscar por nombre o identificador externo
             </span>
             <input
               defaultValue={params.search ?? ""}

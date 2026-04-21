@@ -5,8 +5,13 @@ import { QueryProvider } from "@/providers/query-provider";
 import "@/app/globals.css";
 
 export const metadata: Metadata = {
-  title: "RevenueCore by 4 + [ UNO ]",
+  title: "NexaCore by 4 + [ UNO ]",
   description: "CRM comercial modular para clientes, órdenes y campañas.",
+  icons: {
+    icon: "/icon.png",
+    shortcut: "/icon.png",
+    apple: "/nexacore-icon.png",
+  },
 };
 
 type RootLayoutProps = Readonly<{

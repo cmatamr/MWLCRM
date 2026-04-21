@@ -48,3 +48,8 @@ NEXT_PUBLIC_SITE_URL="https://[YOUR_DOMAIN]"
   - `META_APP_SECRET`
   - `META_BUSINESS_ID`
   - `CRON_SECRET` (recommended in production; required by route auth when set)
+
+## UI conventions
+
+- Any new dashboard card should use the `dashboard-card-3d` class from `src/app/globals.css`.
+- This class is the default visual surface for dashboards (radius, border, background, and 3D shadow depth).

@@ -31,14 +31,14 @@ function buildSummaryCards(
 
   return [
     {
-      label: "Threads visibles",
+      label: "Conversaciones visibles",
       value: String(conversations.length),
       hint: "Conversaciones cargadas en esta vista",
     },
     {
       label: "Con objeciones",
       value: String(conversationsWithObjections),
-      hint: "Threads con senales comerciales detectadas",
+      hint: "Conversaciones con señales comerciales detectadas",
     },
     {
       label: "Sin nombre",
@@ -46,9 +46,9 @@ function buildSummaryCards(
       hint: "Contactos por enriquecer para seguimiento",
     },
     {
-      label: "Ultimo touchpoint",
+      label: "Último contacto",
       value: mostRecentInteraction ? formatDateTime(mostRecentInteraction) : "Sin actividad",
-      hint: "Ultima interaccion cargada en la tabla",
+      hint: "Última interacción cargada en la tabla",
     },
   ];
 }
@@ -93,7 +93,7 @@ export function ConversationsPageClient() {
     <div className="space-y-8">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
         <PageHeader
-          title="Conversations"
+          title="Conversaciones"
           description="Modulo de supervision comercial para revisar conversaciones activas, ultimos mensajes, objeciones detectadas y evolucion de etapa sin depender de un chat en tiempo real."
         />
         <div className="rounded-2xl border border-border/70 bg-white/80 px-4 py-3 text-sm text-muted-foreground">
@@ -157,7 +157,7 @@ export function ConversationsPageClient() {
         <StateDisplay
           eyebrow="Conversations"
           title="No hay datos disponibles"
-          description="Selecciona un thread cuando exista o espera a que el CRM sincronice conversaciones activas."
+          description="Selecciona una conversación cuando exista o espera a que el CRM sincronice conversaciones activas."
           className="shadow-none"
         />
       )}

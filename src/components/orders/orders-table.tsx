@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { Trash2 } from "lucide-react";
 
 import { formatCalendarDate, formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
@@ -115,56 +116,59 @@ function OrderRow({ order }: { order: OrdersListResponse["items"][number] }) {
         </td>
       </tr>
 
-      {isDeleteDialogOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/25 px-4 backdrop-blur-[2px]"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby={`delete-order-title-${order.id}`}
-        >
-          <div className="w-full max-w-md rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary/70">
-                Confirmar accion
-              </p>
-              <h3
-                id={`delete-order-title-${order.id}`}
-                className="text-2xl font-semibold tracking-tight text-slate-950"
-              >
-                ¿Eliminar esta orden?
-              </h3>
-              <p className="text-sm leading-6 text-muted-foreground">
-                Se eliminará la orden y también sus items y comprobantes asociados.
-              </p>
-            </div>
+      {isDeleteDialogOpen
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/25 px-4 backdrop-blur-[2px]"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={`delete-order-title-${order.id}`}
+            >
+              <div className="w-full max-w-md rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary/70">
+                    Confirmar accion
+                  </p>
+                  <h3
+                    id={`delete-order-title-${order.id}`}
+                    className="text-2xl font-semibold tracking-tight text-slate-950"
+                  >
+                    ¿Eliminar esta orden?
+                  </h3>
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    Se eliminará la orden y también sus items y comprobantes asociados.
+                  </p>
+                </div>
 
-            {deleteError ? (
-              <p className="mt-4 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
-                {deleteError}
-              </p>
-            ) : null}
+                {deleteError ? (
+                  <p className="mt-4 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
+                    {deleteError}
+                  </p>
+                ) : null}
 
-            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={closeDeleteDialog}
-                disabled={deleteOrderMutation.isPending}
-              >
-                Cancelar
-              </Button>
-              <Button
-                type="button"
-                onClick={() => void handleDelete()}
-                disabled={deleteOrderMutation.isPending}
-                className="bg-rose-600 text-white hover:bg-rose-700"
-              >
-                {deleteOrderMutation.isPending ? "Eliminando..." : "Eliminar orden"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={closeDeleteDialog}
+                    disabled={deleteOrderMutation.isPending}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void handleDelete()}
+                    disabled={deleteOrderMutation.isPending}
+                    className="bg-rose-600 text-white hover:bg-rose-700"
+                  >
+                    {deleteOrderMutation.isPending ? "Eliminando..." : "Eliminar orden"}
+                  </Button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </>
   );
 }
@@ -175,7 +179,7 @@ export function OrdersTable({ orders, action }: OrdersTableProps) {
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-4">
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
-            Orders
+            Órdenes
           </p>
         </div>
         <div className="space-y-1">
@@ -200,12 +204,12 @@ export function OrdersTable({ orders, action }: OrdersTableProps) {
             <thead className="bg-muted/40 text-xs uppercase tracking-[0.16em] text-muted-foreground">
               <tr>
                 <th scope="col" className="px-4 py-3 text-center font-medium">ID</th>
-                <th scope="col" className="px-4 py-3 text-center font-medium">Customer</th>
-                <th scope="col" className="px-4 py-3 text-center font-medium">Status</th>
-                <th scope="col" className="px-4 py-3 text-center font-medium">Payment status</th>
+                <th scope="col" className="px-4 py-3 text-center font-medium">Cliente</th>
+                <th scope="col" className="px-4 py-3 text-center font-medium">Estado</th>
+                <th scope="col" className="px-4 py-3 text-center font-medium">Estado de pago</th>
                 <th scope="col" className="px-4 py-3 text-center font-medium">Total CRC</th>
-                <th scope="col" className="px-4 py-3 text-center font-medium">Created</th>
-                <th scope="col" className="px-4 py-3 text-center font-medium">Fecha Entrega</th>
+                <th scope="col" className="px-4 py-3 text-center font-medium">Creada</th>
+                <th scope="col" className="px-4 py-3 text-center font-medium">Fecha de entrega</th>
                 <th scope="col" className="px-4 py-3 text-center font-medium">Acciones</th>
               </tr>
             </thead>

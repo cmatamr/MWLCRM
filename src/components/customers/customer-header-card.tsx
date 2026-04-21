@@ -1,5 +1,6 @@
 import type { CustomerDetail } from "@/server/services/customers/types";
 import { formatDateTime } from "@/lib/formatters";
+import { getFriendlyFieldLabel } from "@/lib/ui-labels";
 import { StatusBadge, StatusBadgeFromViewModel } from "@/components/ui/status-badge";
 
 import { CustomerEditAction } from "./customer-edit-action";
@@ -30,7 +31,7 @@ export function CustomerHeaderCard({ customer }: CustomerHeaderCardProps) {
             <div className="space-y-3">
               <div className="space-y-1">
                 <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
-                  Customer profile
+                  Perfil de cliente
                 </p>
                 <div className="flex items-center gap-2">
                   <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-950">
@@ -38,7 +39,7 @@ export function CustomerHeaderCard({ customer }: CustomerHeaderCardProps) {
                   </h1>
                   <CustomerEditAction customer={customer} />
                 </div>
-                <p className="text-sm text-slate-600">External ID: {customer.externalId}</p>
+                <p className="text-sm text-slate-600">{getFriendlyFieldLabel("external_id")}: {customer.externalId}</p>
               </div>
 
               <div className="flex flex-wrap gap-2">

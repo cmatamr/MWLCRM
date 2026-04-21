@@ -19,25 +19,25 @@ export const navigationItems: NavigationItem[] = [
   },
   {
     href: "/customers",
-    label: "Customers",
+    label: "Clientes",
     description: "Clientes y prospectos",
     icon: UsersRound,
   },
   {
     href: "/products",
-    label: "Products",
+    label: "Productos",
     description: "Catalogo y performance comercial",
     icon: Boxes,
   },
   {
     href: "/orders",
-    label: "Orders",
+    label: "Órdenes",
     description: "Pedidos y estado comercial",
     icon: PackageSearch,
   },
   {
     href: "/campaigns",
-    label: "Campaigns",
+    label: "Campañas",
     description: "Campañas activas y borradores",
     icon: Megaphone,
   },
@@ -49,7 +49,7 @@ export const navigationItems: NavigationItem[] = [
   },
   {
     href: "/conversations",
-    label: "Conversations",
+    label: "Conversaciones",
     description: "Seguimiento de mensajes",
     icon: MessageSquareText,
   },

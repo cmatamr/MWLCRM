@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { StatusBadge, StatusBadgeFromViewModel } from "@/components/ui/status-badge";
 import { formatDateTime } from "@/lib/formatters";
+import { getFriendlyFieldLabel } from "@/lib/ui-labels";
 import type { ConversationDetail } from "@/server/services/conversations";
 
 import {
@@ -45,13 +46,13 @@ export function ConversationHeader({ conversation }: ConversationHeaderProps) {
           <div className="space-y-4">
             <div className="space-y-1">
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
-                Conversation overview
+                Resumen de conversación
               </p>
               <h1 className="font-serif text-3xl font-semibold tracking-tight text-slate-950">
                 {conversation.contact.name ?? conversation.leadThreadKey}
               </h1>
               <p className="break-all text-sm text-slate-600">
-                Lead Thread ID: {conversation.id}
+                ID de conversación: {conversation.id}
               </p>
             </div>
 
@@ -61,7 +62,7 @@ export function ConversationHeader({ conversation }: ConversationHeaderProps) {
               </StatusBadge>
               <StatusBadgeFromViewModel badge={leadStageBadge} />
               <StatusBadge>
-                Owner: {conversation.owner}
+                Responsable: {conversation.owner}
               </StatusBadge>
               <StatusBadge>
                 Score: {conversation.leadScore}
@@ -94,14 +95,14 @@ export function ConversationHeader({ conversation }: ConversationHeaderProps) {
               {conversation.contact.name ?? "Sin nombre registrado"}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              External ID: {conversation.contact.externalId ?? "No disponible"}
+              {getFriendlyFieldLabel("external_id")}: {conversation.contact.externalId ?? "No disponible"}
             </p>
             {conversation.contact.id ? (
               <Link
                 href={`/customers/${conversation.contact.id}`}
                 className="mt-3 inline-flex text-sm font-medium text-primary transition-colors hover:text-primary/80"
               >
-                Ver customer
+                Ver cliente
               </Link>
             ) : null}
           </article>

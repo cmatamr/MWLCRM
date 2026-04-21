@@ -9,7 +9,7 @@ type CampaignAlertsCardProps = {
 export function CampaignAlertsCard({ overview }: CampaignAlertsCardProps) {
   const alertItems = [
     {
-      label: "Spend > 0 y revenue = 0",
+      label: "Con inversión y sin ingresos",
       count: overview.spendWithoutRevenueCount,
       description: "Campañas con inversión visible sin retorno atribuido.",
       icon: CircleSlash,
@@ -17,7 +17,7 @@ export function CampaignAlertsCard({ overview }: CampaignAlertsCardProps) {
       iconClassName: "bg-rose-100 text-rose-700",
     },
     {
-      label: "Leads > 10 y orders = 0",
+      label: "Con leads y sin órdenes",
       count: overview.highLeadNoOrderCount,
       description: "Volumen inicial, pero sin convertir a órdenes todavía.",
       icon: AlertTriangle,
@@ -39,7 +39,7 @@ export function CampaignAlertsCard({ overview }: CampaignAlertsCardProps) {
       <div className="space-y-5">
         <div className="space-y-2">
           <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
-            Alerts
+            Alertas
           </p>
           <div className="space-y-1">
             <h3 className="text-2xl font-semibold tracking-tight text-slate-950">

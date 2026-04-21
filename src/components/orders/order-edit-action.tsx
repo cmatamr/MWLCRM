@@ -171,13 +171,13 @@ export function OrderEditAction({ order }: OrderEditActionProps) {
 
             <div className="flex flex-col gap-3 border-b border-border/70 pb-6 sm:flex-row sm:items-start sm:justify-between">
               <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary/70">Orders</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary/70">Órdenes</p>
                 <div className="space-y-1">
                   <h3 id={`edit-order-title-${order.id}`} className="text-2xl font-semibold tracking-tight text-slate-950">
                     Editar orden
                   </h3>
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-600">
-                    Order overview
+                    Resumen de orden
                   </p>
                   <p className="text-sm font-semibold text-slate-900">
                     {formatOrderShortId(order.id)}
@@ -212,7 +212,7 @@ export function OrderEditAction({ order }: OrderEditActionProps) {
             <div className="mt-6 grid gap-5 md:grid-cols-2">
               <label className="space-y-2">
                 <span className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                  Status
+                  Estado
                 </span>
                 <select
                   value={status}
@@ -263,7 +263,7 @@ export function OrderEditAction({ order }: OrderEditActionProps) {
 
             <div className="mt-5 rounded-[22px] border border-border/70 bg-slate-50/70 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                Payment status
+                Estado de pago
               </p>
               <div className="mt-2 flex items-center justify-center">
                 <StatusBadgeFromViewModel badge={getPaymentStatusBadge(order.paymentStatus)} />

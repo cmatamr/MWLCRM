@@ -22,5 +22,6 @@ export function useProductsCatalog(params?: ListCatalogProductsParams) {
     isFetching: query.isFetching,
     isError: query.isError,
     error: query.error,
+    refetch: query.refetch,
   };
 }
