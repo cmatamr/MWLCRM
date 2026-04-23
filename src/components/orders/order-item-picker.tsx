@@ -45,7 +45,18 @@ export function OrderItemPicker({
   const [selectedProduct, setSelectedProduct] = useState<OrderItemProductOption | null>(null);
   const [draftQuantity, setDraftQuantity] = useState("1");
   const [quantityTouched, setQuantityTouched] = useState(false);
-  const productsQuery = useOrderItemProductOptions(orderId, deferredSearch, isOpen);
+  const requestedQty = useMemo(() => {
+    const parsed = Number.parseInt(draftQuantity, 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+  }, [draftQuantity]);
+  const productsQuery = useOrderItemProductOptions(
+    orderId,
+    {
+      query: deferredSearch,
+      qty: requestedQty,
+    },
+    isOpen,
+  );
   const quantityValidationError = useMemo(
     () => validateOrderItemQuantityInput(draftQuantity),
     [draftQuantity],
@@ -66,6 +77,17 @@ export function OrderItemPicker({
     }
   }, [excludeProductIds, selectedProduct]);
 
+  useEffect(() => {
+    if (!selectedProduct) {
+      return;
+    }
+
+    const refreshed = (productsQuery.data ?? []).find((product) => product.id === selectedProduct.id);
+    if (refreshed) {
+      setSelectedProduct(refreshed);
+    }
+  }, [productsQuery.data, selectedProduct]);
+
   if (!isOpen) {
     return null;
   }
@@ -78,7 +100,7 @@ export function OrderItemPicker({
   async function handleSubmit() {
     setQuantityTouched(true);
 
-    if (!selectedProduct || quantityValidationError || isSubmitting) {
+    if (!selectedProduct || quantityValidationError || isSubmitting || selectedProduct.requiresManualReview) {
       return;
     }
 
@@ -161,6 +183,7 @@ export function OrderItemPicker({
                     >
                       {product.sku}{" "}
                       {product.unitPriceCrc != null ? `• ${formatCurrencyCRC(product.unitPriceCrc)}` : ""}
+                      {product.unitPriceCrc == null ? `• ${product.pricingMessage}` : ""}
                     </span>
                   </button>
                 );
@@ -211,12 +234,24 @@ export function OrderItemPicker({
                   ? formatCurrencyCRC(selectedProduct.unitPriceCrc)
                   : "Pendiente"}
               </p>
+              {selectedProduct.totalCrc != null ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Total estimado: {formatCurrencyCRC(selectedProduct.totalCrc)}
+                </p>
+              ) : null}
+              <p className="mt-1 text-xs text-muted-foreground">{selectedProduct.pricingMessage}</p>
             </div>
           </div>
         ) : (
           <p className="mt-3 text-sm text-muted-foreground">{description}</p>
         )}
       </div>
+
+      {selectedProduct?.requiresManualReview ? (
+        <p className="rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+          Este producto no se puede cotizar automáticamente para esta cantidad. {selectedProduct.pricingMessage}
+        </p>
+      ) : null}
 
       {formError ? (
         <p className="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">
@@ -227,7 +262,11 @@ export function OrderItemPicker({
       <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
         {actionOrder === "submit-close" ? (
           <>
-            <Button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting || !selectedProduct}>
+            <Button
+              type="button"
+              onClick={() => void handleSubmit()}
+              disabled={isSubmitting || !selectedProduct || selectedProduct.requiresManualReview}
+            >
               {isSubmitting ? "Guardando..." : submitLabel}
             </Button>
             {onClose ? (
@@ -243,7 +282,11 @@ export function OrderItemPicker({
                 {closeLabel}
               </Button>
             ) : null}
-            <Button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting || !selectedProduct}>
+            <Button
+              type="button"
+              onClick={() => void handleSubmit()}
+              disabled={isSubmitting || !selectedProduct || selectedProduct.requiresManualReview}
+            >
               {isSubmitting ? "Guardando..." : submitLabel}
             </Button>
           </>

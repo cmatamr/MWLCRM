@@ -14,7 +14,7 @@ import {
   type ProductsPerformanceRange,
 } from "@/server/services/products";
 
-const PRODUCT_PRICING_MODES: ProductPricingMode[] = ["fixed", "from", "variable"];
+const PRODUCT_PRICING_MODES: ProductPricingMode[] = ["fixed", "range", "variable"];
 const PERFORMANCE_RANGES: ProductsPerformanceRange[] = ["7d", "30d", "90d", "all"];
 
 function parseBooleanParam(searchParams: URLSearchParams, key: string): boolean | undefined {

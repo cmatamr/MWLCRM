@@ -27,6 +27,8 @@ import type {
   ProductDiscountRuleMeta,
   ProductImageMeta,
   ProductPerformanceRow,
+  ProductRangePriceMeta,
+  ProductPricingResolution,
   ProductSearchTermMeta,
   ProductTopPerformanceEntry,
   ProductPerformanceTrendPoint,
@@ -37,6 +39,7 @@ import type {
   SaveProductAliasInput,
   SaveProductImageInput,
   SaveProductInput,
+  SaveProductRangePriceInput,
   SaveProductResult,
   SaveProductSearchTermInput,
   UpdateProductInput,
@@ -44,7 +47,8 @@ import type {
   UpdateProductSearchTermInput,
 } from "./types";
 
-const PRODUCT_PRICING_MODES = ["fixed", "from", "variable"] as const;
+const PRODUCT_PRICING_MODES = ["fixed", "range", "variable"] as const;
+const POSTGRES_INT4_MAX = 2_147_483_647;
 const PRODUCT_DEFAULTS = {
   requires_design_approval: true,
   discount_visibility: "only_if_customer_requests",
@@ -58,7 +62,7 @@ type ProductListRawRow = {
   category: string;
   variant_label: string | null;
   size_label: string | null;
-  pricing_mode: (typeof PRODUCT_PRICING_MODES)[number];
+  pricing_mode: string;
   price_crc: number | null;
   price_from_crc: number | null;
   min_qty: number | null;
@@ -96,6 +100,10 @@ type ProductDetailRawRow = ProductListRawRow & {
   personalization_area: string | null;
 };
 
+type ProductRangePriceRawRow = Omit<ProductRangePriceMeta, "created_at"> & {
+  created_at: Date | string;
+};
+
 type KpiRawRow = {
   total: bigint | number;
   active_products: bigint | number;
@@ -111,7 +119,7 @@ type ProductNovaValidationRow = {
   family: string;
   variant_label: string | null;
   summary: string | null;
-  pricing_mode: "fixed" | "from" | "variable";
+  pricing_mode: "fixed" | "range" | "variable";
   price_crc: number | null;
   price_from_crc: number | null;
   min_qty: number | null;
@@ -315,7 +323,10 @@ async function getProductNovaValidationRow(
     throw notFound("Product not found.", { productId });
   }
 
-  return row;
+  return {
+    ...row,
+    pricing_mode: normalizePricingMode(row.pricing_mode),
+  };
 }
 
 async function reindexProductImageSortOrder(
@@ -343,9 +354,10 @@ function hasUsablePrice(input: {
   price_crc: number | null;
   price_from_crc: number | null;
 }) {
+  const isRangeMode = input.pricing_mode === "range";
   return (
     (input.pricing_mode === "fixed" && input.price_crc != null) ||
-    (input.pricing_mode === "from" && input.price_from_crc != null) ||
+    (isRangeMode && input.price_from_crc != null) ||
     (input.pricing_mode === "variable" &&
       (input.price_crc != null || input.price_from_crc != null))
   );
@@ -356,10 +368,19 @@ function hasPricingModeMismatch(input: {
   price_crc: number | null;
   price_from_crc: number | null;
 }) {
+  const isRangeMode = input.pricing_mode === "range";
   return (
     (input.pricing_mode === "fixed" && input.price_crc == null) ||
-    (input.pricing_mode === "from" && input.price_from_crc == null)
+    (isRangeMode && input.price_from_crc == null)
   );
+}
+
+function normalizePricingMode(rawValue: string): (typeof PRODUCT_PRICING_MODES)[number] {
+  if (PRODUCT_PRICING_MODES.includes(rawValue as (typeof PRODUCT_PRICING_MODES)[number])) {
+    return rawValue as (typeof PRODUCT_PRICING_MODES)[number];
+  }
+
+  return "fixed";
 }
 
 function getIntegrityAlerts(input: {
@@ -400,7 +421,7 @@ function mapCatalogRow(row: ProductListRawRow): CatalogProductRow {
     family: row.family,
     variant_label: row.variant_label,
     size_label: row.size_label,
-    pricing_mode: row.pricing_mode,
+    pricing_mode: normalizePricingMode(row.pricing_mode),
     price_crc: row.price_crc,
     price_from_crc: row.price_from_crc,
     min_qty: row.min_qty,
@@ -474,14 +495,14 @@ function buildBaseWhere(params: ListCatalogProductsParams) {
       (
         CASE
           WHEN v.pricing_mode = 'fixed' THEN v.price_crc
-          WHEN v.pricing_mode = 'from' THEN v.price_from_crc
+          WHEN v.pricing_mode = 'range' THEN v.price_from_crc
           ELSE COALESCE(v.price_crc, v.price_from_crc)
         END
       ) IS NOT NULL
       AND (
         CASE
           WHEN v.pricing_mode = 'fixed' THEN v.price_crc
-          WHEN v.pricing_mode = 'from' THEN v.price_from_crc
+          WHEN v.pricing_mode = 'range' THEN v.price_from_crc
           ELSE COALESCE(v.price_crc, v.price_from_crc)
         END
       ) <= ${params.maxPriceCrc}
@@ -712,12 +733,12 @@ export async function listCatalogProducts(
             OR COALESCE(BTRIM(v.summary), '') = ''
             OR NOT (
               (v.pricing_mode = 'fixed' AND v.price_crc IS NOT NULL)
-              OR (v.pricing_mode = 'from' AND v.price_from_crc IS NOT NULL)
+              OR (v.pricing_mode = 'range' AND v.price_from_crc IS NOT NULL)
               OR (v.pricing_mode = 'variable' AND (v.price_crc IS NOT NULL OR v.price_from_crc IS NOT NULL))
             )
             OR (
               (v.pricing_mode = 'fixed' AND v.price_crc IS NULL)
-              OR (v.pricing_mode = 'from' AND v.price_from_crc IS NULL)
+              OR (v.pricing_mode = 'range' AND v.price_from_crc IS NULL)
             )
           )
         ) AS with_alerts,
@@ -900,7 +921,7 @@ export async function getProductDetail(
     throw notFound("Product not found.", { productId });
   }
 
-  const [images, aliases, searchTerms, discountRules] = await Promise.all([
+  const [images, aliases, searchTerms, discountRules, rangePrices] = await Promise.all([
     db.$queryRaw<ProductImageMeta[]>(Prisma.sql`
       SELECT
         id::integer AS id,
@@ -954,6 +975,20 @@ export async function getProductDetail(
       WHERE product_id = ${productId}
       ORDER BY min_qty ASC, id ASC
     `),
+    db.$queryRaw<ProductRangePriceRawRow[]>(Prisma.sql`
+      SELECT
+        id::integer AS id,
+        product_id,
+        range_min_qty,
+        range_max_qty,
+        unit_price_crc,
+        sort_order,
+        is_active,
+        created_at
+      FROM public.mwl_product_range_prices
+      WHERE product_id = ${productId}
+      ORDER BY range_min_qty ASC, sort_order ASC, id ASC
+    `),
   ]);
 
   const base = mapCatalogRow(row);
@@ -984,7 +1019,7 @@ export async function getProductDetail(
     is_premium: row.is_premium,
     is_discountable: row.is_discountable,
     discount_visibility: row.discount_visibility,
-    pricing_mode: row.pricing_mode,
+    pricing_mode: normalizePricingMode(row.pricing_mode),
     summary: row.summary,
     details: row.details,
     notes: row.notes,
@@ -1021,8 +1056,183 @@ export async function getProductDetail(
       ...rule,
       discount_percent: toNumberOrNull(rule.discount_percent),
     })),
+    range_prices: rangePrices.map((range) => ({
+      ...range,
+      created_at: toIsoString(range.created_at),
+    })),
+    pricing_engine_hint: null,
     integrity_alerts: base.integrity_alerts,
     ui_created_locally: false,
+  };
+}
+
+const PRICING_RESOLUTION_QUOTABLE_MODES = [
+  "base",
+  "base_below_promo",
+  "range",
+  "block_exact",
+  "block_round_up",
+  "block_post_top",
+] as const;
+
+const PRICING_RESOLUTION_ERROR_MODES = [
+  "manual_required",
+  "min_qty_not_met",
+  "configuration_invalid",
+] as const;
+
+function toSafeRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  return {};
+}
+
+function readIntOrNull(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function readMode(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function buildPricingResolutionMessage(input: {
+  mode: string | null;
+  minQty: number | null;
+  suggestedQty: number | null;
+  reason: string | null;
+}) {
+  if (input.mode === "manual_required") {
+    return "Cotizacion manual requerida para este producto.";
+  }
+
+  if (input.mode === "min_qty_not_met") {
+    if (input.minQty != null) {
+      return `La cantidad minima para cotizar este producto es ${input.minQty}.`;
+    }
+
+    return "La cantidad solicitada no cumple el minimo requerido.";
+  }
+
+  if (input.mode === "configuration_invalid") {
+    return "La configuracion de pricing no cubre esta cantidad. Revisar rangos/promociones.";
+  }
+
+  if (input.mode === "block_round_up" && input.suggestedQty != null) {
+    return `Se cotiza por bloque. Cantidad sugerida: ${input.suggestedQty}.`;
+  }
+
+  if (input.mode === "block_post_top") {
+    return "Cotizacion aplicada con esquema por bloques sobre el tope promocional.";
+  }
+
+  if (input.mode === "base_below_promo") {
+    return "La cantidad aun no alcanza el umbral promocional. Se aplica precio base.";
+  }
+
+  return "Precio resuelto correctamente.";
+}
+
+export async function resolveProductPricing(
+  input: { productId: string; qty: number; now?: Date },
+  options?: { db?: ReturnType<typeof resolveDb> | Prisma.TransactionClient },
+): Promise<ProductPricingResolution> {
+  const db = options?.db ?? resolveDb();
+
+  const normalizedQty = Number.isInteger(input.qty) ? input.qty : Number.NaN;
+  if (!Number.isInteger(normalizedQty) || normalizedQty < 1) {
+    throw badRequest("qty must be an integer greater than or equal to 1.", {
+      field: "qty",
+      qty: input.qty,
+    });
+  }
+
+  const [product] = await db.$queryRaw<Array<{ id: string; pricing_mode: string | null }>>(Prisma.sql`
+    SELECT id, pricing_mode
+    FROM public.mwl_products
+    WHERE id = ${input.productId}
+    LIMIT 1
+  `);
+
+  if (!product) {
+    throw notFound("Product not found.", { productId: input.productId });
+  }
+
+  const [row] = await db.$queryRaw<Array<{ payload: unknown }>>(Prisma.sql`
+    SELECT public.mwl_resolve_product_pricing(
+      ${input.productId},
+      ${normalizedQty},
+      ${input.now ?? new Date()}
+    ) AS payload
+  `);
+
+  const raw = toSafeRecord(row?.payload);
+  const mode = readMode(raw.mode);
+  const unitPrice = readIntOrNull(raw.unit_price);
+  const total = readIntOrNull(raw.total);
+  const quotedQty = readIntOrNull(raw.quoted_qty);
+  const suggestedQty = readIntOrNull(raw.suggested_qty);
+  const minQty = readIntOrNull(raw.min_qty);
+  const rangeMinQty = readIntOrNull(raw.range_min_qty);
+  const rangeMaxQty = readIntOrNull(raw.range_max_qty);
+  const reason =
+    typeof raw.reason === "string" && raw.reason.trim().length > 0 ? raw.reason.trim() : null;
+
+  const isQuotable =
+    mode != null &&
+    PRICING_RESOLUTION_QUOTABLE_MODES.includes(
+      mode as (typeof PRICING_RESOLUTION_QUOTABLE_MODES)[number],
+    );
+  const isErrorMode =
+    mode != null &&
+    PRICING_RESOLUTION_ERROR_MODES.includes(mode as (typeof PRICING_RESOLUTION_ERROR_MODES)[number]);
+
+  const status: ProductPricingResolution["status"] = isQuotable
+    ? "quotable"
+    : isErrorMode
+      ? (mode as ProductPricingResolution["status"])
+      : "configuration_invalid";
+
+  const normalizedMode: ProductPricingResolution["mode"] = isQuotable || isErrorMode
+    ? (mode as ProductPricingResolution["mode"])
+    : "configuration_invalid";
+
+  return {
+    product_id: input.productId,
+    qty_requested: normalizedQty,
+    status,
+    mode: normalizedMode,
+    pricing_mode: product.pricing_mode ? normalizePricingMode(product.pricing_mode) : null,
+    unit_price_crc: unitPrice,
+    total_crc: total,
+    quoted_qty: quotedQty,
+    suggested_qty: suggestedQty,
+    min_qty: minQty,
+    range_min_qty: rangeMinQty,
+    range_max_qty: rangeMaxQty,
+    reason,
+    message: buildPricingResolutionMessage({
+      mode,
+      minQty,
+      suggestedQty,
+      reason,
+    }),
+    raw,
   };
 }
 
@@ -1137,15 +1347,15 @@ function validateMergedProductForUpdate(input: ProductNovaValidationRow) {
     });
   }
 
-  if (input.pricing_mode === "from" && input.price_from_crc == null) {
-    throw badRequest("pricing_mode=from requires price_from_crc.", {
+  if (input.pricing_mode === "range" && input.price_from_crc == null) {
+    throw badRequest("pricing_mode=range requires price_from_crc.", {
       field: "pricing_mode",
       pricing_mode: input.pricing_mode,
       requiredField: "price_from_crc",
     });
   }
-  if (input.pricing_mode === "from" && input.price_crc != null) {
-    throw badRequest("pricing_mode=from does not allow price_crc.", {
+  if (input.pricing_mode === "range" && input.price_crc != null) {
+    throw badRequest("pricing_mode=range does not allow price_crc.", {
       field: "pricing_mode",
       pricing_mode: input.pricing_mode,
       forbiddenField: "price_crc",
@@ -1233,12 +1443,12 @@ export function validateProductForNovaPublication(input: {
     if (product.price_from_crc != null) {
       blockingIssues.push("pricing_mode=fixed must not include price_from_crc.");
     }
-  } else if (product.pricing_mode === "from") {
+  } else if (product.pricing_mode === "range") {
     if (product.price_from_crc == null) {
-      blockingIssues.push("pricing_mode=from requires price_from_crc.");
+      blockingIssues.push("pricing_mode=range requires price_from_crc.");
     }
     if (product.price_crc != null) {
-      blockingIssues.push("pricing_mode=from must not include price_crc.");
+      blockingIssues.push("pricing_mode=range must not include price_crc.");
     }
   } else if (product.pricing_mode === "variable") {
     if (product.price_crc == null) {
@@ -2129,6 +2339,7 @@ export async function saveProduct(
   const normalizedAliases = normalizeAliasesForSave(payload.aliases);
   const normalizedSearchTerms = normalizeSearchTermsForSave(payload.search_terms);
   const normalizedImages = normalizeImagesForSave(payload.images);
+  const normalizedRangePrices = normalizeRangePricesForSave(payload.range_prices);
   const publicationMode = payload.publication_mode;
 
   if (publicationMode !== "internal" && publicationMode !== "nova") {
@@ -2139,10 +2350,24 @@ export async function saveProduct(
   }
 
   validateCreatePayload(normalizedCore);
+  if (normalizedCore.pricing_mode === "range" && normalizedRangePrices.length === 0) {
+    throw badRequest("pricing_mode=range requires at least one structural range.", {
+      field: "range_prices",
+      pricing_mode: normalizedCore.pricing_mode,
+    });
+  }
 
-  const productId = await db.$transaction(async (tx) => {
-    let resolvedProductId = payload.product_id?.trim() || "";
-    const targetAgentVisibility = publicationMode === "nova";
+  if (normalizedCore.pricing_mode !== "range" && normalizedRangePrices.length > 0) {
+    throw badRequest("range_prices are only allowed when pricing_mode=range.", {
+      field: "range_prices",
+      pricing_mode: normalizedCore.pricing_mode,
+    });
+  }
+
+  const productId = await db.$transaction(
+    async (tx) => {
+      let resolvedProductId = payload.product_id?.trim() || "";
+      const targetAgentVisibility = publicationMode === "nova";
 
     if (resolvedProductId) {
       const [existing] = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
@@ -2314,6 +2539,11 @@ export async function saveProduct(
       productId: resolvedProductId,
       images: normalizedImages,
     });
+    await syncRangePricesInTransaction(tx, {
+      productId: resolvedProductId,
+      pricingMode: normalizedCore.pricing_mode,
+      rangePrices: normalizedRangePrices,
+    });
 
     const productValidation = await getProductNovaValidationRow(tx, resolvedProductId);
     const discoveryTerms = await listNovaDiscoveryTerms(tx, {
@@ -2327,8 +2557,15 @@ export async function saveProduct(
       operation: "save_product",
     });
 
-    return resolvedProductId;
-  });
+      return resolvedProductId;
+    },
+    {
+      // Save flow can perform many coordinated writes; allow more time to acquire a transaction
+      // connection under concurrent API traffic and avoid transient P2028 start-time failures.
+      maxWait: 15_000,
+      timeout: 60_000,
+    },
+  );
 
   const saveRefresh = await refreshSearchIndexSafely(db, {
     productId,
@@ -2819,6 +3056,103 @@ function normalizeImagesForSave(
   return normalizedImages;
 }
 
+function normalizeRangePricesForSave(
+  input: SaveProductRangePriceInput[] | undefined,
+): Array<{
+  id: number | null;
+  range_min_qty: number;
+  range_max_qty: number | null;
+  unit_price_crc: number;
+  sort_order: number;
+  is_active: boolean;
+}> {
+  if (!input) {
+    return [];
+  }
+
+  const normalizedRanges: Array<{
+    id: number | null;
+    range_min_qty: number;
+    range_max_qty: number | null;
+    unit_price_crc: number;
+    sort_order: number;
+    is_active: boolean;
+  }> = [];
+
+  let activeOpenEndedCount = 0;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const entry = input[index]!;
+    const rawId = entry.id ?? null;
+    const id = typeof rawId === "number" && Number.isInteger(rawId) && rawId > 0 ? rawId : null;
+
+    if (
+      !Number.isInteger(entry.range_min_qty) ||
+      entry.range_min_qty < 1 ||
+      entry.range_min_qty > POSTGRES_INT4_MAX
+    ) {
+      throw badRequest("range_min_qty must be an integer greater than or equal to 1.", {
+        field: "range_prices.range_min_qty",
+        value: entry.range_min_qty,
+      });
+    }
+
+    const normalizedMax = entry.range_max_qty ?? null;
+    if (
+      normalizedMax != null &&
+      (!Number.isInteger(normalizedMax) ||
+        normalizedMax < entry.range_min_qty ||
+        normalizedMax > POSTGRES_INT4_MAX)
+    ) {
+      throw badRequest("range_max_qty must be null or an integer greater than or equal to range_min_qty.", {
+        field: "range_prices.range_max_qty",
+        value: entry.range_max_qty,
+      });
+    }
+
+    if (
+      !Number.isInteger(entry.unit_price_crc) ||
+      entry.unit_price_crc <= 0 ||
+      entry.unit_price_crc > POSTGRES_INT4_MAX
+    ) {
+      throw badRequest("unit_price_crc must be an integer greater than 0.", {
+        field: "range_prices.unit_price_crc",
+        value: entry.unit_price_crc,
+      });
+    }
+
+    const sortOrder = entry.sort_order ?? index;
+    if (!Number.isInteger(sortOrder) || sortOrder < 0 || sortOrder > POSTGRES_INT4_MAX) {
+      throw badRequest("sort_order must be an integer greater than or equal to 0.", {
+        field: "range_prices.sort_order",
+        value: entry.sort_order,
+      });
+    }
+
+    const isActive = entry.is_active ?? true;
+    if (isActive && normalizedMax == null) {
+      activeOpenEndedCount += 1;
+    }
+
+    normalizedRanges.push({
+      id,
+      range_min_qty: entry.range_min_qty,
+      range_max_qty: normalizedMax,
+      unit_price_crc: entry.unit_price_crc,
+      sort_order: sortOrder,
+      is_active: isActive,
+    });
+  }
+
+  if (activeOpenEndedCount > 1) {
+    throw badRequest("Only one active open-ended range is allowed per product.", {
+      field: "range_prices",
+    });
+  }
+
+  return normalizedRanges;
+}
+
 async function syncAliasesInTransaction(
   tx: Prisma.TransactionClient,
   input: { productId: string; aliases: string[]; productName: string },
@@ -3006,6 +3340,76 @@ async function syncImagesInTransaction(
   }
 
   await reindexProductImageSortOrder(tx, input.productId);
+}
+
+async function syncRangePricesInTransaction(
+  tx: Prisma.TransactionClient,
+  input: {
+    productId: string;
+    pricingMode: "fixed" | "range" | "variable";
+    rangePrices: Array<{
+      id: number | null;
+      range_min_qty: number;
+      range_max_qty: number | null;
+      unit_price_crc: number;
+      sort_order: number;
+      is_active: boolean;
+    }>;
+  },
+) {
+  if (input.pricingMode !== "range") {
+    await tx.$executeRaw(Prisma.sql`
+      DELETE FROM public.mwl_product_range_prices
+      WHERE product_id = ${input.productId}
+    `);
+    return;
+  }
+
+  if (input.rangePrices.length === 0) {
+    throw badRequest("pricing_mode=range requires at least one structural range.", {
+      field: "range_prices",
+      pricing_mode: input.pricingMode,
+    });
+  }
+
+  await tx.$executeRaw(Prisma.sql`
+    DELETE FROM public.mwl_product_range_prices
+    WHERE product_id = ${input.productId}
+  `);
+
+  const sortedRanges = [...input.rangePrices].sort((left, right) => {
+    if (left.range_min_qty !== right.range_min_qty) {
+      return left.range_min_qty - right.range_min_qty;
+    }
+    if (left.sort_order !== right.sort_order) {
+      return left.sort_order - right.sort_order;
+    }
+    return left.unit_price_crc - right.unit_price_crc;
+  });
+
+  const values = sortedRanges.map((range, index) => {
+    const sortOrder = Number.isInteger(range.sort_order) ? range.sort_order : index;
+    return Prisma.sql`(
+      ${input.productId},
+      ${range.range_min_qty},
+      ${range.range_max_qty},
+      ${range.unit_price_crc},
+      ${sortOrder},
+      ${range.is_active}
+    )`;
+  });
+
+  await tx.$executeRaw(Prisma.sql`
+    INSERT INTO public.mwl_product_range_prices (
+      product_id,
+      range_min_qty,
+      range_max_qty,
+      unit_price_crc,
+      sort_order,
+      is_active
+    )
+    VALUES ${Prisma.join(values, ", ")}
+  `);
 }
 
 export async function addProductSearchTerm(

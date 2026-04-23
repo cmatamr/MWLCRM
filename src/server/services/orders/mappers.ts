@@ -129,8 +129,15 @@ export function mapOrderItemProductOption(input: {
   id: string;
   name: string;
   sku: string;
-  priceCrc: number | null;
-  priceFromCrc: number | null;
+  unitPriceCrc: number | null;
+  pricingStatus: OrderItemProductOption["pricingStatus"];
+  pricingMode: OrderItemProductOption["pricingMode"];
+  quotedQty: number | null;
+  suggestedQty: number | null;
+  minQty: number | null;
+  totalCrc: number | null;
+  pricingMessage: string;
+  requiresManualReview: boolean;
   category: string;
   family: string;
 }): OrderItemProductOption {
@@ -138,7 +145,15 @@ export function mapOrderItemProductOption(input: {
     id: input.id,
     name: input.name,
     sku: input.sku,
-    unitPriceCrc: input.priceCrc ?? input.priceFromCrc ?? null,
+    unitPriceCrc: input.unitPriceCrc,
+    pricingStatus: input.pricingStatus,
+    pricingMode: input.pricingMode,
+    quotedQty: input.quotedQty,
+    suggestedQty: input.suggestedQty,
+    minQty: input.minQty,
+    totalCrc: input.totalCrc,
+    pricingMessage: input.pricingMessage,
+    requiresManualReview: input.requiresManualReview,
     category: input.category,
     family: input.family,
   };

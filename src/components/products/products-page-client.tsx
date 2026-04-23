@@ -81,6 +81,14 @@ type CreateProductDraft = {
   pricing_mode: ProductPricingMode;
   price_crc: string;
   price_from_crc: string;
+  range_prices: Array<{
+    local_id: string;
+    range_min_qty: string;
+    range_max_qty: string;
+    unit_price_crc: string;
+    is_open_ended: boolean;
+    is_active: boolean;
+  }>;
   min_qty: string;
   is_active: boolean;
   allows_name: boolean;
@@ -93,6 +101,7 @@ type CreateProductDraft = {
   search_boost: string;
   sort_order: string;
 };
+type CreateRangeDraftRow = CreateProductDraft["range_prices"][number];
 
 type SuggestionInputProps = {
   label: string;
@@ -227,6 +236,7 @@ const defaultCreateDraft: CreateProductDraft = {
   pricing_mode: "fixed",
   price_crc: "",
   price_from_crc: "",
+  range_prices: [],
   min_qty: "1",
   is_active: true,
   allows_name: false,
@@ -536,7 +546,7 @@ function getPriceValue(product: ProductPriceShape) {
     return product.price_crc;
   }
 
-  if (product.pricing_mode === "from") {
+  if (product.pricing_mode === "range") {
     return product.price_from_crc;
   }
 
@@ -554,8 +564,8 @@ function getFormattedPrice(product: ProductPriceShape) {
     return "Sin precio usable";
   }
 
-  if (product.pricing_mode === "from") {
-    return `Desde ${formatCurrencyCRC(value)}`;
+  if (product.pricing_mode === "range") {
+    return `Rangos desde ${formatCurrencyCRC(value)}`;
   }
 
   if (product.pricing_mode === "variable") {
@@ -623,11 +633,11 @@ function assessNovaOperationalStatus(product: ProductDetail): NovaOperationalAss
       blockingIssues.push("Falta el precio principal para este modo de precio.");
     }
     if (product.price_from_crc != null) {
-      blockingIssues.push("Este modo de precio no admite precio desde.");
+      blockingIssues.push("Este modo de precio no admite precio base de rangos.");
     }
-  } else if (product.pricing_mode === "from") {
+  } else if (product.pricing_mode === "range") {
     if (product.price_from_crc == null) {
-      blockingIssues.push("Falta el precio desde para este modo de precio.");
+      blockingIssues.push("Falta el precio base de rangos para este modo de precio.");
     }
     if (product.price_crc != null) {
       blockingIssues.push("Este modo de precio no admite precio fijo.");
@@ -637,7 +647,7 @@ function assessNovaOperationalStatus(product: ProductDetail): NovaOperationalAss
       blockingIssues.push("Falta el precio base para precio variable.");
     }
     if (product.price_from_crc != null) {
-      blockingIssues.push("Precio variable no admite precio desde.");
+      blockingIssues.push("Precio variable no admite precio base de rangos.");
     }
   } else {
     blockingIssues.push("Modo de precio invalido.");
@@ -748,7 +758,7 @@ function getIntegrityAlerts(product: ProductDetail) {
 
   const hasUsablePrice =
     (product.pricing_mode === "fixed" && product.price_crc != null) ||
-    (product.pricing_mode === "from" && product.price_from_crc != null) ||
+    (product.pricing_mode === "range" && product.price_from_crc != null) ||
     (product.pricing_mode === "variable" &&
       (product.price_crc != null || product.price_from_crc != null));
 
@@ -758,7 +768,7 @@ function getIntegrityAlerts(product: ProductDetail) {
 
   const hasPricingModeMismatch =
     (product.pricing_mode === "fixed" && product.price_crc == null) ||
-    (product.pricing_mode === "from" && product.price_from_crc == null);
+    (product.pricing_mode === "range" && product.price_from_crc == null);
 
   if (hasPricingModeMismatch) {
     alerts.push("pricing_mode inconsistente");
@@ -854,6 +864,8 @@ function toProductDetailStub(row: CatalogProductRow): ProductDetail {
       score: 0,
     },
     discount_rules: [],
+    range_prices: [],
+    pricing_engine_hint: null,
     integrity_alerts: row.integrity_alerts,
     ui_created_locally: false,
   };
@@ -911,6 +923,13 @@ type PendingChangesSnapshot = {
     is_primary: boolean;
     sort_order: number;
   }>;
+  range_prices: Array<{
+    range_min_qty: number;
+    range_max_qty: number | null;
+    unit_price_crc: number;
+    sort_order: number;
+    is_active: boolean;
+  }>;
 };
 
 function normalizeAliasTokens(aliases: string[]) {
@@ -958,6 +977,18 @@ function buildPendingChangesSnapshot(product: ProductDetail): PendingChangesSnap
       ),
     );
 
+  const normalizedRangePrices = sortRangePriceRows(
+    product.range_prices
+      .map((range) => ({
+        range_min_qty: range.range_min_qty,
+        range_max_qty: range.range_max_qty ?? null,
+        unit_price_crc: range.unit_price_crc,
+        sort_order: range.sort_order,
+        is_active: range.is_active,
+      }))
+      .filter((range) => range.range_min_qty > 0 && range.unit_price_crc > 0),
+  );
+
   return {
     core: toUpdatePayload(product),
     search_meta: {
@@ -965,10 +996,14 @@ function buildPendingChangesSnapshot(product: ProductDetail): PendingChangesSnap
       search_terms: normalizedSearchTerms,
     },
     images: normalizedImages,
+    range_prices: normalizedRangePrices,
   };
 }
 
-function validateProductPayloadForSave(payload: UpdateProductInput): string | null {
+function validateProductPayloadForSave(
+  payload: UpdateProductInput,
+  rangePrices: ProductDetail["range_prices"] = [],
+): string | null {
   const name = payload.name?.trim() ?? "";
   if (!name) {
     return "Completa el nombre del producto.";
@@ -1001,19 +1036,32 @@ function validateProductPayloadForSave(payload: UpdateProductInput): string | nu
     return "Completa el precio principal para continuar.";
   }
   if (pricingMode === "fixed" && payload.price_from_crc != null) {
-    return "Este tipo de precio no admite precio desde.";
+    return "Este tipo de precio no admite precio base de rangos.";
   }
-  if (pricingMode === "from" && payload.price_from_crc == null) {
-    return "Completa el precio desde para continuar.";
+  if (pricingMode === "range" && payload.price_from_crc == null) {
+    return "Completa el precio base de rangos para continuar.";
   }
-  if (pricingMode === "from" && payload.price_crc != null) {
+  if (pricingMode === "range" && payload.price_crc != null) {
     return "Este tipo de precio no admite precio fijo.";
+  }
+  if (pricingMode === "range") {
+    const rangeValidation = validateRangePricesForUi(
+      rangePrices.map((range) => ({
+        range_min_qty: range.range_min_qty,
+        range_max_qty: range.range_max_qty ?? null,
+        unit_price_crc: range.unit_price_crc,
+        is_active: range.is_active,
+      })),
+    );
+    if (rangeValidation) {
+      return rangeValidation;
+    }
   }
   if (pricingMode === "variable" && payload.price_crc == null) {
     return "Completa el precio base para precio variable.";
   }
   if (pricingMode === "variable" && payload.price_from_crc != null) {
-    return "Precio variable no admite precio desde.";
+    return "Precio variable no admite precio base de rangos.";
   }
 
   if (!payload.is_discountable && payload.discount_visibility !== "never") {
@@ -1089,6 +1137,91 @@ function formatDecimalDisplay(rawValue: string) {
   return `${integerWithSpaces}.${decimalPart}`;
 }
 
+function sortRangePriceRows<T extends { range_min_qty: number; sort_order: number }>(
+  rows: T[],
+) {
+  return [...rows].sort((left, right) => {
+    if (left.range_min_qty !== right.range_min_qty) {
+      return left.range_min_qty - right.range_min_qty;
+    }
+
+    if (left.sort_order !== right.sort_order) {
+      return left.sort_order - right.sort_order;
+    }
+    return 0;
+  });
+}
+
+function sortCreateRangeDraftRows(rows: CreateRangeDraftRow[]) {
+  return [...rows].sort((left, right) => {
+    const leftMin = toNumberOrNull(left.range_min_qty);
+    const rightMin = toNumberOrNull(right.range_min_qty);
+
+    if (leftMin != null && rightMin != null && leftMin !== rightMin) {
+      return leftMin - rightMin;
+    }
+
+    if (leftMin != null && rightMin == null) {
+      return -1;
+    }
+
+    if (leftMin == null && rightMin != null) {
+      return 1;
+    }
+
+    return left.local_id.localeCompare(right.local_id, "es", { sensitivity: "base" });
+  });
+}
+
+function validateRangePricesForUi(
+  input: Array<{
+    range_min_qty: number;
+    range_max_qty: number | null;
+    unit_price_crc: number;
+    is_active: boolean;
+  }>,
+): string | null {
+  if (input.length === 0) {
+    return "Agrega al menos un rango estructural para precio por rangos.";
+  }
+
+  let activeRows = 0;
+  let openActiveRows = 0;
+
+  for (const range of input) {
+    if (!Number.isInteger(range.range_min_qty) || range.range_min_qty < 1) {
+      return "Cada rango debe tener un mínimo válido mayor o igual a 1.";
+    }
+
+    if (range.range_max_qty != null) {
+      if (!Number.isInteger(range.range_max_qty) || range.range_max_qty < range.range_min_qty) {
+        return "El máximo del rango debe ser mayor o igual al mínimo.";
+      }
+    }
+
+    if (!Number.isInteger(range.unit_price_crc) || range.unit_price_crc <= 0) {
+      return "El precio unitario del rango debe ser mayor que 0.";
+    }
+
+    if (range.is_active) {
+      activeRows += 1;
+      if (range.range_max_qty == null) {
+        openActiveRows += 1;
+      }
+    }
+  }
+
+  if (activeRows === 0) {
+    return "Debe existir al menos un rango activo.";
+  }
+
+  if (openActiveRows > 1) {
+    return "Solo se permite un rango abierto activo.";
+  }
+
+  return null;
+}
+
 function validateCreateDraft(draft: CreateProductDraft): string | null {
   if (!draft.name.trim()) {
     return "Completa el nombre del producto.";
@@ -1112,19 +1245,39 @@ function validateCreateDraft(draft: CreateProductDraft): string | null {
     return "Completa el precio principal para continuar.";
   }
   if (draft.pricing_mode === "fixed" && priceFrom != null) {
-    return "Este tipo de precio no admite precio desde.";
+    return "Este tipo de precio no admite precio base de rangos.";
   }
-  if (draft.pricing_mode === "from" && priceFrom == null) {
-    return "Completa el precio desde para continuar.";
+  if (draft.pricing_mode === "range" && priceFrom == null) {
+    return "Completa el precio base de rangos para continuar.";
   }
-  if (draft.pricing_mode === "from" && price != null) {
+  if (draft.pricing_mode === "range" && price != null) {
     return "Este tipo de precio no admite precio fijo.";
+  }
+  if (draft.pricing_mode === "range") {
+    const normalizedRanges = draft.range_prices
+      .map((range) => ({
+        range_min_qty: toNumberOrNull(range.range_min_qty),
+        range_max_qty: range.is_open_ended ? null : toNumberOrNull(range.range_max_qty),
+        unit_price_crc: toNumberOrNull(range.unit_price_crc),
+        is_active: range.is_active,
+      }))
+      .map((range) => ({
+        range_min_qty: range.range_min_qty ?? 0,
+        range_max_qty: range.range_max_qty,
+        unit_price_crc: range.unit_price_crc ?? 0,
+        is_active: range.is_active,
+      }));
+
+    const rangeValidation = validateRangePricesForUi(normalizedRanges);
+    if (rangeValidation) {
+      return rangeValidation;
+    }
   }
   if (draft.pricing_mode === "variable" && price == null) {
     return "Completa el precio base para precio variable.";
   }
   if (draft.pricing_mode === "variable" && priceFrom != null) {
-    return "Precio variable no admite precio desde.";
+    return "Precio variable no admite precio base de rangos.";
   }
   if (!draft.is_discountable && draft.discount_visibility !== "never") {
     return "Ajusta la configuracion de descuento para continuar.";
@@ -1576,7 +1729,10 @@ export function ProductsPageClient() {
   }, [baselinePendingChangesSnapshot, pendingChangesSnapshot]);
   const localValidationError = useMemo(() => {
     const payloadValidation = selectedProductEditablePayload
-      ? validateProductPayloadForSave(selectedProductEditablePayload)
+      ? validateProductPayloadForSave(
+          selectedProductEditablePayload,
+          editDraft?.range_prices ?? [],
+        )
       : null;
     if (payloadValidation) {
       return payloadValidation;
@@ -1790,16 +1946,27 @@ export function ProductsPageClient() {
   const createPricingSectionReady = useMemo(() => {
     const hasMinQty = Boolean(createDraft.min_qty.trim());
     const hasPrice =
-      createDraft.pricing_mode === "from"
+      createDraft.pricing_mode === "range"
         ? Boolean(createDraft.price_from_crc.trim())
         : Boolean(createDraft.price_crc.trim());
+    const hasValidRanges =
+      createDraft.pricing_mode !== "range" ||
+      validateRangePricesForUi(
+        createDraft.range_prices.map((range) => ({
+          range_min_qty: toNumberOrNull(range.range_min_qty) ?? 0,
+          range_max_qty: range.is_open_ended ? null : toNumberOrNull(range.range_max_qty),
+          unit_price_crc: toNumberOrNull(range.unit_price_crc) ?? 0,
+          is_active: range.is_active,
+        })),
+      ) == null;
 
-    return hasMinQty && hasPrice;
+    return hasMinQty && hasPrice && hasValidRanges;
   }, [
     createDraft.min_qty,
     createDraft.price_crc,
     createDraft.price_from_crc,
     createDraft.pricing_mode,
+    createDraft.range_prices,
   ]);
   const createNovaContentSectionReady = useMemo(
     () =>
@@ -1809,8 +1976,7 @@ export function ProductsPageClient() {
     [createDraft.summary, createDraftNovaValidation.usableSearchTerms.length],
   );
   const canPublishCreateDraftToNova = createDraftNovaValidation.isNovaReady;
-  const isCreateFixedPricingMode = createDraft.pricing_mode === "fixed";
-  const isCreateFromPricingMode = createDraft.pricing_mode === "from";
+  const isCreateRangePricingMode = createDraft.pricing_mode === "range";
 
   const resolveProductName = (productId: string | null) => {
     if (!productId) {
@@ -2103,6 +2269,33 @@ export function ProductsPageClient() {
         priority: 100,
         is_active: true,
       }));
+      const normalizedRangePrices =
+        createDraft.pricing_mode === "range"
+          ? sortRangePriceRows(
+              createDraft.range_prices
+                .map((range, index) => ({
+                  id: null,
+                  range_min_qty: toNumberOrNull(range.range_min_qty),
+                  range_max_qty: range.is_open_ended ? null : toNumberOrNull(range.range_max_qty),
+                  unit_price_crc: toNumberOrNull(range.unit_price_crc),
+                  sort_order: index,
+                  is_active: range.is_active,
+                }))
+                .filter(
+                  (range): range is {
+                    id: null;
+                    range_min_qty: number;
+                    range_max_qty: number | null;
+                    unit_price_crc: number;
+                    sort_order: number;
+                    is_active: boolean;
+                  } =>
+                    range.range_min_qty != null &&
+                    range.unit_price_crc != null &&
+                    (range.range_max_qty == null || range.range_max_qty >= range.range_min_qty),
+                ),
+            )
+          : undefined;
 
       const saveResult = await saveProduct({
         input: {
@@ -2111,6 +2304,7 @@ export function ProductsPageClient() {
           search_terms: searchableTerms,
           aliases: [],
           images: [],
+          range_prices: normalizedRangePrices,
         },
       });
       const createdProduct = saveResult.product;
@@ -2187,6 +2381,102 @@ export function ProductsPageClient() {
     }));
   }
 
+  function handleAddCreateRange() {
+    const nextLocalId = `new-range-${Date.now()}-${Math.abs(tempIdSeed)}`;
+    setTempIdSeed((current) => current - 1);
+    setCreateDraft((current) => ({
+      ...current,
+      range_prices: [
+        ...current.range_prices,
+        {
+          local_id: nextLocalId,
+          range_min_qty: "",
+          range_max_qty: "",
+          unit_price_crc: "",
+          is_open_ended: false,
+          is_active: true,
+        },
+      ],
+    }));
+  }
+
+  function handleUpdateCreateRange(
+    localId: string,
+    updates: Partial<CreateProductDraft["range_prices"][number]>,
+  ) {
+    setCreateDraft((current) => ({
+      ...current,
+      range_prices: current.range_prices.map((range) =>
+        range.local_id === localId ? { ...range, ...updates } : range,
+      ),
+    }));
+  }
+
+  function handleDeleteCreateRange(localId: string) {
+    setCreateDraft((current) => ({
+      ...current,
+      range_prices: current.range_prices.filter((range) => range.local_id !== localId),
+    }));
+  }
+
+  function handleAddEditRange() {
+    const nextTempId = tempIdSeed;
+    setTempIdSeed((current) => current - 1);
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            range_prices: [
+              ...current.range_prices,
+              {
+                id: nextTempId,
+                product_id: current.id,
+                range_min_qty: 1,
+                range_max_qty: null,
+                unit_price_crc: 1,
+                sort_order: current.range_prices.length,
+                is_active: true,
+                created_at: new Date().toISOString(),
+              },
+            ],
+          }
+        : current,
+    );
+    setSaveStatusMessage(null);
+    setSaveFeedbackItems([]);
+  }
+
+  function handleUpdateEditRange(
+    rangeId: number,
+    updates: Partial<ProductDetail["range_prices"][number]>,
+  ) {
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            range_prices: current.range_prices.map((range) =>
+              range.id === rangeId ? { ...range, ...updates } : range,
+            ),
+          }
+        : current,
+    );
+    setSaveStatusMessage(null);
+    setSaveFeedbackItems([]);
+  }
+
+  function handleDeleteEditRange(rangeId: number) {
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            range_prices: current.range_prices.filter((range) => range.id !== rangeId),
+          }
+        : current,
+    );
+    setSaveStatusMessage(null);
+    setSaveFeedbackItems([]);
+  }
+
   async function handleSaveChanges() {
     if (!selectedProductId || !editDraft || !editBaseline || !selectedProductEditablePayload) {
       return;
@@ -2246,6 +2536,19 @@ export function ProductsPageClient() {
           sort_order: image.sort_order,
         }))
         .filter((image) => image.storage_path.length > 0);
+      const normalizedRangePrices =
+        editDraft.pricing_mode === "range"
+          ? sortRangePriceRows(
+              editDraft.range_prices.map((range) => ({
+                id: range.id > 0 ? range.id : null,
+                range_min_qty: range.range_min_qty,
+                range_max_qty: range.range_max_qty,
+                unit_price_crc: range.unit_price_crc,
+                sort_order: range.sort_order,
+                is_active: range.is_active,
+              })),
+            )
+          : undefined;
 
       const saveResult = await saveProduct({
         input: {
@@ -2255,6 +2558,7 @@ export function ProductsPageClient() {
           aliases: normalizedAliases,
           search_terms: normalizedSearchTerms,
           images: normalizedImages,
+          range_prices: normalizedRangePrices,
         },
       });
       const updatedProduct = saveResult.product;
@@ -2681,7 +2985,7 @@ export function ProductsPageClient() {
               >
                 <option value="all">Precio: todos</option>
                 <option value="fixed">{getFriendlyPricingModeLabel("fixed")}</option>
-                <option value="from">{getFriendlyPricingModeLabel("from")}</option>
+                <option value="range">{getFriendlyPricingModeLabel("range")}</option>
                 <option value="variable">{getFriendlyPricingModeLabel("variable")}</option>
               </select>
 
@@ -3523,48 +3827,88 @@ export function ProductsPageClient() {
                           <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("pricing_mode")}</span>
                           <select
                             value={selectedProduct.pricing_mode}
-                            onChange={(event) =>
-                              updateSelectedProductField(
-                                "pricing_mode",
-                                event.target.value as ProductPricingMode,
-                              )
-                            }
+                            onChange={(event) => {
+                              const nextMode = event.target.value as ProductPricingMode;
+                              setEditDraft((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      pricing_mode: nextMode,
+                                      price_crc:
+                                        nextMode === "range" ? null : current.price_crc,
+                                      price_from_crc:
+                                        nextMode === "range"
+                                          ? current.price_from_crc
+                                          : null,
+                                    }
+                                  : current,
+                              );
+                              setSaveStatusMessage(null);
+                              setSaveFeedbackItems([]);
+                            }}
                             className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                           >
                             <option value="fixed">{getFriendlyPricingModeLabel("fixed")}</option>
-                            <option value="from">{getFriendlyPricingModeLabel("from")}</option>
+                            <option value="range">{getFriendlyPricingModeLabel("range")}</option>
                             <option value="variable">{getFriendlyPricingModeLabel("variable")}</option>
                           </select>
                         </label>
                         <div className="grid gap-3 sm:grid-cols-2">
-                          <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("price_crc")}</span>
-                            <input
-                              value={selectedProduct.price_crc ?? ""}
-                              onChange={(event) =>
-                                updateSelectedProductField(
-                                  "price_crc",
-                                  toNumberOrNull(event.target.value),
-                                )
-                              }
-                              inputMode="numeric"
-                              className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                            />
-                          </label>
-                          <label className="space-y-1">
-                            <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("price_from_crc")}</span>
-                            <input
-                              value={selectedProduct.price_from_crc ?? ""}
-                              onChange={(event) =>
-                                updateSelectedProductField(
-                                  "price_from_crc",
-                                  toNumberOrNull(event.target.value),
-                                )
-                              }
-                              inputMode="numeric"
-                              className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                            />
-                          </label>
+                          {selectedProduct.pricing_mode === "fixed" ? (
+                            <label className="space-y-1">
+                              <span className="text-xs text-muted-foreground">
+                                {getFriendlyFieldLabel("price_crc")}
+                              </span>
+                              <input
+                                value={selectedProduct.price_crc ?? ""}
+                                onChange={(event) =>
+                                  updateSelectedProductField(
+                                    "price_crc",
+                                    toNumberOrNull(event.target.value),
+                                  )
+                                }
+                                inputMode="numeric"
+                                className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                              />
+                            </label>
+                          ) : null}
+                          {selectedProduct.pricing_mode === "range" ? (
+                            <label className="space-y-1">
+                              <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("price_from_crc")}</span>
+                              <input
+                                value={selectedProduct.price_from_crc ?? ""}
+                                onChange={(event) =>
+                                  updateSelectedProductField(
+                                    "price_from_crc",
+                                    toNumberOrNull(event.target.value),
+                                  )
+                                }
+                                inputMode="numeric"
+                                className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                              />
+                            </label>
+                          ) : null}
+                          {selectedProduct.pricing_mode === "variable" ? (
+                            <>
+                              <label className="space-y-1">
+                                <span className="text-xs text-muted-foreground">Precio base interno</span>
+                                <input
+                                  value={selectedProduct.price_crc ?? ""}
+                                  onChange={(event) =>
+                                    updateSelectedProductField(
+                                      "price_crc",
+                                      toNumberOrNull(event.target.value),
+                                    )
+                                  }
+                                  inputMode="numeric"
+                                  className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                                />
+                              </label>
+                              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:col-span-2">
+                                Este producto se cotiza con revisión manual. No usa precio por rangos.
+                              </div>
+                            </>
+                          ) : null}
                           <label className="space-y-1">
                             <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("min_qty")}</span>
                             <input
@@ -3601,6 +3945,123 @@ export function ProductsPageClient() {
                             </select>
                           </label>
                         </div>
+                        {selectedProduct.pricing_mode === "range" ? (
+                          <div className="space-y-2 rounded-2xl border border-border/70 bg-slate-50/80 p-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                                Rangos estructurales
+                              </p>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={handleAddEditRange}
+                                disabled={isSavingProduct}
+                              >
+                                Agregar rango
+                              </Button>
+                            </div>
+                            {sortRangePriceRows(selectedProduct.range_prices).length > 0 ? (
+                              <div className="space-y-2">
+                                {sortRangePriceRows(selectedProduct.range_prices).map((range, index) => (
+                                  <div
+                                    key={`range-edit-${range.id}`}
+                                    className="grid gap-2 rounded-xl border border-border/60 bg-white p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto]"
+                                  >
+                                    <label className="space-y-1">
+                                      <span className="text-[11px] text-muted-foreground">Desde qty</span>
+                                      <input
+                                        value={range.range_min_qty}
+                                        inputMode="numeric"
+                                        onChange={(event) =>
+                                          handleUpdateEditRange(range.id, {
+                                            range_min_qty:
+                                              toNumberOrNull(event.target.value) ?? 0,
+                                            sort_order: index,
+                                          })
+                                        }
+                                        className="h-9 w-full rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
+                                      />
+                                    </label>
+                                    <label className="space-y-1">
+                                      <span className="text-[11px] text-muted-foreground">Hasta qty</span>
+                                      <input
+                                        value={range.range_max_qty ?? ""}
+                                        inputMode="numeric"
+                                        disabled={range.range_max_qty == null}
+                                        onChange={(event) =>
+                                          handleUpdateEditRange(range.id, {
+                                            range_max_qty:
+                                              toNumberOrNull(event.target.value),
+                                          })
+                                        }
+                                        className="h-9 w-full rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary disabled:bg-slate-100 disabled:text-slate-500"
+                                      />
+                                    </label>
+                                    <label className="space-y-1">
+                                      <span className="text-[11px] text-muted-foreground">Precio unitario</span>
+                                      <input
+                                        value={range.unit_price_crc}
+                                        inputMode="numeric"
+                                        onChange={(event) =>
+                                          handleUpdateEditRange(range.id, {
+                                            unit_price_crc:
+                                              toNumberOrNull(event.target.value) ?? 0,
+                                          })
+                                        }
+                                        className="h-9 w-full rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
+                                      />
+                                    </label>
+                                    <label className="inline-flex items-center gap-1 text-xs text-slate-700">
+                                      <input
+                                        type="checkbox"
+                                        checked={range.range_max_qty == null}
+                                        onChange={(event) =>
+                                          handleUpdateEditRange(range.id, {
+                                            range_max_qty: event.target.checked
+                                              ? null
+                                              : range.range_min_qty,
+                                          })
+                                        }
+                                      />
+                                      Abierto
+                                    </label>
+                                    <div className="flex items-center justify-end gap-2">
+                                      <label className="inline-flex items-center gap-1 text-xs text-slate-700">
+                                        <input
+                                          type="checkbox"
+                                          checked={range.is_active}
+                                          onChange={(event) =>
+                                            handleUpdateEditRange(range.id, {
+                                              is_active: event.target.checked,
+                                            })
+                                          }
+                                        />
+                                        Activo
+                                      </label>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleDeleteEditRange(range.id)}
+                                        disabled={isSavingProduct}
+                                      >
+                                        Eliminar
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-muted-foreground">
+                                Sin rangos cargados. Agrega al menos un tramo para guardar en modo rangos.
+                              </p>
+                            )}
+                            <p className="text-[11px] text-muted-foreground">
+                              El orden visual se aplica de menor a mayor por cantidad mínima.
+                            </p>
+                          </div>
+                        ) : null}
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className="inline-flex items-center gap-2 text-sm text-slate-800">
                             <input
@@ -4244,8 +4705,10 @@ export function ProductsPageClient() {
                                   ) : null}
                                   {catalogTab === "precios" ? (
                                     <>
-                                      <p><strong>Modalidad de precio:</strong> Precio fijo, precio desde o precio variable según el caso.</p>
-                                      <p><strong>Precio y precio desde:</strong> Completa según el modo elegido para evitar inconsistencias comerciales.</p>
+                                      <p><strong>Modalidad de precio:</strong> Precio fijo, precio por rangos o precio variable según el caso.</p>
+                                      <p><strong>Precio fijo y precio base de rangos:</strong> Completa según el modo elegido para evitar inconsistencias comerciales.</p>
+                                      <p><strong>Editor de rangos:</strong> Solo aparece en `Precio por rangos`. Permite crear tramos con mínimo, máximo opcional y precio unitario.</p>
+                                      <p><strong>Precio variable:</strong> Se interpreta como cotización manual y no utiliza rangos.</p>
                                       <p><strong>Cantidad mínima:</strong> Define el mínimo real de venta para evitar cotizaciones inválidas.</p>
                                       <p><strong>Visibilidad de descuento y permiso de descuento:</strong> Alinea esta combinación con la política comercial del producto.</p>
                                     </>
@@ -4609,59 +5072,200 @@ export function ProductsPageClient() {
                           setCreateDraft((current) => ({
                             ...current,
                             pricing_mode: event.target.value as ProductPricingMode,
+                            price_crc:
+                              event.target.value === "range" ? "" : current.price_crc,
+                            price_from_crc:
+                              event.target.value === "range" ? current.price_from_crc : "",
                           }))
                         }
                         className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                       >
                         <option value="fixed">{getFriendlyPricingModeLabel("fixed")}</option>
-                        <option value="from">{getFriendlyPricingModeLabel("from")}</option>
+                        <option value="range">{getFriendlyPricingModeLabel("range")}</option>
                         <option value="variable">{getFriendlyPricingModeLabel("variable")}</option>
                       </select>
                     </label>
-                    <label className="space-y-1">
-                      <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("price_crc")}</span>
-                      <input
-                        value={
-                          isEditingCreatePriceCrc
-                            ? createDraft.price_crc
-                            : formatDecimalDisplay(createDraft.price_crc)
-                        }
-                        onChange={(event) =>
-                          setCreateDraft((current) => ({
-                            ...current,
-                            price_crc: normalizeDecimalRawInput(event.target.value),
-                          }))
-                        }
-                        onFocus={() => setIsEditingCreatePriceCrc(true)}
-                        onBlur={() => handleCreatePriceBlur("price_crc")}
-                        inputMode="decimal"
-                        disabled={!isCreateFixedPricingMode}
-                        placeholder="Ej. 2 500.00"
-                        className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
-                      />
-                    </label>
-                    <label className="space-y-1">
-                      <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("price_from_crc")}</span>
-                      <input
-                        value={
-                          isEditingCreatePriceFromCrc
-                            ? createDraft.price_from_crc
-                            : formatDecimalDisplay(createDraft.price_from_crc)
-                        }
-                        onChange={(event) =>
-                          setCreateDraft((current) => ({
-                            ...current,
-                            price_from_crc: normalizeDecimalRawInput(event.target.value),
-                          }))
-                        }
-                        onFocus={() => setIsEditingCreatePriceFromCrc(true)}
-                        onBlur={() => handleCreatePriceBlur("price_from_crc")}
-                        inputMode="decimal"
-                        disabled={!isCreateFromPricingMode}
-                        placeholder="Ej. 15 567.64"
-                        className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
-                      />
-                    </label>
+                    {createDraft.pricing_mode === "fixed" ? (
+                      <label className="space-y-1">
+                        <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("price_crc")}</span>
+                        <input
+                          value={
+                            isEditingCreatePriceCrc
+                              ? createDraft.price_crc
+                              : formatDecimalDisplay(createDraft.price_crc)
+                          }
+                          onChange={(event) =>
+                            setCreateDraft((current) => ({
+                              ...current,
+                              price_crc: normalizeDecimalRawInput(event.target.value),
+                            }))
+                          }
+                          onFocus={() => setIsEditingCreatePriceCrc(true)}
+                          onBlur={() => handleCreatePriceBlur("price_crc")}
+                          inputMode="decimal"
+                          placeholder="Ej. 2 500.00"
+                          className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                        />
+                      </label>
+                    ) : null}
+                    {createDraft.pricing_mode === "range" ? (
+                      <label className="space-y-1">
+                        <span className="text-xs text-muted-foreground">{getFriendlyFieldLabel("price_from_crc")}</span>
+                        <input
+                          value={
+                            isEditingCreatePriceFromCrc
+                              ? createDraft.price_from_crc
+                              : formatDecimalDisplay(createDraft.price_from_crc)
+                          }
+                          onChange={(event) =>
+                            setCreateDraft((current) => ({
+                              ...current,
+                              price_from_crc: normalizeDecimalRawInput(event.target.value),
+                            }))
+                          }
+                          onFocus={() => setIsEditingCreatePriceFromCrc(true)}
+                          onBlur={() => handleCreatePriceBlur("price_from_crc")}
+                          inputMode="decimal"
+                          placeholder="Ej. 15 567.64"
+                          className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                        />
+                      </label>
+                    ) : null}
+                    {createDraft.pricing_mode === "variable" ? (
+                      <>
+                        <label className="space-y-1">
+                          <span className="text-xs text-muted-foreground">Precio base interno</span>
+                          <input
+                            value={
+                              isEditingCreatePriceCrc
+                                ? createDraft.price_crc
+                                : formatDecimalDisplay(createDraft.price_crc)
+                            }
+                            onChange={(event) =>
+                              setCreateDraft((current) => ({
+                                ...current,
+                                price_crc: normalizeDecimalRawInput(event.target.value),
+                              }))
+                            }
+                            onFocus={() => setIsEditingCreatePriceCrc(true)}
+                            onBlur={() => handleCreatePriceBlur("price_crc")}
+                            inputMode="decimal"
+                            placeholder="Ej. 2 500.00"
+                            className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
+                          />
+                        </label>
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 lg:col-span-2">
+                          Este modo no cotiza automático. Se enviará a revisión manual.
+                        </div>
+                      </>
+                    ) : null}
+                    {createDraft.pricing_mode === "variable" ? (
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 lg:col-span-3">
+                        Los rangos estructurales solo aplican cuando el modo es <strong>Precio por rangos</strong>.
+                      </div>
+                    ) : null}
+                    {isCreateRangePricingMode ? (
+                      <div className="space-y-2 rounded-2xl border border-border/70 bg-slate-50/80 p-3 lg:col-span-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                            Rangos estructurales
+                          </p>
+                          <Button type="button" variant="outline" size="sm" onClick={handleAddCreateRange}>
+                            Agregar rango
+                          </Button>
+                        </div>
+                        {createDraft.range_prices.length > 0 ? (
+                          <div className="space-y-2">
+                            {sortCreateRangeDraftRows(createDraft.range_prices).map((range) => (
+                              <div
+                                key={range.local_id}
+                                className="grid gap-2 rounded-xl border border-border/60 bg-white p-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto]"
+                              >
+                                <label className="space-y-1">
+                                  <span className="text-[11px] text-muted-foreground">Desde qty</span>
+                                  <input
+                                    value={range.range_min_qty}
+                                    inputMode="numeric"
+                                    onChange={(event) =>
+                                      handleUpdateCreateRange(range.local_id, {
+                                        range_min_qty: event.target.value,
+                                      })
+                                    }
+                                    className="h-9 w-full rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-[11px] text-muted-foreground">Hasta qty</span>
+                                  <input
+                                    value={range.range_max_qty}
+                                    inputMode="numeric"
+                                    disabled={range.is_open_ended}
+                                    onChange={(event) =>
+                                      handleUpdateCreateRange(range.local_id, {
+                                        range_max_qty: event.target.value,
+                                      })
+                                    }
+                                    className="h-9 w-full rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary disabled:bg-slate-100 disabled:text-slate-500"
+                                  />
+                                </label>
+                                <label className="space-y-1">
+                                  <span className="text-[11px] text-muted-foreground">Precio unitario</span>
+                                  <input
+                                    value={range.unit_price_crc}
+                                    inputMode="numeric"
+                                    onChange={(event) =>
+                                      handleUpdateCreateRange(range.local_id, {
+                                        unit_price_crc: event.target.value,
+                                      })
+                                    }
+                                    className="h-9 w-full rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
+                                  />
+                                </label>
+                                <label className="inline-flex items-center gap-1 text-xs text-slate-700">
+                                  <input
+                                    type="checkbox"
+                                    checked={range.is_open_ended}
+                                    onChange={(event) =>
+                                      handleUpdateCreateRange(range.local_id, {
+                                        is_open_ended: event.target.checked,
+                                        range_max_qty: event.target.checked ? "" : range.range_max_qty,
+                                      })
+                                    }
+                                  />
+                                  Abierto
+                                </label>
+                                <div className="flex items-center justify-end gap-2">
+                                  <label className="inline-flex items-center gap-1 text-xs text-slate-700">
+                                    <input
+                                      type="checkbox"
+                                      checked={range.is_active}
+                                      onChange={(event) =>
+                                        handleUpdateCreateRange(range.local_id, {
+                                          is_active: event.target.checked,
+                                        })
+                                      }
+                                    />
+                                    Activo
+                                  </label>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleDeleteCreateRange(range.local_id)}
+                                  >
+                                    Eliminar
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            Agrega al menos un rango para guardar productos en modo rangos.
+                          </p>
+                        )}
+                      </div>
+                    ) : null}
                     <div className="space-y-3 lg:col-span-3 lg:space-y-0">
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,220px)_minmax(0,320px)_minmax(0,220px)] lg:items-end">
                         <label className="space-y-1">
@@ -4975,7 +5579,11 @@ export function ProductsPageClient() {
                     <p className="text-xs font-semibold uppercase tracking-[0.1em] text-primary/80">Precio y reglas</p>
                     <p><strong>Modalidad:</strong> {getFriendlyPricingModeLabel(createDraft.pricing_mode)}</p>
                     <p><strong>Precio fijo:</strong> {createDraft.price_crc.trim() || "No aplica"}</p>
-                    <p><strong>Precio desde:</strong> {createDraft.price_from_crc.trim() || "No aplica"}</p>
+                    <p><strong>Precio base de rangos:</strong> {createDraft.price_from_crc.trim() || "No aplica"}</p>
+                    <p><strong>Rangos estructurales:</strong> {createDraft.range_prices.length}</p>
+                    {createDraft.pricing_mode === "variable" ? (
+                      <p><strong>Cotización automática:</strong> Revisión manual requerida</p>
+                    ) : null}
                     <p><strong>Cantidad mínima:</strong> {createDraft.min_qty.trim() || "Sin completar"}</p>
                     <p><strong>Activo:</strong> {createDraft.is_active ? "Sí" : "No"}</p>
                     <p><strong>Permite descuento:</strong> {createDraft.is_discountable ? "Sí" : "No"}</p>
@@ -5029,8 +5637,8 @@ export function ProductsPageClient() {
                   <p><strong>Variante, tamaño y material:</strong> Agrega diferenciadores reales (ej. color, capacidad, medida o acabado). Si no aplican, déjalos vacíos para evitar ruido.</p>
                   <p><strong>SKU autogenerado:</strong> El sistema lo crea automáticamente según la información seleccionada. No necesitas editarlo manualmente.</p>
                   <p><strong>Si el SKU no se puede generar:</strong> Revisa categoría y familia. El formulario mostrará una advertencia hasta que la combinación sea válida.</p>
-                  <p><strong>Modalidad de precio (cómo elegir):</strong> Usa `Precio fijo` cuando siempre vendes al mismo monto (ej. ₡3,500). Usa `Precio desde` cuando tienes un monto base que puede subir según personalización o cantidad (ej. desde ₡2,500). Usa `Precio variable` cuando el precio se define por cotización y no quieres mostrar un monto en el formulario.</p>
-                  <p><strong>Campos de precio en el formulario:</strong> Si eliges `Precio fijo`, se activa solo el campo de precio fijo. Si eliges `Precio desde`, se activa solo el campo de precio desde. Si eliges `Precio variable`, ambos quedan desactivados para evitar confusión.</p>
+                  <p><strong>Modalidad de precio (cómo elegir):</strong> Usa `Precio fijo` cuando siempre vendes al mismo monto (ej. ₡3,500). Usa `Precio por rangos` cuando tienes un precio base de entrada y además estructuras tramos por cantidad. Usa `Precio variable` cuando la cotización será manual.</p>
+                  <p><strong>Campos de precio en el formulario:</strong> En `Precio por rangos` debes completar `precio base de rangos` y construir al menos un tramo estructural (min, max opcional, precio unitario). En `Precio fijo` o `Precio variable` no se usan rangos estructurales.</p>
                   <p><strong>Cantidad mínima:</strong> Define el mínimo real de venta (ej. 1, 6, 12) según tu operación.</p>
                   <p><strong>Reglas comerciales:</strong> `Activo` permite operar/publicar. `Permite descuento` habilita la visibilidad del descuento. `Permite personalizar nombre` y `Requiere aprobación de diseño` deben reflejar el flujo real del producto.</p>
                   <p><strong>Resumen vs Detalle:</strong> `Resumen` es una frase corta de alto impacto (qué es y para qué sirve). `Detalle` amplía la información con características, usos y beneficios.</p>

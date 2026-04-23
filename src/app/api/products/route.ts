@@ -13,7 +13,7 @@ import {
   type ProductPricingMode,
 } from "@/server/services/products";
 
-const PRODUCT_PRICING_MODES: ProductPricingMode[] = ["fixed", "from", "variable"];
+const PRODUCT_PRICING_MODES: ProductPricingMode[] = ["fixed", "range", "variable"];
 
 function parseBooleanParam(searchParams: URLSearchParams, key: string): boolean | undefined {
   const value = parseStringParam(searchParams, key);

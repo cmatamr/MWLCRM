@@ -604,7 +604,7 @@ async function getPromotionRawById(db: SqlDbClient, id: string) {
       prod.family,
       CASE
         WHEN prod.pricing_mode = 'fixed' THEN prod.price_crc
-        WHEN prod.pricing_mode = 'from' THEN prod.price_from_crc
+        WHEN prod.pricing_mode = 'range' THEN prod.price_from_crc
         ELSE COALESCE(prod.price_crc, prod.price_from_crc)
       END AS base_price_crc,
       prod.is_active AS product_is_active,
@@ -735,7 +735,7 @@ export async function listPromotions(
       prod.family,
       CASE
         WHEN prod.pricing_mode = 'fixed' THEN prod.price_crc
-        WHEN prod.pricing_mode = 'from' THEN prod.price_from_crc
+        WHEN prod.pricing_mode = 'range' THEN prod.price_from_crc
         ELSE COALESCE(prod.price_crc, prod.price_from_crc)
       END AS base_price_crc,
       prod.is_active AS product_is_active,

@@ -133,6 +133,7 @@ export const initialProductDetailsMock: ProductDetail[] = [
         is_active: true,
       },
     ],
+    range_prices: [],
     ui_created_locally: false,
   },
   {
@@ -212,6 +213,7 @@ export const initialProductDetailsMock: ProductDetail[] = [
       score: 11.65,
     }),
     discount_rules: [],
+    range_prices: [],
     ui_created_locally: false,
   },
   {
@@ -240,7 +242,7 @@ export const initialProductDetailsMock: ProductDetail[] = [
     is_premium: false,
     is_discountable: false,
     discount_visibility: "never",
-    pricing_mode: "from",
+    pricing_mode: "range",
     summary: "Kit personalizado para celebraciones.",
     details: "Incluye libro de colorear, vaso personalizado, bolso confitero y crayolas.",
     notes: null,
@@ -280,6 +282,28 @@ export const initialProductDetailsMock: ProductDetail[] = [
       score: 2.47,
     }),
     discount_rules: [],
+    range_prices: [
+      {
+        id: 101,
+        product_id: "kit_creativo_std",
+        range_min_qty: 10,
+        range_max_qty: 19,
+        unit_price_crc: 4300,
+        sort_order: 0,
+        is_active: true,
+        created_at: "2026-03-10T10:00:00.000Z",
+      },
+      {
+        id: 102,
+        product_id: "kit_creativo_std",
+        range_min_qty: 20,
+        range_max_qty: null,
+        unit_price_crc: 4100,
+        sort_order: 1,
+        is_active: true,
+        created_at: "2026-03-10T10:00:00.000Z",
+      },
+    ],
     ui_created_locally: false,
   },
   {
@@ -359,6 +383,7 @@ export const initialProductDetailsMock: ProductDetail[] = [
       score: 10.2,
     }),
     discount_rules: [],
+    range_prices: [],
     ui_created_locally: false,
   },
   {
@@ -428,6 +453,7 @@ export const initialProductDetailsMock: ProductDetail[] = [
       score: 1.4,
     }),
     discount_rules: [],
+    range_prices: [],
     ui_created_locally: false,
   },
   {
@@ -456,7 +482,7 @@ export const initialProductDetailsMock: ProductDetail[] = [
     is_premium: false,
     is_discountable: false,
     discount_visibility: "never",
-    pricing_mode: "from",
+    pricing_mode: "range",
     summary: null,
     details: null,
     notes: "Producto desactivado para revision comercial interna.",
@@ -483,6 +509,7 @@ export const initialProductDetailsMock: ProductDetail[] = [
       score: 0.2,
     }),
     discount_rules: [],
+    range_prices: [],
     ui_created_locally: false,
   },
 ];

@@ -1,6 +1,6 @@
 import type { PaginationMeta, PaginationParams } from "@/domain/crm/common";
 
-export type ProductPricingMode = "fixed" | "from" | "variable";
+export type ProductPricingMode = "fixed" | "range" | "variable";
 export type ProductDiscountVisibility =
   | "never"
   | "only_if_customer_requests"
@@ -55,6 +55,62 @@ export interface ProductDiscountRuleMeta {
   rule_type: string;
   notes: string | null;
   is_active: boolean;
+}
+
+export interface ProductRangePriceMeta {
+  id: number;
+  product_id: string;
+  range_min_qty: number;
+  range_max_qty: number | null;
+  unit_price_crc: number;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export type ProductPricingEngineStatusCode =
+  | "manual_required"
+  | "min_qty_not_met"
+  | "configuration_invalid";
+
+export type ProductPricingResolvedMode =
+  | "base"
+  | "base_below_promo"
+  | "range"
+  | "block_exact"
+  | "block_round_up"
+  | "block_post_top"
+  | ProductPricingEngineStatusCode;
+
+export interface ProductPricingEngineStatusHint {
+  code: ProductPricingEngineStatusCode;
+  message: string;
+  reason?: string | null;
+  min_qty?: number | null;
+}
+
+export type ProductPricingResolutionStatus =
+  | "quotable"
+  | "manual_required"
+  | "min_qty_not_met"
+  | "configuration_invalid";
+
+export interface ProductPricingResolution {
+  product_id: string;
+  qty_requested: number;
+  status: ProductPricingResolutionStatus;
+  mode: ProductPricingResolvedMode;
+  pricing_mode: ProductPricingMode | null;
+  unit_price_crc: number | null;
+  total_crc: number | null;
+  quoted_qty: number | null;
+  suggested_qty: number | null;
+  min_qty: number | null;
+  range_min_qty: number | null;
+  range_max_qty: number | null;
+  reason: string | null;
+  message: string;
+  raw: Record<string, unknown>;
 }
 
 export interface ProductSearchMeta {
@@ -141,6 +197,8 @@ export interface ProductDetail {
   images: ProductImageMeta[];
   search_meta: ProductSearchMeta;
   discount_rules: ProductDiscountRuleMeta[];
+  range_prices: ProductRangePriceMeta[];
+  pricing_engine_hint?: ProductPricingEngineStatusHint | null;
   integrity_alerts?: string[];
   ui_created_locally?: boolean;
 }
@@ -390,6 +448,15 @@ export interface SaveProductImageInput {
   sort_order?: number;
 }
 
+export interface SaveProductRangePriceInput {
+  id?: number | null;
+  range_min_qty: number;
+  range_max_qty?: number | null;
+  unit_price_crc: number;
+  sort_order?: number;
+  is_active?: boolean;
+}
+
 export interface SaveProductInput {
   product_id?: string | null;
   product: CreateProductInput;
@@ -397,6 +464,7 @@ export interface SaveProductInput {
   aliases?: SaveProductAliasInput[];
   search_terms?: SaveProductSearchTermInput[];
   images?: SaveProductImageInput[];
+  range_prices?: SaveProductRangePriceInput[];
 }
 
 export interface SaveProductResult {

@@ -155,11 +155,34 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
         ...init,
       });
     },
-    getOrderItemProductOptions(orderId: string, query?: string, init?: RequestInit) {
-      return get<OrderItemProductOption[]>(`/api/orders/${orderId}/items/products`, { query }, init);
+    getOrderItemProductOptions(
+      orderId: string,
+      input?: { query?: string; qty?: number; exactProductId?: string },
+      init?: RequestInit,
+    ) {
+      return get<OrderItemProductOption[]>(
+        `/api/orders/${orderId}/items/products`,
+        {
+          query: input?.query,
+          qty: input?.qty,
+          exact_product_id: input?.exactProductId,
+        },
+        init,
+      );
     },
-    listOrderCatalogProductOptions(query?: string, init?: RequestInit) {
-      return get<OrderItemProductOption[]>("/api/orders/item-products", { query }, init);
+    listOrderCatalogProductOptions(
+      input?: { query?: string; qty?: number; exactProductId?: string },
+      init?: RequestInit,
+    ) {
+      return get<OrderItemProductOption[]>(
+        "/api/orders/item-products",
+        {
+          query: input?.query,
+          qty: input?.qty,
+          exact_product_id: input?.exactProductId,
+        },
+        init,
+      );
     },
     listProductsCatalog(params?: ListCatalogProductsParams, init?: RequestInit) {
       return get<ProductsCatalogResponse>("/api/products", {

@@ -104,6 +104,23 @@ export interface OrderItemProductOption {
   name: string;
   sku: string;
   unitPriceCrc: number | null;
+  pricingStatus: "quotable" | "manual_required" | "min_qty_not_met" | "configuration_invalid";
+  pricingMode:
+    | "base"
+    | "base_below_promo"
+    | "range"
+    | "block_exact"
+    | "block_round_up"
+    | "block_post_top"
+    | "manual_required"
+    | "min_qty_not_met"
+    | "configuration_invalid";
+  quotedQty: number | null;
+  suggestedQty: number | null;
+  minQty: number | null;
+  totalCrc: number | null;
+  pricingMessage: string;
+  requiresManualReview: boolean;
   category: string;
   family: string;
 }

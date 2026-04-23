@@ -26,6 +26,15 @@ export async function POST(request: Request, context: RouteContext<{ id: string 
         return handleRouteError(notFound(error.message, error.details));
       }
 
+      if (
+        error.code === "PRICING_MANUAL_REQUIRED" ||
+        error.code === "PRICING_MIN_QTY_NOT_MET" ||
+        error.code === "PRICING_CONFIGURATION_INVALID" ||
+        error.code === "PRICING_NON_LINEAR_UNSUPPORTED"
+      ) {
+        return handleRouteError(badRequest(error.message, error.details));
+      }
+
       if (error.code === "PRODUCT_ALREADY_IN_ORDER") {
         return handleRouteError(conflict(error.message, error.details));
       }

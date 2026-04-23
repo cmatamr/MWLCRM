@@ -18,6 +18,8 @@ import {
   resolveDb,
   ServiceOptions,
 } from "@/server/services/shared";
+import { resolveProductPricing } from "@/server/services/products";
+import type { ProductPricingResolution } from "@/server/services/products";
 
 import { mapOrderDetail, mapOrderItemProductOption, mapOrderListItem } from "./mappers";
 import type {
@@ -58,6 +60,10 @@ type OrderItemCatalogProduct = {
   sku: string;
   priceCrc: number | null;
   priceFromCrc: number | null;
+  pricingMode: string;
+  minQty: number | null;
+  category: string;
+  family: string;
 };
 
 export class PaymentReceiptError extends Error {
@@ -88,7 +94,11 @@ export class CreateOrderError extends Error {
     | "CUSTOMER_NOT_FOUND"
     | "CUSTOMER_WITHOUT_CONVERSATION"
     | "PRODUCT_NOT_FOUND"
-    | "DUPLICATE_PRODUCT";
+    | "DUPLICATE_PRODUCT"
+    | "PRICING_MANUAL_REQUIRED"
+    | "PRICING_MIN_QTY_NOT_MET"
+    | "PRICING_CONFIGURATION_INVALID"
+    | "PRICING_NON_LINEAR_UNSUPPORTED";
 
   constructor(
     code: CreateOrderError["code"],
@@ -102,7 +112,14 @@ export class CreateOrderError extends Error {
 }
 
 export class UpdateOrderItemQuantityError extends Error {
-  code: "ORDER_NOT_FOUND" | "ITEM_NOT_FOUND" | "ITEM_NOT_IN_ORDER";
+  code:
+    | "ORDER_NOT_FOUND"
+    | "ITEM_NOT_FOUND"
+    | "ITEM_NOT_IN_ORDER"
+    | "PRICING_MANUAL_REQUIRED"
+    | "PRICING_MIN_QTY_NOT_MET"
+    | "PRICING_CONFIGURATION_INVALID"
+    | "PRICING_NON_LINEAR_UNSUPPORTED";
 
   constructor(
     code: UpdateOrderItemQuantityError["code"],
@@ -179,7 +196,11 @@ export class CreateOrderItemError extends Error {
   code:
     | "ORDER_NOT_FOUND"
     | "PRODUCT_NOT_FOUND"
-    | "PRODUCT_ALREADY_IN_ORDER";
+    | "PRODUCT_ALREADY_IN_ORDER"
+    | "PRICING_MANUAL_REQUIRED"
+    | "PRICING_MIN_QTY_NOT_MET"
+    | "PRICING_CONFIGURATION_INVALID"
+    | "PRICING_NON_LINEAR_UNSUPPORTED";
 
   constructor(
     code: CreateOrderItemError["code"],
@@ -848,17 +869,16 @@ function buildOrderItemCreateData(input: {
   orderId: string;
   product: OrderItemCatalogProduct;
   quantity: number;
+  unitPriceCrc: number | null;
 }): Prisma.OrderItemUncheckedCreateInput {
-  const unitPriceCrc = input.product.priceCrc ?? input.product.priceFromCrc ?? null;
-
   return {
     orderId: input.orderId,
     productId: input.product.id,
     quantity: input.quantity,
-    unitPriceCrc,
+    unitPriceCrc: input.unitPriceCrc,
     totalPriceCrc: calculateOrderItemSubtotalCrc({
       quantity: input.quantity,
-      unitPriceCrc,
+      unitPriceCrc: input.unitPriceCrc,
     }),
     productNameSnapshot: input.product.name,
     skuSnapshot: input.product.sku,
@@ -881,10 +901,167 @@ async function getCatalogProductsByIds(
       sku: true,
       priceCrc: true,
       priceFromCrc: true,
+      pricingMode: true,
+      minQty: true,
+      category: true,
+      family: true,
     },
   });
 
   return new Map(products.map((product) => [product.id, product]));
+}
+
+function toOrderOptionPricingPayload(input: ProductPricingResolution): {
+  unitPriceCrc: number | null;
+  pricingStatus: OrderItemProductOption["pricingStatus"];
+  pricingMode: OrderItemProductOption["pricingMode"];
+  quotedQty: number | null;
+  suggestedQty: number | null;
+  minQty: number | null;
+  totalCrc: number | null;
+  pricingMessage: string;
+  requiresManualReview: boolean;
+} {
+  return {
+    unitPriceCrc: input.unit_price_crc,
+    pricingStatus: input.status,
+    pricingMode: input.mode,
+    quotedQty: input.quoted_qty,
+    suggestedQty: input.suggested_qty,
+    minQty: input.min_qty,
+    totalCrc: input.total_crc,
+    pricingMessage: input.message,
+    requiresManualReview:
+      input.status !== "quotable" ||
+      input.unit_price_crc == null ||
+      input.total_crc == null,
+  };
+}
+
+function pricingStatusToCreateOrderErrorCode(
+  status: ProductPricingResolution["status"],
+): CreateOrderError["code"] {
+  if (status === "manual_required") {
+    return "PRICING_MANUAL_REQUIRED";
+  }
+
+  if (status === "min_qty_not_met") {
+    return "PRICING_MIN_QTY_NOT_MET";
+  }
+
+  return "PRICING_CONFIGURATION_INVALID";
+}
+
+function pricingStatusToCreateOrderItemErrorCode(
+  status: ProductPricingResolution["status"],
+): CreateOrderItemError["code"] {
+  if (status === "manual_required") {
+    return "PRICING_MANUAL_REQUIRED";
+  }
+
+  if (status === "min_qty_not_met") {
+    return "PRICING_MIN_QTY_NOT_MET";
+  }
+
+  return "PRICING_CONFIGURATION_INVALID";
+}
+
+function pricingStatusToUpdateQtyErrorCode(
+  status: ProductPricingResolution["status"],
+): UpdateOrderItemQuantityError["code"] {
+  if (status === "manual_required") {
+    return "PRICING_MANUAL_REQUIRED";
+  }
+
+  if (status === "min_qty_not_met") {
+    return "PRICING_MIN_QTY_NOT_MET";
+  }
+
+  return "PRICING_CONFIGURATION_INVALID";
+}
+
+function requireLinearUnitPriceForOrder(
+  resolution: ProductPricingResolution,
+  context: {
+    source: "create_order" | "create_order_item" | "update_order_item_quantity";
+    orderId?: string;
+    productId: string;
+    itemId?: string;
+    quantity: number;
+  },
+): number {
+  if (resolution.status !== "quotable") {
+    if (context.source === "create_order") {
+      throw new CreateOrderError(
+        pricingStatusToCreateOrderErrorCode(resolution.status),
+        resolution.message,
+        {
+          orderId: context.orderId ?? null,
+          productId: context.productId,
+          quantity: context.quantity,
+          pricing: resolution,
+        },
+      );
+    }
+
+    if (context.source === "create_order_item") {
+      throw new CreateOrderItemError(
+        pricingStatusToCreateOrderItemErrorCode(resolution.status),
+        resolution.message,
+        {
+          orderId: context.orderId ?? null,
+          productId: context.productId,
+          quantity: context.quantity,
+          pricing: resolution,
+        },
+      );
+    }
+
+    throw new UpdateOrderItemQuantityError(
+      pricingStatusToUpdateQtyErrorCode(resolution.status),
+      resolution.message,
+      {
+        orderId: context.orderId ?? null,
+        productId: context.productId,
+        itemId: context.itemId ?? null,
+        quantity: context.quantity,
+        pricing: resolution,
+      },
+    );
+  }
+
+  if (resolution.unit_price_crc == null) {
+    const message =
+      "La cotizacion actual no incluye precio unitario lineal y requiere revision manual.";
+
+    if (context.source === "create_order") {
+      throw new CreateOrderError("PRICING_NON_LINEAR_UNSUPPORTED", message, {
+        orderId: context.orderId ?? null,
+        productId: context.productId,
+        quantity: context.quantity,
+        pricing: resolution,
+      });
+    }
+
+    if (context.source === "create_order_item") {
+      throw new CreateOrderItemError("PRICING_NON_LINEAR_UNSUPPORTED", message, {
+        orderId: context.orderId ?? null,
+        productId: context.productId,
+        quantity: context.quantity,
+        pricing: resolution,
+      });
+    }
+
+    throw new UpdateOrderItemQuantityError("PRICING_NON_LINEAR_UNSUPPORTED", message, {
+      orderId: context.orderId ?? null,
+      productId: context.productId,
+      itemId: context.itemId ?? null,
+      quantity: context.quantity,
+      pricing: resolution,
+    });
+  }
+
+  return resolution.unit_price_crc;
 }
 
 function findDuplicateProductId(items: CreateOrderInput["items"]) {
@@ -936,12 +1113,17 @@ async function recalculateOrderTotals(
 async function listAvailableOrderItemProducts(
   input: {
     query?: string;
+    qty?: number;
+    exactProductId?: string;
     excludeOrderId?: string;
   },
   options?: ServiceOptions,
 ): Promise<OrderItemProductOption[]> {
   const db = resolveDb(options);
   const normalizedQuery = input.query?.trim();
+  const normalizedExactProductId = input.exactProductId?.trim() || undefined;
+  const normalizedQty =
+    input.qty != null && Number.isInteger(input.qty) && input.qty > 0 ? input.qty : 1;
 
   if (input.excludeOrderId) {
     const order = await db.order.findUnique({
@@ -964,6 +1146,11 @@ async function listAvailableOrderItemProducts(
     where: {
       isActive: true,
       isAgentVisible: true,
+      ...(normalizedExactProductId
+        ? {
+            id: normalizedExactProductId,
+          }
+        : {}),
       ...(normalizedQuery
         ? {
             OR: [
@@ -1007,24 +1194,48 @@ async function listAvailableOrderItemProducts(
       sku: true,
       priceCrc: true,
       priceFromCrc: true,
+      pricingMode: true,
+      minQty: true,
       category: true,
       family: true,
     },
   });
 
-  return products.map(mapOrderItemProductOption);
+  const resolvedPricing = await Promise.all(
+    products.map(async (product) => {
+      const pricing = await resolveProductPricing(
+        { productId: product.id, qty: normalizedQty },
+        options,
+      );
+
+      return mapOrderItemProductOption({
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        category: product.category,
+        family: product.family,
+        ...toOrderOptionPricingPayload(pricing),
+      });
+    }),
+  );
+
+  return resolvedPricing;
 }
 
 export async function listOrderItemProductOptions(
   input: {
     orderId: string;
     query?: string;
+    qty?: number;
+    exactProductId?: string;
   },
   options?: ServiceOptions,
 ): Promise<OrderItemProductOption[]> {
   return listAvailableOrderItemProducts(
     {
       query: input.query,
+      qty: input.qty,
+      exactProductId: input.exactProductId,
       excludeOrderId: input.orderId,
     },
     options,
@@ -1034,6 +1245,8 @@ export async function listOrderItemProductOptions(
 export async function listOrderCatalogProductOptions(
   input: {
     query?: string;
+    qty?: number;
+    exactProductId?: string;
   },
   options?: ServiceOptions,
 ): Promise<OrderItemProductOption[]> {
@@ -1098,7 +1311,7 @@ export async function createOrder(
 
     const productIds = input.items.map((item) => item.productId);
     const productsById = await getCatalogProductsByIds(tx, productIds);
-    const preparedItems = input.items.map((item) => {
+    const preparedItems = await Promise.all(input.items.map(async (item) => {
       const product = productsById.get(item.productId);
 
       if (!product) {
@@ -1108,12 +1321,23 @@ export async function createOrder(
         });
       }
 
+      const pricing = await resolveProductPricing(
+        { productId: product.id, qty: item.quantity },
+        { db: tx },
+      );
+      const unitPriceCrc = requireLinearUnitPriceForOrder(pricing, {
+        source: "create_order",
+        productId: product.id,
+        quantity: item.quantity,
+      });
+
       return buildOrderItemCreateData({
         orderId: "",
         product,
         quantity: item.quantity,
+        unitPriceCrc,
       });
-    });
+    }));
 
     const subtotalCrc = calculateOrderItemsSubtotalCrc(
       preparedItems.map((item) => ({
@@ -1216,11 +1440,24 @@ export async function createOrderItem(
         },
       );
     }
+
+    const pricing = await resolveProductPricing(
+      { productId: product.id, qty: input.quantity },
+      { db: tx },
+    );
+    const unitPriceCrc = requireLinearUnitPriceForOrder(pricing, {
+      source: "create_order_item",
+      orderId: input.orderId,
+      productId: product.id,
+      quantity: input.quantity,
+    });
+
     await tx.orderItem.create({
       data: buildOrderItemCreateData({
         orderId: input.orderId,
         product,
         quantity: input.quantity,
+        unitPriceCrc,
       }),
     });
 
@@ -1470,7 +1707,7 @@ export async function updateOrderItemQuantity(
       select: {
         id: true,
         orderId: true,
-        unitPriceCrc: true,
+        productId: true,
       },
     });
 
@@ -1493,8 +1730,29 @@ export async function updateOrderItemQuantity(
       );
     }
 
-    const netAdjustment = order.subtotalCrc - order.totalCrc;
-    const nextLineTotal = item.unitPriceCrc != null ? item.unitPriceCrc * input.quantity : null;
+    if (!item.productId) {
+      throw new UpdateOrderItemQuantityError(
+        "PRICING_CONFIGURATION_INVALID",
+        "El item no tiene producto asociado para resolver pricing.",
+        {
+          orderId: input.orderId,
+          itemId: input.itemId.toString(),
+        },
+      );
+    }
+
+    const pricing = await resolveProductPricing(
+      { productId: item.productId, qty: input.quantity },
+      { db: tx },
+    );
+    const unitPriceCrc = requireLinearUnitPriceForOrder(pricing, {
+      source: "update_order_item_quantity",
+      orderId: input.orderId,
+      itemId: input.itemId.toString(),
+      productId: item.productId,
+      quantity: input.quantity,
+    });
+    const nextLineTotal = unitPriceCrc * input.quantity;
 
     await tx.orderItem.update({
       where: {
@@ -1502,6 +1760,7 @@ export async function updateOrderItemQuantity(
       },
       data: {
         quantity: input.quantity,
+        unitPriceCrc,
         totalPriceCrc: nextLineTotal,
       },
     });
@@ -1851,6 +2110,12 @@ export async function deleteOrder(
         orderId,
       });
     }
+
+    await tx.orderItem.deleteMany({
+      where: {
+        orderId,
+      },
+    });
 
     await tx.order.delete({
       where: {

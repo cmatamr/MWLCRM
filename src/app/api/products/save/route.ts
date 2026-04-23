@@ -7,12 +7,14 @@ import {
 } from "@/lib/products/search-term-quality";
 import { z } from "zod";
 
+const POSTGRES_INT4_MAX = 2_147_483_647;
+
 const productPayloadSchema = z
   .object({
     name: z.string().trim().min(1).max(180),
     category: z.string().trim().min(1),
     family: z.string().trim().min(1),
-    pricing_mode: z.enum(["fixed", "from", "variable"]),
+    pricing_mode: z.enum(["fixed", "range", "variable"]),
     price_crc: z.number().int().min(0).optional().nullable(),
     price_from_crc: z.number().int().min(0).optional().nullable(),
     min_qty: z.number().int().min(1),
@@ -84,6 +86,20 @@ const saveProductPayloadSchema = z
             alt_text: z.string().max(300).optional().nullable(),
             is_primary: z.boolean().optional(),
             sort_order: z.number().int().min(0).optional(),
+          })
+          .strict(),
+      )
+      .optional(),
+    range_prices: z
+      .array(
+        z
+          .object({
+            id: z.number().int().optional().nullable(),
+            range_min_qty: z.number().int().min(1).max(POSTGRES_INT4_MAX),
+            range_max_qty: z.number().int().min(1).max(POSTGRES_INT4_MAX).optional().nullable(),
+            unit_price_crc: z.number().int().min(1).max(POSTGRES_INT4_MAX),
+            sort_order: z.number().int().min(0).max(POSTGRES_INT4_MAX).optional(),
+            is_active: z.boolean().optional(),
           })
           .strict(),
       )

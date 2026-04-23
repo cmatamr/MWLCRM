@@ -12,7 +12,7 @@ const FRIENDLY_FIELD_LABELS: Record<string, string> = {
   size_label: "Tamaño",
   base_color: "Color base",
   price_crc: "Precio (CRC)",
-  price_from_crc: "Precio desde (CRC)",
+  price_from_crc: "Precio base rangos (CRC)",
   discount_visibility: "Visibilidad del descuento",
   search_boost: "Prioridad de búsqueda",
   source_type: "Origen del registro",
@@ -43,13 +43,13 @@ export function getFriendlyFieldLabel(fieldKey: string): string {
   return FRIENDLY_FIELD_LABELS[fieldKey] ?? fieldKey;
 }
 
-export function getFriendlyPricingModeLabel(mode: "fixed" | "from" | "variable"): string {
+export function getFriendlyPricingModeLabel(mode: "fixed" | "range" | "variable"): string {
   if (mode === "fixed") {
     return "Precio fijo";
   }
 
-  if (mode === "from") {
-    return "Precio desde";
+  if (mode === "range") {
+    return "Precio por rangos";
   }
 
   return "Precio variable";

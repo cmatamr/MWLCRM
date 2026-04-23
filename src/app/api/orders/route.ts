@@ -32,6 +32,15 @@ export async function POST(request: Request) {
         return handleRouteError(notFound(error.message, error.details));
       }
 
+      if (
+        error.code === "PRICING_MANUAL_REQUIRED" ||
+        error.code === "PRICING_MIN_QTY_NOT_MET" ||
+        error.code === "PRICING_CONFIGURATION_INVALID" ||
+        error.code === "PRICING_NON_LINEAR_UNSUPPORTED"
+      ) {
+        return handleRouteError(badRequest(error.message, error.details));
+      }
+
       if (error.code === "CUSTOMER_WITHOUT_CONVERSATION" || error.code === "DUPLICATE_PRODUCT") {
         return handleRouteError(conflict(error.message, error.details));
       }

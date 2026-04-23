@@ -37,6 +37,15 @@ export async function PATCH(
       ) {
         return handleRouteError(notFound(error.message, error.details));
       }
+
+      if (
+        error.code === "PRICING_MANUAL_REQUIRED" ||
+        error.code === "PRICING_MIN_QTY_NOT_MET" ||
+        error.code === "PRICING_CONFIGURATION_INVALID" ||
+        error.code === "PRICING_NON_LINEAR_UNSUPPORTED"
+      ) {
+        return handleRouteError(badRequest(error.message, error.details));
+      }
     }
 
     return handleRouteError(error);
