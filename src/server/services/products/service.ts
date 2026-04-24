@@ -1175,9 +1175,9 @@ export async function resolveProductPricing(
 
   const [row] = await db.$queryRaw<Array<{ payload: unknown }>>(Prisma.sql`
     SELECT public.mwl_resolve_product_pricing(
-      ${input.productId},
-      ${normalizedQty},
-      ${input.now ?? new Date()}
+      ${input.productId}::text,
+      ${normalizedQty}::integer,
+      ${input.now ?? new Date()}::timestamptz
     ) AS payload
   `);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { X, Trash2 } from "lucide-react";
 
 import {
@@ -10,6 +10,8 @@ import {
 import { useCreateOrder } from "@/hooks/use-create-order";
 import { useCustomers } from "@/hooks/use-customers";
 import { Button } from "@/components/ui/button";
+import { crmApiClient } from "@/lib/api/crm";
+import { FetcherError } from "@/lib/fetcher";
 import { formatCurrencyCRC } from "@/lib/formatters";
 import type { CustomerListItem } from "@/server/services/customers/types";
 import type { OrderItemProductOption } from "@/server/services/orders/types";
@@ -25,6 +27,16 @@ type CreateOrderModalProps = {
 type DraftOrderItem = {
   product: OrderItemProductOption;
   quantityInput: string;
+  resolvedQty: number | null;
+  repricingQty: number | null;
+  pricingError: string | null;
+};
+
+type DraftItemSummary = DraftOrderItem & {
+  quantity: number | null;
+  validationError: string | null;
+  hasFreshPricing: boolean;
+  totalPriceCrc: number | null;
 };
 
 function parseDraftQuantity(value: string) {
@@ -43,6 +55,8 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerListItem | null>(null);
   const [draftItems, setDraftItems] = useState<DraftOrderItem[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
+  const [isFinalRepricing, setIsFinalRepricing] = useState(false);
+  const quoteRequestByProductRef = useRef<Record<string, number>>({});
   const customersQuery = useCustomers({
     page: 1,
     pageSize: 8,
@@ -56,17 +70,127 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
       setSelectedCustomer(null);
       setDraftItems([]);
       setFormError(null);
+      setIsFinalRepricing(false);
+      quoteRequestByProductRef.current = {};
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const itemsToRequote = draftItems
+      .map((item) => {
+        const parsed = parseDraftQuantity(item.quantityInput);
+        return {
+          item,
+          quantity: parsed.quantity,
+        };
+      })
+      .filter(
+        (entry) =>
+          entry.quantity != null &&
+          entry.item.resolvedQty !== entry.quantity &&
+          entry.item.repricingQty !== entry.quantity,
+      );
+
+    if (itemsToRequote.length === 0) {
+      return;
+    }
+
+    for (const entry of itemsToRequote) {
+      const quantity = entry.quantity;
+
+      if (quantity == null) {
+        continue;
+      }
+
+      const requestVersion = (quoteRequestByProductRef.current[entry.item.product.id] ?? 0) + 1;
+      quoteRequestByProductRef.current[entry.item.product.id] = requestVersion;
+
+      setDraftItems((current) =>
+        current.map((draft) =>
+          draft.product.id === entry.item.product.id
+            ? {
+                ...draft,
+                repricingQty: quantity,
+                pricingError: null,
+              }
+            : draft,
+        ),
+      );
+
+      void crmApiClient
+        .listOrderCatalogProductOptions({
+          exactProductId: entry.item.product.id,
+          qty: quantity,
+        })
+        .then((options) => {
+          if (quoteRequestByProductRef.current[entry.item.product.id] !== requestVersion) {
+            return;
+          }
+
+          const quotedProduct = options.find((option) => option.id === entry.item.product.id);
+
+          setDraftItems((current) =>
+            current.map((draft) =>
+              draft.product.id === entry.item.product.id
+                ? quotedProduct
+                  ? {
+                      ...draft,
+                      product: quotedProduct,
+                      resolvedQty: quantity,
+                      repricingQty: null,
+                      pricingError: null,
+                    }
+                  : {
+                      ...draft,
+                      resolvedQty: null,
+                      repricingQty: null,
+                      pricingError:
+                        "No se pudo recalcular el precio para este producto en la cantidad ingresada.",
+                    }
+                : draft,
+            ),
+          );
+        })
+        .catch((error: unknown) => {
+          if (quoteRequestByProductRef.current[entry.item.product.id] !== requestVersion) {
+            return;
+          }
+
+          const errorMessage =
+            error instanceof FetcherError
+              ? error.message
+              : "No se pudo recalcular el precio para este item.";
+
+          setDraftItems((current) =>
+            current.map((draft) =>
+              draft.product.id === entry.item.product.id
+                ? {
+                    ...draft,
+                    resolvedQty: null,
+                    repricingQty: null,
+                    pricingError: errorMessage,
+                  }
+                : draft,
+            ),
+          );
+        });
+    }
+  }, [draftItems, isOpen]);
 
   const draftItemSummaries = useMemo(
     () =>
       draftItems.map((item) => {
         const parsed = parseDraftQuantity(item.quantityInput);
+        const hasFreshPricing = parsed.quantity != null && item.resolvedQty === parsed.quantity;
         const totalPriceCrc =
-          parsed.quantity == null
+          parsed.quantity == null || item.repricingQty != null || !hasFreshPricing || item.pricingError != null
             ? null
-            : calculateOrderItemSubtotalCrc({
+            : item.product.totalCrc ??
+              calculateOrderItemSubtotalCrc({
                 quantity: parsed.quantity,
                 unitPriceCrc: item.product.unitPriceCrc,
               });
@@ -75,8 +199,9 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
           ...item,
           quantity: parsed.quantity,
           validationError: parsed.validationError,
+          hasFreshPricing,
           totalPriceCrc,
-        };
+        } satisfies DraftItemSummary;
       }),
     [draftItems],
   );
@@ -109,6 +234,9 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
       {
         product: input.product,
         quantityInput: String(input.quantity),
+        resolvedQty: input.quantity,
+        repricingQty: null,
+        pricingError: null,
       },
     ]);
   }
@@ -120,6 +248,8 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
           ? {
               ...item,
               quantityInput,
+              resolvedQty: null,
+              pricingError: null,
             }
           : item,
       ),
@@ -144,15 +274,146 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
     }
 
     const invalidDraft = draftItemSummaries.find(
-      (item) => item.quantity == null || !item.product.name.trim(),
+      (item) =>
+        item.quantity == null ||
+        !item.product.name.trim() ||
+        item.repricingQty != null ||
+        !item.hasFreshPricing ||
+        item.pricingError != null ||
+        item.product.requiresManualReview,
     );
 
     if (invalidDraft) {
-      setFormError("Corrige las cantidades de los items antes de guardar.");
+      setFormError(
+        "Corrige los items antes de guardar. Hay productos con cantidad invalida, recotizacion pendiente o pricing no cotizable para la cantidad actual.",
+      );
       return;
     }
 
+    setIsFinalRepricing(true);
+
     try {
+      const finalQuoteResults = await Promise.all(
+        draftItemSummaries.map(async (item) => {
+          const quantity = item.quantity;
+
+          if (quantity == null) {
+            return {
+              productId: item.product.id,
+              quantity: null,
+              quotedProduct: null,
+              error: "Cantidad invalida.",
+            };
+          }
+
+          try {
+            const options = await crmApiClient.listOrderCatalogProductOptions({
+              exactProductId: item.product.id,
+              qty: quantity,
+            });
+            const quotedProduct = options.find((option) => option.id === item.product.id) ?? null;
+
+            return {
+              productId: item.product.id,
+              quantity,
+              quotedProduct,
+              error: quotedProduct
+                ? null
+                : "No se pudo recotizar el producto para la cantidad solicitada.",
+            };
+          } catch (error) {
+            return {
+              productId: item.product.id,
+              quantity,
+              quotedProduct: null,
+              error:
+                error instanceof FetcherError
+                  ? error.message
+                  : "No se pudo recotizar el producto antes de guardar.",
+            };
+          }
+        }),
+      );
+
+      const quotesByProductId = new Map(
+        finalQuoteResults.map((result) => [result.productId, result]),
+      );
+
+      let hasNonQuotableItem = false;
+      let hasPriceChange = false;
+
+      for (const summary of draftItemSummaries) {
+        const result = quotesByProductId.get(summary.product.id);
+        if (!result) {
+          hasNonQuotableItem = true;
+          continue;
+        }
+
+        if (result.error || !result.quotedProduct || result.quantity == null) {
+          hasNonQuotableItem = true;
+          continue;
+        }
+
+        if (result.quotedProduct.requiresManualReview) {
+          hasNonQuotableItem = true;
+        }
+
+        if (
+          result.quotedProduct.unitPriceCrc !== summary.product.unitPriceCrc ||
+          result.quotedProduct.totalCrc !== summary.product.totalCrc ||
+          result.quotedProduct.pricingStatus !== summary.product.pricingStatus ||
+          result.quotedProduct.pricingMode !== summary.product.pricingMode ||
+          result.quotedProduct.quotedQty !== summary.product.quotedQty ||
+          result.quotedProduct.suggestedQty !== summary.product.suggestedQty ||
+          result.quotedProduct.minQty !== summary.product.minQty ||
+          result.quotedProduct.pricingMessage !== summary.product.pricingMessage ||
+          result.quotedProduct.requiresManualReview !== summary.product.requiresManualReview
+        ) {
+          hasPriceChange = true;
+        }
+      }
+
+      setDraftItems((current) =>
+        current.map((item) => {
+          const result = quotesByProductId.get(item.product.id);
+
+          if (!result) {
+            return item;
+          }
+
+          if (result.error || !result.quotedProduct || result.quantity == null) {
+            return {
+              ...item,
+              resolvedQty: null,
+              repricingQty: null,
+              pricingError: result.error ?? "No se pudo recotizar el item.",
+            };
+          }
+
+          return {
+            ...item,
+            product: result.quotedProduct,
+            resolvedQty: result.quantity,
+            repricingQty: null,
+            pricingError: null,
+          };
+        }),
+      );
+
+      if (hasNonQuotableItem) {
+        setFormError(
+          "Algunos items ya no son cotizables para la cantidad actual. Revisa las alertas de pricing antes de guardar.",
+        );
+        return;
+      }
+
+      if (hasPriceChange) {
+        setFormError(
+          "Los precios se recotizaron y cambiaron antes de guardar. Revisa el total actualizado y presiona Guardar orden nuevamente para confirmar.",
+        );
+        return;
+      }
+
       await createOrderMutation.mutateAsync({
         customerId: selectedCustomer.id,
         items: draftItemSummaries.map((item) => ({
@@ -168,6 +429,8 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
       }
 
       setFormError("No se pudo crear la orden.");
+    } finally {
+      setIsFinalRepricing(false);
     }
   }
 
@@ -215,8 +478,23 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
             <Button type="button" variant="outline" onClick={handleClose} disabled={createOrderMutation.isPending}>
               Cancelar
             </Button>
-            <Button type="button" onClick={() => void handleSubmit()} disabled={createOrderMutation.isPending}>
-              {createOrderMutation.isPending ? "Guardando..." : "Guardar orden"}
+            <Button
+              type="button"
+              onClick={() => void handleSubmit()}
+              disabled={
+                createOrderMutation.isPending ||
+                isFinalRepricing ||
+                draftItemSummaries.some(
+                  (item) =>
+                    item.quantity == null ||
+                    item.repricingQty != null ||
+                    !item.hasFreshPricing ||
+                    item.pricingError != null ||
+                    item.product.requiresManualReview,
+                )
+              }
+            >
+              {createOrderMutation.isPending || isFinalRepricing ? "Guardando..." : "Guardar orden"}
             </Button>
           </div>
         </div>
@@ -392,6 +670,22 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
                               {item.product.unitPriceCrc != null
                                 ? formatCurrencyCRC(item.product.unitPriceCrc)
                                 : "Pendiente"}
+                              {item.repricingQty != null ? (
+                                <p className="mt-1 text-xs text-amber-700">
+                                  Recalculando precio para cantidad {item.repricingQty}...
+                                </p>
+                              ) : null}
+                              {item.pricingError ? (
+                                <p className="mt-1 text-xs text-rose-700">{item.pricingError}</p>
+                              ) : null}
+                              {!item.repricingQty && !item.pricingError ? (
+                                <p className="mt-1 text-xs text-muted-foreground">{item.product.pricingMessage}</p>
+                              ) : null}
+                              {item.product.suggestedQty != null ? (
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  Cantidad sugerida: {item.product.suggestedQty}
+                                </p>
+                              ) : null}
                             </td>
                             <td className="px-4 py-4 font-medium text-slate-950">
                               {item.totalPriceCrc != null ? formatCurrencyCRC(item.totalPriceCrc) : "Pendiente"}
