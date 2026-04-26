@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { createPortal } from "react-dom";
 
@@ -13,6 +13,7 @@ import { useRejectPaymentReceipt } from "@/hooks/use-reject-payment-receipt";
 import { useUpdatePaymentReceipt } from "@/hooks/use-update-payment-receipt";
 import { useValidatePaymentReceipt } from "@/hooks/use-validate-payment-receipt";
 import { Button } from "@/components/ui/button";
+import { useModalDismiss } from "@/components/ui/modal-dismiss";
 import { TableEmptyStateRow } from "@/components/ui/state-display";
 import { StatusBadgeFromViewModel } from "@/components/ui/status-badge";
 import { cn } from "@/lib/utils";
@@ -140,6 +141,12 @@ export function PaymentReceiptsTable({ orderId, receipts }: PaymentReceiptsTable
 
     setReceiptPendingValidationConfirm(null);
   }
+
+  const { onBackdropMouseDown: onValidateConfirmBackdropMouseDown } = useModalDismiss({
+    isOpen: receiptPendingValidationConfirm != null,
+    onClose: closeValidateConfirmModal,
+    isDisabled: validateReceiptMutation.isPending,
+  });
 
   async function confirmValidateReceipt() {
     if (!receiptPendingValidationConfirm || validateReceiptMutation.isPending) {
@@ -298,30 +305,33 @@ export function PaymentReceiptsTable({ orderId, receipts }: PaymentReceiptsTable
     };
   }, [openMenuReceiptId]);
 
-  function calculateMenuPosition(element: HTMLButtonElement, receiptId: string) {
-    const receipt = receipts.find((item) => item.id === receiptId);
-    const normalizedStatus = receipt ? getNormalizedReceiptStatus(receipt) : "";
-    const menuWidth = 220;
-    const estimatedMenuHeight = normalizedStatus === "pending_validation" ? 220 : 56;
-    const viewportPadding = 16;
-    const gap = 8;
-    const rect = element.getBoundingClientRect();
-    const left = Math.min(
-      Math.max(viewportPadding, rect.right - menuWidth),
-      window.innerWidth - menuWidth - viewportPadding,
-    );
-    const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
-    const spaceAbove = rect.top - viewportPadding;
-    const openUpward = spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow;
+  const calculateMenuPosition = useCallback(
+    (element: HTMLButtonElement, receiptId: string) => {
+      const receipt = receipts.find((item) => item.id === receiptId);
+      const normalizedStatus = receipt ? getNormalizedReceiptStatus(receipt) : "";
+      const menuWidth = 220;
+      const estimatedMenuHeight = normalizedStatus === "pending_validation" ? 220 : 56;
+      const viewportPadding = 16;
+      const gap = 8;
+      const rect = element.getBoundingClientRect();
+      const left = Math.min(
+        Math.max(viewportPadding, rect.right - menuWidth),
+        window.innerWidth - menuWidth - viewportPadding,
+      );
+      const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
+      const spaceAbove = rect.top - viewportPadding;
+      const openUpward = spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow;
 
-    return {
-      left,
-      top: openUpward
-        ? Math.max(viewportPadding, rect.top - estimatedMenuHeight - gap)
-        : Math.min(window.innerHeight - estimatedMenuHeight - viewportPadding, rect.bottom + gap),
-      placement: openUpward ? "top" : "bottom",
-    } as const;
-  }
+      return {
+        left,
+        top: openUpward
+          ? Math.max(viewportPadding, rect.top - estimatedMenuHeight - gap)
+          : Math.min(window.innerHeight - estimatedMenuHeight - viewportPadding, rect.bottom + gap),
+        placement: openUpward ? "top" : "bottom",
+      } as const;
+    },
+    [receipts],
+  );
 
   useEffect(() => {
     if (!openMenuReceiptId || !activeTriggerRef.current) {
@@ -344,7 +354,7 @@ export function PaymentReceiptsTable({ orderId, receipts }: PaymentReceiptsTable
       window.removeEventListener("resize", updateMenuPosition);
       window.removeEventListener("scroll", updateMenuPosition, true);
     };
-  }, [openMenuReceiptId, receipts]);
+  }, [calculateMenuPosition, openMenuReceiptId]);
 
   function toggleReceiptMenu(receiptId: string, element: HTMLButtonElement) {
     if (openMenuReceiptId === receiptId) {
@@ -647,6 +657,7 @@ export function PaymentReceiptsTable({ orderId, receipts }: PaymentReceiptsTable
           role="dialog"
           aria-modal="true"
           aria-labelledby="validate-receipt-confirm-title"
+          onMouseDown={onValidateConfirmBackdropMouseDown}
         >
           <div className="mx-auto w-full max-w-xl rounded-[32px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
             <div className="space-y-2 border-b border-border/70 pb-5">

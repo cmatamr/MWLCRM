@@ -2,12 +2,14 @@ import Image from "next/image";
 import { redirect } from "next/navigation";
 
 import { LoginForm } from "@/app/auth/login/login-form";
-import { isProfileAllowed } from "@/lib/auth/profile";
+import { isAppRole, isGovernedPasswordRole } from "@/lib/auth/profile";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type LoginPageProps = {
   searchParams: Promise<{
     next?: string | string[];
+    email?: string | string[];
+    password?: string | string[];
   }>;
 };
 
@@ -33,6 +35,14 @@ function toSafeInternalPath(path: string): string {
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
   const params = await searchParams;
+
+  // Defensive cleanup: never keep credentials in URL query params.
+  if (params.email != null || params.password != null) {
+    const safeNext = toSafeInternalPath(getNextPath(params.next));
+    const safeUrl = safeNext && safeNext !== "/dashboard" ? `/auth/login?next=${encodeURIComponent(safeNext)}` : "/auth/login";
+    redirect(safeUrl);
+  }
+
   const requestedNextPath = toSafeInternalPath(getNextPath(params.next));
 
   const supabase = await createSupabaseServerClient();
@@ -43,11 +53,30 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   if (user) {
     const { data: profile } = await supabase
       .from("app_user_profiles")
-      .select("role, is_active, full_name")
+      .select("role, is_active, status, is_locked, password_reset_required, password_expires_at")
       .eq("id", user.id)
       .maybeSingle();
 
-    if (isProfileAllowed(profile)) {
+    if (
+      profile &&
+      profile.is_active === true &&
+      profile.status !== "inactive" &&
+      profile.is_locked !== true &&
+      isAppRole(profile.role)
+    ) {
+      if (profile.role === "service") {
+        redirect("/auth/access-denied");
+      }
+
+      if (
+        isGovernedPasswordRole(profile.role) &&
+        (profile.password_reset_required ||
+          !profile.password_expires_at ||
+          new Date(profile.password_expires_at).getTime() <= Date.now())
+      ) {
+        redirect("/account/security/change-password");
+      }
+
       redirect(requestedNextPath);
     }
 
@@ -129,10 +158,6 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               </div>
 
               <LoginForm nextPath={requestedNextPath} />
-
-              <p className="mt-6 text-sm text-muted-foreground">
-                ¿Problemas para ingresar? Contacta al administrador.
-              </p>
 
               <div className="mt-6 border-t border-border/80 pt-4">
                 <p className="text-xs font-medium uppercase tracking-[0.15em] text-muted-foreground/90">

@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { crmEntityIdParamsSchema } from "@/domain/crm/schemas";
 import {
   handleRouteError,
@@ -20,6 +21,15 @@ export async function GET(_request: Request, context: RouteContext<{ id: string 
 
     return ok(campaign);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: _request,
+      route: "/api/campaigns/[id]",
+      source: "api.commercial",
+      defaultEventType: "commercial_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

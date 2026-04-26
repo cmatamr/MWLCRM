@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { createOrderItemSchema, crmEntityIdParamsSchema } from "@/domain/crm/schemas";
 import { badRequest, conflict, handleRouteError, notFound, ok, RouteContext } from "@/server/api/http";
 import { requireAnyRole } from "@/server/api/auth";
@@ -40,6 +41,15 @@ export async function POST(request: Request, context: RouteContext<{ id: string 
       }
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/orders/[id]/items",
+      source: "api.orders",
+      defaultEventType: "orders_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

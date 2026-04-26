@@ -39,10 +39,11 @@ import type {
 } from "@/server/services/orders/types";
 import type {
   AddProductAliasInput,
-  CreateProductInput,
   AddProductImageInput,
+  CreateProductInput,
   ListCatalogProductsParams,
   ProductDetail as CatalogProductDetail,
+  ProductImageMeta,
   ProductSkuPreviewInput,
   ProductSkuPreviewResult,
   SaveProductInput,
@@ -260,14 +261,27 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
         ...init,
       });
     },
-    addProductImage(id: string, input: AddProductImageInput, init?: RequestInit) {
+    listProductImages(id: string, init?: RequestInit) {
+      return get<ProductImageMeta[]>(`/api/products/${id}/images`, undefined, init);
+    },
+    addProductImage(id: string, input: FormData | AddProductImageInput, init?: RequestInit) {
+      const formData =
+        input instanceof FormData
+          ? input
+          : (() => {
+              const fd = new FormData();
+              if (input.alt_text != null) {
+                fd.set("alt_text", input.alt_text);
+              }
+              if (input.mark_as_primary != null) {
+                fd.set("mark_as_primary", input.mark_as_primary ? "true" : "false");
+              }
+              return fd;
+            })();
+
       return get<CatalogProductDetail>(`/api/products/${id}/images`, undefined, {
         method: "POST",
-        body: JSON.stringify(input),
-        headers: {
-          "Content-Type": "application/json",
-          ...init?.headers,
-        },
+        body: formData,
         ...init,
       });
     },

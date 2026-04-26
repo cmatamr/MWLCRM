@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { createOrderSchema, listOrdersParamsSchema, parseQueryParams } from "@/domain/crm/schemas";
 import { badRequest, conflict, handleRouteError, notFound, ok } from "@/server/api/http";
 import { requireAnyRole, requireSessionProfile } from "@/server/api/auth";
@@ -11,7 +12,16 @@ export async function GET(request: Request) {
     );
     return ok(orders);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/orders",
+      source: "api.orders",
+      defaultEventType: "orders_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
@@ -46,6 +56,15 @@ export async function POST(request: Request) {
       }
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/orders",
+      source: "api.orders",
+      defaultEventType: "orders_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

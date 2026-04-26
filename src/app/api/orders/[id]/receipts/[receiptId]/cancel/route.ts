@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { badRequest, conflict, handleRouteError, notFound, ok, RouteContext } from "@/server/api/http";
 import { paymentReceiptReviewActionSchema, paymentReceiptRouteParamsSchema } from "@/domain/crm/schemas";
 import { requireRole } from "@/server/api/auth";
@@ -37,6 +38,15 @@ export async function POST(
       return handleRouteError(conflict(error.message, error.details));
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/orders/[id]/receipts/[receiptId]/cancel",
+      source: "api.orders",
+      defaultEventType: "orders_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

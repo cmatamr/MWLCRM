@@ -1,5 +1,6 @@
 "use client";
 
+import "@/lib/security/install-log-redaction";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

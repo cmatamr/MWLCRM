@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { z } from "zod";
 
 import { handleRouteError, ok, parseUuidRouteParam, type RouteContext } from "@/server/api/http";
@@ -17,6 +18,15 @@ export async function POST(request: Request, context: RouteContext<{ id: string 
     const updated = await setPromotionEnabled(id, body);
     return ok(updated);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/promotions/[id]/toggle",
+      source: "api.commercial",
+      defaultEventType: "commercial_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

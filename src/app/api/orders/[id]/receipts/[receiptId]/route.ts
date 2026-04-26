@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import {
   badRequest,
   conflict,
@@ -56,7 +57,16 @@ export async function PATCH(
       return handleRouteError(conflict(error.message, error.details));
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/orders/[id]/receipts/[receiptId]",
+      source: "api.orders",
+      defaultEventType: "orders_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
@@ -103,6 +113,15 @@ export async function DELETE(
       return handleRouteError(conflict(error.message, error.details));
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/orders/[id]/receipts/[receiptId]",
+      source: "api.orders",
+      defaultEventType: "orders_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

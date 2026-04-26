@@ -13,6 +13,7 @@ DATABASE_URL="postgresql://postgres.[YOUR_PROJECT_REF]:[YOUR_PASSWORD]@[YOUR_POO
 DIRECT_URL="postgresql://postgres.[YOUR_PROJECT_REF]:[YOUR_PASSWORD]@[YOUR_POOLER_HOST]:5432/postgres"
 NEXT_PUBLIC_SUPABASE_URL="https://[YOUR_PROJECT_REF].supabase.co"
 NEXT_PUBLIC_SUPABASE_ANON_KEY="[YOUR_SUPABASE_ANON_KEY]"
+SUPABASE_SERVICE_ROLE_KEY="[YOUR_SUPABASE_SERVICE_ROLE_KEY]"
 NEXT_PUBLIC_SITE_URL="http://localhost:3000"
 ```
 
@@ -25,6 +26,7 @@ DATABASE_URL="postgresql://postgres.[YOUR_PROJECT_REF]:[YOUR_PASSWORD]@[YOUR_POO
 DIRECT_URL="postgresql://postgres.[YOUR_PROJECT_REF]:[YOUR_PASSWORD]@[YOUR_POOLER_HOST]:5432/postgres"
 NEXT_PUBLIC_SUPABASE_URL="https://[YOUR_PROJECT_REF].supabase.co"
 NEXT_PUBLIC_SUPABASE_ANON_KEY="[YOUR_SUPABASE_ANON_KEY]"
+SUPABASE_SERVICE_ROLE_KEY="[YOUR_SUPABASE_SERVICE_ROLE_KEY]"
 NEXT_PUBLIC_SITE_URL="https://[YOUR_DOMAIN]"
 ```
 
@@ -33,6 +35,7 @@ NEXT_PUBLIC_SITE_URL="https://[YOUR_DOMAIN]"
 - Local and Vercel should not use the same `DATABASE_URL` port.
 - Local uses `5432`.
 - Vercel uses `6543`.
+- Auth gobernada y administracion de usuarios requieren `SUPABASE_SERVICE_ROLE_KEY` en el entorno del servidor.
 - After changing environment variables, restart the local dev server or redeploy on Vercel.
 - Local development should only require `.env.local`.
 

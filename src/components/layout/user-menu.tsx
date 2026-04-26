@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { LogOut, ShieldCheck, UserRound } from "lucide-react";
+import { KeyRound, LogOut, ShieldCheck, UserRound } from "lucide-react";
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { isAppRole, type AppRole } from "@/lib/auth/profile";
@@ -45,8 +45,16 @@ function roleLabel(role: AppRole | null): string {
     return "Admin";
   }
 
+  if (role === "user") {
+    return "User";
+  }
+
+  if (role === "service") {
+    return "Service";
+  }
+
   if (role === "agent") {
-    return "Agent";
+    return "Legacy";
   }
 
   return "Sin rol";
@@ -149,6 +157,12 @@ export function UserMenu() {
           </div>
 
           <div className="mt-3">
+            <Button asChild variant="outline" className="mb-2 w-full justify-start rounded-xl">
+              <Link href="/account/security/change-password" onClick={() => setIsOpen(false)}>
+                <KeyRound className="h-4 w-4" />
+                Cambiar contraseña
+              </Link>
+            </Button>
             <Button asChild variant="outline" className="w-full justify-start rounded-xl">
               <Link href="/auth/logout" onClick={() => setIsOpen(false)}>
                 <LogOut className="h-4 w-4" />

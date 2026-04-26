@@ -1,3 +1,6 @@
+import { logApiRouteError } from "@/server/observability/api-route";
+export const dynamic = "force-dynamic";
+
 import { crmEntityIdParamsSchema, updateCustomerSchema } from "@/domain/crm/schemas";
 import {
   badRequest,
@@ -22,7 +25,16 @@ export async function GET(_request: Request, context: RouteContext<{ id: string 
 
     return ok(customer);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: _request,
+      route: "/api/customers/[id]",
+      source: "api.customers",
+      defaultEventType: "customers_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
@@ -51,6 +63,15 @@ export async function PATCH(request: Request, context: RouteContext<{ id: string
       return handleRouteError(badRequest(error.message, error.details));
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/customers/[id]",
+      source: "api.customers",
+      defaultEventType: "customers_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

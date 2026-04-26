@@ -27,14 +27,17 @@ import type {
 } from "@/components/products/types";
 import {
   useProductDetail,
+  useProductSearchMedia,
   useProductSkuPreview,
   useSaveProduct,
   useProductsCatalog,
   useProductsPerformance,
 } from "@/hooks";
 import { Button } from "@/components/ui/button";
+import { useModalDismiss } from "@/components/ui/modal-dismiss";
 import { StateDisplay, TableEmptyStateRow } from "@/components/ui/state-display";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { formatCurrencyCRC, formatDateTime } from "@/lib/formatters";
 import {
   getFriendlyDiscountVisibilityLabel,
@@ -250,8 +253,6 @@ const defaultCreateDraft: CreateProductDraft = {
   sort_order: "0",
 };
 
-const supabaseProjectUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim().replace(/\/+$/g, "");
-
 function normalizeValue(value: string | null | undefined) {
   return value?.trim().toLowerCase() ?? "";
 }
@@ -266,24 +267,9 @@ function toSlugToken(rawValue: string) {
   return normalized || "draft";
 }
 
-function buildStoragePublicUrl(storageBucket: string | null, storagePath: string | null) {
-  if (!supabaseProjectUrl || !storageBucket || !storagePath) {
-    return null;
-  }
-
-  const bucket = storageBucket.trim().replace(/^\/+|\/+$/g, "");
-  const path = storagePath
-    .trim()
-    .split("/")
-    .filter(Boolean)
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-
-  if (!bucket || !path) {
-    return null;
-  }
-
-  return `${supabaseProjectUrl}/storage/v1/object/public/${bucket}/${path}`;
+function resolveStorageImageUrl(signedUrl: string | null | undefined) {
+  const normalized = signedUrl?.trim();
+  return normalized && normalized.length > 0 ? normalized : null;
 }
 
 function getPrimaryImage(product: ProductDetail) {
@@ -293,6 +279,7 @@ function getPrimaryImage(product: ProductDetail) {
     return {
       storage_bucket: primaryFromTable.storage_bucket,
       storage_path: primaryFromTable.storage_path,
+      signed_url: primaryFromTable.signed_url,
       alt_text: primaryFromTable.alt_text,
     };
   }
@@ -301,6 +288,7 @@ function getPrimaryImage(product: ProductDetail) {
     return {
       storage_bucket: product.search_meta.storage_bucket,
       storage_path: product.search_meta.storage_path,
+      signed_url: product.search_meta.storage_signed_url,
       alt_text: product.search_meta.alt_text,
     };
   }
@@ -308,6 +296,7 @@ function getPrimaryImage(product: ProductDetail) {
   return {
     storage_bucket: null,
     storage_path: null,
+    signed_url: null,
     alt_text: null,
   };
 }
@@ -803,6 +792,7 @@ function toCatalogRow(product: ProductDetail): CatalogProductRow {
     updated_at: product.updated_at,
     primary_image_bucket: primaryImage.storage_bucket,
     primary_image_path: primaryImage.storage_path,
+    primary_image_signed_url: primaryImage.signed_url,
     primary_image_alt: primaryImage.alt_text,
     aliases: product.search_meta.aliases,
     integrity_alerts: getIntegrityAlerts(product),
@@ -857,6 +847,7 @@ function toProductDetailStub(row: CatalogProductRow): ProductDetail {
       search_boost: row.search_boost,
       storage_bucket: row.primary_image_bucket,
       storage_path: row.primary_image_path,
+      storage_signed_url: row.primary_image_signed_url,
       alt_text: row.primary_image_alt,
       exact_match: false,
       direct_match: false,
@@ -1424,18 +1415,47 @@ function TrendChart({
   points: ProductPerformanceTrendPoint[];
   metric: PerformanceMetric;
 }) {
-  const values = points.map((point) =>
-    metric === "units" ? point.units_sold : point.revenue_crc,
-  );
+  const values = points.map((point) => (metric === "units" ? point.units_sold : point.revenue_crc));
   const maxValue = Math.max(...values, 1);
+  const hasLongLabels = points.some((point) => point.label.length > 8);
+  const maxTickLabels = hasLongLabels ? 4 : 7;
+  const chartSeries = useMemo(
+    () =>
+      points.map((point, index) => {
+        const value = values[index] ?? 0;
+        return {
+          ...point,
+          value,
+          x: values.length <= 1 ? 50 : (index / (values.length - 1)) * 100,
+          y: 100 - (value / maxValue) * 100,
+        };
+      }),
+    [maxValue, points, values],
+  );
+  const tickIndexes = useMemo(() => {
+    if (points.length === 0) {
+      return [];
+    }
 
-  const chartPoints = values
-    .map((value, index) => {
-      const x = values.length <= 1 ? 0 : (index / (values.length - 1)) * 100;
-      const y = 100 - (value / maxValue) * 100;
-      return `${x},${y}`;
-    })
-    .join(" ");
+    if (points.length <= maxTickLabels) {
+      return points.map((_, index) => index);
+    }
+
+    const indexes: number[] = [];
+    const step = Math.ceil((points.length - 1) / (maxTickLabels - 1));
+    for (let index = 0; index < points.length; index += step) {
+      indexes.push(index);
+    }
+
+    const lastIndex = points.length - 1;
+    if (indexes[indexes.length - 1] !== lastIndex) {
+      indexes.push(lastIndex);
+    }
+
+    return indexes;
+  }, [maxTickLabels, points]);
+
+  const chartPoints = chartSeries.map((point) => `${point.x},${point.y}`).join(" ");
 
   return (
     <div className="space-y-3">
@@ -1448,11 +1468,47 @@ function TrendChart({
           strokeLinejoin="round"
           points={chartPoints}
         />
+        {chartSeries.map((point, index) => {
+          const tooltipValue =
+            metric === "units" ? `${point.value.toLocaleString("es-CR")} unidades` : formatCurrencyCRC(point.value);
+
+          return (
+            <circle
+              key={point.bucket_start}
+              cx={point.x}
+              cy={point.y}
+              r="2.1"
+              fill="hsl(var(--chart-1))"
+              className={index === 0 || index === chartSeries.length - 1 ? "opacity-90" : "opacity-75"}
+            >
+              <title>{`${point.label}: ${tooltipValue}`}</title>
+            </circle>
+          );
+        })}
       </svg>
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        {points.map((point) => (
-          <span key={point.label}>{point.label}</span>
-        ))}
+      <div className="relative h-4 text-xs text-muted-foreground">
+        {tickIndexes.map((index) => {
+          const point = points[index];
+          if (!point) {
+            return null;
+          }
+
+          const isFirst = index === 0;
+          const isLast = index === points.length - 1;
+          const left = isFirst ? "0%" : isLast ? "100%" : `${(index / (points.length - 1)) * 100}%`;
+
+          return (
+            <span
+              key={point.bucket_start}
+              className={`absolute top-0 whitespace-nowrap ${
+                isFirst ? "translate-x-0 text-left" : isLast ? "-translate-x-full text-right" : "-translate-x-1/2 text-center"
+              }`}
+              style={{ left }}
+            >
+              {point.label}
+            </span>
+          );
+        })}
       </div>
     </div>
   );
@@ -1475,6 +1531,7 @@ export function ProductsPageClient() {
   const [editDraft, setEditDraft] = useState<ProductDetail | null>(null);
   const [editBaseline, setEditBaseline] = useState<ProductDetail | null>(null);
   const [isDiscardChangesOpen, setIsDiscardChangesOpen] = useState(false);
+  const [isCreateDiscardChangesOpen, setIsCreateDiscardChangesOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [showCreateHelpPopup, setShowCreateHelpPopup] = useState(false);
   const [showCreateDetailsPopup, setShowCreateDetailsPopup] = useState(false);
@@ -1491,11 +1548,10 @@ export function ProductsPageClient() {
   const [createFeedbackItems, setCreateFeedbackItems] = useState<OperationalFeedbackItem[]>([]);
   const [newAlias, setNewAlias] = useState("");
   const [newImageDraft, setNewImageDraft] = useState({
-    storage_bucket: "mwl-products",
-    storage_path: "",
+    file: null as File | null,
+    preview_url: null as string | null,
     alt_text: "",
-    is_primary: false,
-    sort_order: "",
+    mark_as_primary: false,
   });
   const [newSearchTermDraft, setNewSearchTermDraft] = useState({
     term: "",
@@ -1505,9 +1561,16 @@ export function ProductsPageClient() {
   });
   const [searchMetaMessage, setSearchMetaMessage] = useState<string | null>(null);
   const [thumbnailLoadErrors, setThumbnailLoadErrors] = useState<Record<string, boolean>>({});
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [tempIdSeed, setTempIdSeed] = useState(-1);
 
   const { saveProduct, isPending: isSavingProduct } = useSaveProduct();
+  const {
+    addImage: addProductImageMutation,
+    updateImage: updateProductImageMutation,
+    deleteImage: deleteProductImageMutation,
+    isPending: isUpdatingMedia,
+  } = useProductSearchMedia();
 
   useEffect(() => {
     if (!isCreateOpen) {
@@ -1521,6 +1584,15 @@ export function ProductsPageClient() {
       setShowEditHelpPopup(false);
     }
   }, [isEditOpen]);
+
+  useEffect(
+    () => () => {
+      if (newImageDraft.preview_url) {
+        URL.revokeObjectURL(newImageDraft.preview_url);
+      }
+    },
+    [newImageDraft.preview_url],
+  );
 
   const catalogQueryParams = useMemo<ListCatalogProductsParams>(() => {
     return {
@@ -1699,13 +1771,15 @@ export function ProductsPageClient() {
     return selectedProductBase;
   }, [editDraft, isEditOpen, selectedProductBase]);
   const selectedPrimaryImage = useMemo(
-    () => (selectedProduct ? getPrimaryImage(selectedProduct) : { storage_bucket: null, storage_path: null, alt_text: null }),
+    () =>
+      selectedProduct
+        ? getPrimaryImage(selectedProduct)
+        : { storage_bucket: null, storage_path: null, signed_url: null, alt_text: null },
     [selectedProduct],
   );
   const selectedPrimaryImageSrc = useMemo(
-    () =>
-      buildStoragePublicUrl(selectedPrimaryImage.storage_bucket, selectedPrimaryImage.storage_path),
-    [selectedPrimaryImage.storage_bucket, selectedPrimaryImage.storage_path],
+    () => resolveStorageImageUrl(selectedPrimaryImage.signed_url),
+    [selectedPrimaryImage.signed_url],
   );
 
   const selectedProductEditablePayload = useMemo(
@@ -1782,10 +1856,9 @@ export function ProductsPageClient() {
   );
   const hasDraftFormsPendingChanges = Boolean(
     newAlias.trim() ||
-      newImageDraft.storage_path.trim() ||
+      newImageDraft.file ||
       newImageDraft.alt_text.trim() ||
-      newImageDraft.sort_order.trim() ||
-      newImageDraft.is_primary ||
+      newImageDraft.mark_as_primary ||
       newSearchTermDraft.term.trim() ||
       newSearchTermDraft.notes.trim() ||
       newSearchTermDraft.priority.trim() !== "100" ||
@@ -1808,12 +1881,17 @@ export function ProductsPageClient() {
     setSaveFeedbackItems([]);
     setSearchMetaMessage(null);
     setNewAlias("");
-    setNewImageDraft({
-      storage_bucket: "mwl-products",
-      storage_path: "",
-      alt_text: "",
-      is_primary: false,
-      sort_order: "",
+    setNewImageDraft((current) => {
+      if (current.preview_url) {
+        URL.revokeObjectURL(current.preview_url);
+      }
+
+      return {
+        file: null,
+        preview_url: null,
+        alt_text: "",
+        mark_as_primary: false,
+      };
     });
     setNewSearchTermDraft({
       term: "",
@@ -2010,12 +2088,14 @@ export function ProductsPageClient() {
     setSaveFeedbackItems([]);
     setSearchMetaMessage(null);
     setNewAlias("");
+    if (newImageDraft.preview_url) {
+      URL.revokeObjectURL(newImageDraft.preview_url);
+    }
     setNewImageDraft({
-      storage_bucket: "mwl-products",
-      storage_path: "",
+      file: null,
+      preview_url: null,
       alt_text: "",
-      is_primary: false,
-      sort_order: "",
+      mark_as_primary: false,
     });
     setNewSearchTermDraft({
       term: "",
@@ -2037,12 +2117,14 @@ export function ProductsPageClient() {
     setSaveFeedbackItems([]);
     setSearchMetaMessage(null);
     setNewAlias("");
+    if (newImageDraft.preview_url) {
+      URL.revokeObjectURL(newImageDraft.preview_url);
+    }
     setNewImageDraft({
-      storage_bucket: "mwl-products",
-      storage_path: "",
+      file: null,
+      preview_url: null,
       alt_text: "",
-      is_primary: false,
-      sort_order: "",
+      mark_as_primary: false,
     });
     setNewSearchTermDraft({
       term: "",
@@ -2052,7 +2134,7 @@ export function ProductsPageClient() {
     });
   }
 
-  const requestCloseEditModal = useCallback(() => {
+  function requestCloseEditModal() {
     if (!hasUnsavedChanges) {
       resetEditModalState();
       return;
@@ -2061,7 +2143,59 @@ export function ProductsPageClient() {
     setPendingSelectedProductId(null);
     setPendingMode(null);
     setIsDiscardChangesOpen(true);
-  }, [hasUnsavedChanges]);
+  }
+
+  const hasCreateUnsavedChanges =
+    JSON.stringify(createDraft) !== JSON.stringify(defaultCreateDraft) ||
+    createFeedbackItems.length > 0 ||
+    createStatusMessage != null;
+
+  const closeCreateModal = useCallback(() => {
+    if (isSavingProduct) {
+      return;
+    }
+
+    if (hasCreateUnsavedChanges) {
+      setIsCreateDiscardChangesOpen(true);
+      return;
+    }
+
+    setIsCreateOpen(false);
+    setCreateStatusMessage(null);
+    setCreateFeedbackItems([]);
+  }, [hasCreateUnsavedChanges, isSavingProduct]);
+
+  const { onBackdropMouseDown: onEditBackdropMouseDown } = useModalDismiss({
+    isOpen: isEditOpen,
+    onClose: requestCloseEditModal,
+    isDisabled: isSavingProduct,
+  });
+
+  const { onBackdropMouseDown: onDiscardBackdropMouseDown } = useModalDismiss({
+    isOpen: isDiscardChangesOpen,
+    onClose: handleContinueEditing,
+  });
+
+  const { onBackdropMouseDown: onCreateBackdropMouseDown } = useModalDismiss({
+    isOpen: isCreateOpen,
+    onClose: closeCreateModal,
+    isDisabled: isSavingProduct,
+  });
+
+  const { onBackdropMouseDown: onEditHelpBackdropMouseDown } = useModalDismiss({
+    isOpen: showEditHelpPopup,
+    onClose: () => setShowEditHelpPopup(false),
+  });
+
+  const { onBackdropMouseDown: onCreateDetailsBackdropMouseDown } = useModalDismiss({
+    isOpen: showCreateDetailsPopup,
+    onClose: () => setShowCreateDetailsPopup(false),
+  });
+
+  const { onBackdropMouseDown: onCreateHelpBackdropMouseDown } = useModalDismiss({
+    isOpen: showCreateHelpPopup,
+    onClose: () => setShowCreateHelpPopup(false),
+  });
 
   function requestSelectProduct(nextProductId: string) {
     if (nextProductId === selectedProductId) {
@@ -2113,22 +2247,6 @@ export function ProductsPageClient() {
     setPendingMode(null);
     setIsDiscardChangesOpen(false);
   }
-
-  useEffect(() => {
-    if (!isEditOpen) {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        requestCloseEditModal();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isEditOpen, requestCloseEditModal]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) {
@@ -2303,7 +2421,6 @@ export function ProductsPageClient() {
           publication_mode: wantsNovaPublication ? "nova" : "internal",
           search_terms: searchableTerms,
           aliases: [],
-          images: [],
           range_prices: normalizedRangePrices,
         },
       });
@@ -2526,16 +2643,6 @@ export function ProductsPageClient() {
         }))
         .filter((term) => term.term.length > 0);
 
-      const normalizedImages = editDraft.images
-        .map((image) => ({
-          id: image.id > 0 ? image.id : null,
-          storage_bucket: image.storage_bucket,
-          storage_path: image.storage_path.trim(),
-          alt_text: image.alt_text ?? null,
-          is_primary: image.is_primary,
-          sort_order: image.sort_order,
-        }))
-        .filter((image) => image.storage_path.length > 0);
       const normalizedRangePrices =
         editDraft.pricing_mode === "range"
           ? sortRangePriceRows(
@@ -2557,7 +2664,6 @@ export function ProductsPageClient() {
           publication_mode: publicationMode,
           aliases: normalizedAliases,
           search_terms: normalizedSearchTerms,
-          images: normalizedImages,
           range_prices: normalizedRangePrices,
         },
       });
@@ -2745,66 +2851,39 @@ export function ProductsPageClient() {
   }
 
   async function handleAddImage() {
-    if (!editDraft || !newImageDraft.storage_path.trim()) {
+    if (!editDraft || !newImageDraft.file) {
       return;
     }
 
-    const nextTempId = tempIdSeed;
-    const nextSortOrder = toNumberOrNull(newImageDraft.sort_order) ?? editDraft.images.length;
-    setTempIdSeed((current) => current - 1);
+    try {
+      const formData = new FormData();
+      formData.set("file", newImageDraft.file);
+      formData.set("alt_text", newImageDraft.alt_text.trim());
+      formData.set("mark_as_primary", newImageDraft.mark_as_primary ? "true" : "false");
 
-    setEditDraft((current) =>
-      current
-        ? {
-            ...current,
-            images: [
-              ...current.images.map((image) =>
-                newImageDraft.is_primary ? { ...image, is_primary: false } : image,
-              ),
-              {
-                id: nextTempId,
-                product_id: current.id,
-                storage_bucket: newImageDraft.storage_bucket.trim() || "mwl-products",
-                storage_path: newImageDraft.storage_path.trim(),
-                alt_text: newImageDraft.alt_text.trim() || null,
-                is_primary: newImageDraft.is_primary,
-                sort_order: nextSortOrder,
-                created_at: new Date().toISOString(),
-              },
-            ],
-          }
-        : current,
-    );
-    setNewImageDraft({
-      storage_bucket: "mwl-products",
-      storage_path: "",
-      alt_text: "",
-      is_primary: false,
-      sort_order: "",
-    });
-    setSearchMetaMessage("Imagen agregada al draft");
-  }
-
-  async function handleTogglePrimaryImage(imageId: number, isPrimary: boolean) {
-    if (!editDraft) {
-      return;
+      const updatedProduct = await addProductImageMutation(editDraft.id, formData);
+      setProducts((currentProducts) =>
+        currentProducts.map((product) =>
+          product.id === updatedProduct.id ? updatedProduct : product,
+        ),
+      );
+      setEditDraft(updatedProduct);
+      setEditBaseline(updatedProduct);
+      setSearchMetaMessage("Imagen cargada correctamente.");
+      if (newImageDraft.preview_url) {
+        URL.revokeObjectURL(newImageDraft.preview_url);
+      }
+      setNewImageDraft({
+        file: null,
+        preview_url: null,
+        alt_text: "",
+        mark_as_primary: false,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "No se pudo cargar la imagen del producto.";
+      setSearchMetaMessage(toFriendlyOperationalMessage(message));
     }
-
-    setEditDraft((current) =>
-      current
-        ? {
-            ...current,
-            images: current.images.map((image) => {
-              if (image.id === imageId) {
-                return { ...image, is_primary: !isPrimary };
-              }
-
-              return !isPrimary ? { ...image, is_primary: false } : image;
-            }),
-          }
-        : current,
-    );
-    setSearchMetaMessage("Imagen actualizada en draft");
   }
 
   async function handleUpdateImageAlt(imageId: number, altText: string) {
@@ -2812,35 +2891,23 @@ export function ProductsPageClient() {
       return;
     }
 
-    setEditDraft((current) =>
-      current
-        ? {
-            ...current,
-            images: current.images.map((image) =>
-              image.id === imageId ? { ...image, alt_text: altText || null } : image,
-            ),
-          }
-        : current,
-    );
-    setSearchMetaMessage("Texto alternativo actualizado en borrador.");
-  }
+    try {
+      const updatedProduct = await updateProductImageMutation(editDraft.id, imageId, {
+        alt_text: altText || null,
+      });
 
-  async function handleUpdateImageSort(imageId: number, sortOrder: number) {
-    if (!editDraft) {
-      return;
+      setProducts((currentProducts) =>
+        currentProducts.map((product) =>
+          product.id === updatedProduct.id ? updatedProduct : product,
+        ),
+      );
+      setEditDraft(updatedProduct);
+      setEditBaseline(updatedProduct);
+      setSearchMetaMessage("Texto alternativo actualizado.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo actualizar el texto alternativo.";
+      setSearchMetaMessage(toFriendlyOperationalMessage(message));
     }
-
-    setEditDraft((current) =>
-      current
-        ? {
-            ...current,
-            images: current.images.map((image) =>
-              image.id === imageId ? { ...image, sort_order: sortOrder } : image,
-            ),
-          }
-        : current,
-    );
-    setSearchMetaMessage("Orden de imagen actualizado en draft");
   }
 
   async function handleDeleteImage(imageId: number) {
@@ -2848,12 +2915,20 @@ export function ProductsPageClient() {
       return;
     }
 
-    setEditDraft((current) =>
-      current
-        ? { ...current, images: current.images.filter((image) => image.id !== imageId) }
-        : current,
-    );
-    setSearchMetaMessage("Imagen eliminada del draft");
+    try {
+      const updatedProduct = await deleteProductImageMutation(editDraft.id, imageId);
+      setProducts((currentProducts) =>
+        currentProducts.map((product) =>
+          product.id === updatedProduct.id ? updatedProduct : product,
+        ),
+      );
+      setEditDraft(updatedProduct);
+      setEditBaseline(updatedProduct);
+      setSearchMetaMessage("Imagen eliminada.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo eliminar la imagen.";
+      setSearchMetaMessage(toFriendlyOperationalMessage(message));
+    }
   }
 
   return (
@@ -3216,10 +3291,7 @@ export function ProductsPageClient() {
                     ) : null}
                     {catalogRows.map((row) => {
                       const isSelected = row.id === selectedProductId;
-                      const thumbnailSrc = buildStoragePublicUrl(
-                        row.primary_image_bucket,
-                        row.primary_image_path,
-                      );
+                      const thumbnailSrc = resolveStorageImageUrl(row.primary_image_signed_url);
                       const thumbnailKey = `${row.id}:${thumbnailSrc ?? "none"}`;
                       const hasThumbnailError = Boolean(thumbnailLoadErrors[thumbnailKey]);
 
@@ -3529,11 +3601,7 @@ export function ProductsPageClient() {
                     {isEditOpen && selectedProduct ? (
                       <div
                         className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 backdrop-blur-[2px]"
-                        onMouseDown={(event) => {
-                          if (event.target === event.currentTarget) {
-                            requestCloseEditModal();
-                          }
-                        }}
+                        onMouseDown={onEditBackdropMouseDown}
                       >
                         <section
                           className="flex h-[82vh] w-full max-w-5xl flex-col rounded-[30px] border border-white/80 bg-white p-5 shadow-[0_30px_90px_rgba(15,23,42,0.18)] sm:p-6"
@@ -4357,29 +4425,74 @@ export function ProductsPageClient() {
                           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                             Imágenes del producto
                           </p>
-                          <div className="mt-3 grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-                            <input
-                              value={newImageDraft.storage_bucket}
-                              onChange={(event) =>
-                                setNewImageDraft((current) => ({
-                                  ...current,
-                                  storage_bucket: event.target.value,
-                                }))
-                              }
-                              placeholder={getFriendlyFieldLabel("storage_bucket")}
-                              className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                            />
-                            <input
-                              value={newImageDraft.storage_path}
-                              onChange={(event) =>
-                                setNewImageDraft((current) => ({
-                                  ...current,
-                                  storage_path: event.target.value,
-                                }))
-                              }
-                              placeholder={getFriendlyFieldLabel("storage_path")}
-                              className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                            />
+                          <div className="mt-3 grid min-w-0 gap-2">
+                            <label
+                              className={`flex min-h-28 cursor-pointer items-center justify-center rounded-xl border border-dashed bg-white px-4 py-3 text-center text-sm text-slate-700 transition ${
+                                isDraggingImage ? "border-primary" : "border-border hover:border-primary/70"
+                              }`}
+                              onDragOver={(event) => {
+                                event.preventDefault();
+                                setIsDraggingImage(true);
+                              }}
+                              onDragLeave={(event) => {
+                                event.preventDefault();
+                                setIsDraggingImage(false);
+                              }}
+                              onDrop={(event) => {
+                                event.preventDefault();
+                                setIsDraggingImage(false);
+                                const droppedFile = event.dataTransfer.files?.[0] ?? null;
+                                setNewImageDraft((current) => {
+                                  if (current.preview_url) {
+                                    URL.revokeObjectURL(current.preview_url);
+                                  }
+
+                                  return {
+                                    ...current,
+                                    file: droppedFile,
+                                    preview_url: droppedFile ? URL.createObjectURL(droppedFile) : null,
+                                  };
+                                });
+                              }}
+                            >
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp"
+                                className="hidden"
+                                onChange={(event) => {
+                                  const nextFile = event.target.files?.[0] ?? null;
+                                  setNewImageDraft((current) => {
+                                    if (current.preview_url) {
+                                      URL.revokeObjectURL(current.preview_url);
+                                    }
+
+                                    return {
+                                      ...current,
+                                      file: nextFile,
+                                      preview_url: nextFile ? URL.createObjectURL(nextFile) : null,
+                                    };
+                                  });
+                                  setIsDraggingImage(false);
+                                }}
+                              />
+                              <span>
+                                {newImageDraft.file
+                                  ? `${newImageDraft.file.name} (${Math.ceil(newImageDraft.file.size / 1024)} KB)`
+                                  : "Arrastra o selecciona una imagen (JPG, PNG, WEBP, max 3MB)"}
+                              </span>
+                            </label>
+                            {newImageDraft.preview_url ? (
+                              <div className="overflow-hidden rounded-xl border border-border bg-white p-2">
+                                <Image
+                                  src={newImageDraft.preview_url}
+                                  alt="Preview local"
+                                  width={500}
+                                  height={320}
+                                  unoptimized
+                                  className="h-auto max-h-56 w-full rounded-lg object-contain"
+                                />
+                              </div>
+                            ) : null}
                             <input
                               value={newImageDraft.alt_text}
                               onChange={(event) =>
@@ -4391,38 +4504,24 @@ export function ProductsPageClient() {
                               placeholder={getFriendlyFieldLabel("alt_text")}
                               className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
                             />
-                            <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-                              <input
-                                value={newImageDraft.sort_order}
-                                onChange={(event) =>
-                                  setNewImageDraft((current) => ({
-                                    ...current,
-                                    sort_order: event.target.value,
-                                  }))
-                                }
-                                placeholder={getFriendlyFieldLabel("sort_order")}
-                                inputMode="numeric"
-                                className="h-10 w-full min-w-0 rounded-xl border border-border bg-white px-3 text-sm text-slate-950 outline-none transition focus:border-primary"
-                              />
-                              <Button
-                                type="button"
-                                variant="outline"
-                                onClick={handleAddImage}
-                                disabled={!newImageDraft.storage_path.trim() || isSavingProduct}
-                                className="w-full sm:w-auto sm:shrink-0"
-                              >
-                                Agregar
-                              </Button>
-                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={handleAddImage}
+                              disabled={!newImageDraft.file || isSavingProduct || isUpdatingMedia}
+                              className="w-full sm:w-auto sm:shrink-0"
+                            >
+                              Subir imagen
+                            </Button>
                           </div>
                           <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-700">
                             <input
                               type="checkbox"
-                              checked={newImageDraft.is_primary}
+                              checked={newImageDraft.mark_as_primary}
                               onChange={(event) =>
                                 setNewImageDraft((current) => ({
                                   ...current,
-                                  is_primary: event.target.checked,
+                                  mark_as_primary: event.target.checked,
                                 }))
                               }
                             />
@@ -4434,31 +4533,32 @@ export function ProductsPageClient() {
                                 <div key={image.id} className="rounded-xl bg-white px-3 py-2">
                                   <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
                                     <div className="min-w-0 space-y-1">
-                                      <p className="break-all">{image.storage_bucket}</p>
-                                      <p className="break-all text-xs text-muted-foreground">
-                                        {image.storage_path}
-                                      </p>
+                                      <p className="break-all text-xs text-muted-foreground">{image.storage_bucket}</p>
+                                      <p className="break-all text-xs text-muted-foreground">{image.storage_path}</p>
                                     </div>
                                     <div className="flex flex-wrap gap-2 sm:justify-end">
                                       <Button
                                         type="button"
                                         variant="outline"
-                                        onClick={() => handleTogglePrimaryImage(image.id, image.is_primary)}
-                                        disabled={isSavingProduct}
-                                      >
-                                        {image.is_primary ? "Quitar primaria" : "Marcar primaria"}
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        variant="outline"
                                         onClick={() => handleDeleteImage(image.id)}
-                                        disabled={isSavingProduct}
+                                        disabled={isSavingProduct || isUpdatingMedia}
                                       >
                                         Eliminar
                                       </Button>
                                     </div>
                                   </div>
-                                  <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] sm:items-center">
+                                  {image.signed_url ? (
+                                    <div className="mt-2 overflow-hidden rounded-lg border border-border bg-slate-50 p-2">
+                                      <Image
+                                        src={image.signed_url}
+                                        alt={image.alt_text ?? `Imagen ${selectedProduct.name}`}
+                                        width={480}
+                                        height={280}
+                                        className="h-auto max-h-48 w-full rounded-md object-contain"
+                                      />
+                                    </div>
+                                  ) : null}
+                                  <div className="mt-2 grid min-w-0 gap-2 sm:grid-cols-[minmax(0,2fr)] sm:items-center">
                                     <input
                                       defaultValue={image.alt_text ?? ""}
                                       onBlur={(event) => {
@@ -4468,18 +4568,6 @@ export function ProductsPageClient() {
                                         }
                                       }}
                                       placeholder={getFriendlyFieldLabel("alt_text")}
-                                      className="h-9 w-full min-w-0 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
-                                    />
-                                    <input
-                                      defaultValue={String(image.sort_order)}
-                                      onBlur={(event) => {
-                                        const sortOrder = toNumberOrNull(event.target.value);
-                                        if (sortOrder != null && sortOrder !== image.sort_order) {
-                                          void handleUpdateImageSort(image.id, sortOrder);
-                                        }
-                                      }}
-                                      inputMode="numeric"
-                                      placeholder={getFriendlyFieldLabel("sort_order")}
                                       className="h-9 w-full min-w-0 rounded-lg border border-border bg-white px-2 text-xs text-slate-950 outline-none transition focus:border-primary"
                                     />
                                   </div>
@@ -4679,11 +4767,7 @@ export function ProductsPageClient() {
                           {showEditHelpPopup ? (
                             <div
                               className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 p-4"
-                              onClick={(event) => {
-                                if (event.target === event.currentTarget) {
-                                  setShowEditHelpPopup(false);
-                                }
-                              }}
+                              onMouseDown={onEditHelpBackdropMouseDown}
                             >
                               <section className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_24px_48px_-24px_rgba(2,6,23,0.35)]">
                                 <div className="flex items-center justify-between gap-3">
@@ -4886,7 +4970,10 @@ export function ProductsPageClient() {
       </section>
 
       {isDiscardChangesOpen ? (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/40 px-4 backdrop-blur-[2px]">
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/40 px-4 backdrop-blur-[2px]"
+          onMouseDown={onDiscardBackdropMouseDown}
+        >
           <div className="w-full max-w-md rounded-[24px] border border-white/80 bg-white p-5 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
             <div className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">
@@ -4909,11 +4996,26 @@ export function ProductsPageClient() {
         </div>
       ) : null}
 
+      <UnsavedChangesDialog
+        isOpen={isCreateDiscardChangesOpen}
+        onContinueEditing={() => setIsCreateDiscardChangesOpen(false)}
+        onDiscardChanges={() => {
+          setIsCreateDiscardChangesOpen(false);
+          setIsCreateOpen(false);
+          setCreateStatusMessage(null);
+          setCreateFeedbackItems([]);
+        }}
+        isDisabled={isSavingProduct}
+        title="Hay cambios pendientes en el nuevo producto"
+        description="Si sales ahora, se perdera el draft del producto y no se guardara nada en base de datos."
+      />
+
       {isCreateOpen ? (
         <div
           className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/30 px-4 py-6 backdrop-blur-[2px]"
           role="dialog"
           aria-modal="true"
+          onMouseDown={onCreateBackdropMouseDown}
         >
           <div className="w-full max-w-[1240px] rounded-[30px] border border-white/80 bg-white p-5 shadow-[0_30px_90px_rgba(15,23,42,0.18)] sm:p-6">
             <div className="border-b border-border/70 pb-4">
@@ -5509,11 +5611,7 @@ export function ProductsPageClient() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => {
-                      setIsCreateOpen(false);
-                      setCreateStatusMessage(null);
-                      setCreateFeedbackItems([]);
-                    }}
+                    onClick={closeCreateModal}
                     disabled={isSavingProduct}
                     className="h-8 w-full text-sm"
                   >
@@ -5534,11 +5632,7 @@ export function ProductsPageClient() {
           {showCreateDetailsPopup ? (
             <div
               className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 p-4"
-              onClick={(event) => {
-                if (event.target === event.currentTarget) {
-                  setShowCreateDetailsPopup(false);
-                }
-              }}
+              onMouseDown={onCreateDetailsBackdropMouseDown}
             >
               <section className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_24px_48px_-24px_rgba(2,6,23,0.35)]">
                 <div className="flex items-center justify-between gap-3">
@@ -5619,11 +5713,7 @@ export function ProductsPageClient() {
           {showCreateHelpPopup ? (
             <div
               className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 p-4"
-              onClick={(event) => {
-                if (event.target === event.currentTarget) {
-                  setShowCreateHelpPopup(false);
-                }
-              }}
+              onMouseDown={onCreateHelpBackdropMouseDown}
             >
               <section className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_24px_48px_-24px_rgba(2,6,23,0.35)]">
                 <div className="flex items-center justify-between gap-3">

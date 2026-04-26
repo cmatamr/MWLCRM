@@ -1,39 +1,96 @@
+import { logApiRouteError } from "@/server/observability/api-route";
+export const dynamic = "force-dynamic";
+
 import { badRequest, handleRouteError, ok, type RouteContext } from "@/server/api/http";
 import { requireRole } from "@/server/api/auth";
-import { addProductImage } from "@/server/services/products";
-import { z } from "zod";
+import { addProductImage, getProductImages } from "@/server/services/products";
+import { canManageProductImages } from "@/server/services/products/image-permissions";
 
-const addProductImageSchema = z
-  .object({
-    storage_bucket: z.string().trim().min(1).optional(),
-    storage_path: z.string().trim().min(1),
-    alt_text: z.string().optional().nullable(),
-    is_primary: z.boolean().optional(),
-    sort_order: z.number().int().min(0).optional(),
-  })
-  .strict();
-
-export async function POST(
-  request: Request,
+export async function GET(
+  _request: Request,
   context: RouteContext<{ id: string }>,
 ) {
   try {
-    await requireRole("admin");
+    const session = await requireRole("admin");
     const { id } = await context.params;
 
     if (!id?.trim()) {
       throw badRequest('Route param "id" is required.');
     }
 
-    const body = addProductImageSchema.parse(await request.json());
-    const product = await addProductImage(id.trim(), body);
+    canManageProductImages(
+      { id: session.user.id, role: session.profile.role },
+      { id: id.trim() },
+    );
+
+    const images = await getProductImages(id.trim());
+    return ok(images);
+  } catch (error) {
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: _request,
+      route: "/api/products/[id]/images",
+      source: "api.products",
+      defaultEventType: "products_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
+  }
+}
+
+export async function POST(
+  request: Request,
+  context: RouteContext<{ id: string }>,
+) {
+  try {
+    const session = await requireRole("admin");
+    const { id } = await context.params;
+
+    if (!id?.trim()) {
+      throw badRequest('Route param "id" is required.');
+    }
+
+    canManageProductImages(
+      { id: session.user.id, role: session.profile.role },
+      { id: id.trim() },
+    );
+
+    const formData = await request.formData();
+    const fileField = formData.get("file");
+
+    if (!(fileField instanceof File)) {
+      throw badRequest("Debes enviar un archivo valido en el campo file.", {
+        field: "file",
+      });
+    }
+
+    const altRaw = formData.get("alt_text");
+    const markPrimaryRaw = formData.get("mark_as_primary");
+    const markAsPrimary =
+      typeof markPrimaryRaw === "string" && ["1", "true", "on", "yes"].includes(markPrimaryRaw.toLowerCase());
+
+    const fileBuffer = Buffer.from(await fileField.arrayBuffer());
+
+    const product = await addProductImage(id.trim(), {
+      mime_type: fileField.type,
+      size_bytes: fileField.size,
+      file_buffer: fileBuffer,
+      alt_text: typeof altRaw === "string" ? altRaw : null,
+      mark_as_primary: markAsPrimary,
+    });
 
     return ok(product);
   } catch (error) {
-    if (error instanceof SyntaxError) {
-      return handleRouteError(badRequest("Invalid JSON body."));
-    }
-
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/products/[id]/images",
+      source: "api.products",
+      defaultEventType: "products_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

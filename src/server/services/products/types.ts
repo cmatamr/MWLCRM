@@ -21,6 +21,7 @@ export interface ProductImageMeta {
   product_id: string;
   storage_bucket: string;
   storage_path: string;
+  signed_url?: string | null;
   alt_text: string | null;
   is_primary: boolean;
   sort_order: number;
@@ -122,6 +123,7 @@ export interface ProductSearchMeta {
   search_boost: number;
   storage_bucket: string | null;
   storage_path: string | null;
+  storage_signed_url?: string | null;
   alt_text: string | null;
   exact_match: boolean;
   direct_match: boolean;
@@ -152,6 +154,7 @@ export interface CatalogProductRow {
   updated_at: string;
   primary_image_bucket: string | null;
   primary_image_path: string | null;
+  primary_image_signed_url?: string | null;
   primary_image_alt: string | null;
   aliases: string[];
   integrity_alerts: string[];
@@ -391,11 +394,14 @@ export interface ProductSkuPreviewResult {
 }
 
 export interface AddProductImageInput {
-  storage_bucket?: string;
-  storage_path: string;
   alt_text?: string | null;
-  is_primary?: boolean;
-  sort_order?: number;
+  mark_as_primary?: boolean;
+}
+
+export interface UploadProductImageInput extends AddProductImageInput {
+  mime_type: string;
+  size_bytes: number;
+  file_buffer: Buffer;
 }
 
 export interface UpdateProductImageInput {
@@ -439,15 +445,6 @@ export interface SaveProductSearchTermInput {
   notes?: string | null;
 }
 
-export interface SaveProductImageInput {
-  id?: number | null;
-  storage_bucket?: string;
-  storage_path: string;
-  alt_text?: string | null;
-  is_primary?: boolean;
-  sort_order?: number;
-}
-
 export interface SaveProductRangePriceInput {
   id?: number | null;
   range_min_qty: number;
@@ -463,7 +460,6 @@ export interface SaveProductInput {
   publication_mode: ProductPublicationMode;
   aliases?: SaveProductAliasInput[];
   search_terms?: SaveProductSearchTermInput[];
-  images?: SaveProductImageInput[];
   range_prices?: SaveProductRangePriceInput[];
 }
 

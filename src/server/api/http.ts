@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
+import "@/lib/security/install-log-redaction";
+import { redactSensitiveData } from "@/lib/security/redaction";
 import type { ApiErrorBody, ApiErrorResponse, ApiSuccessResponse } from "@/types/api";
 import { isUuid } from "@/server/services/shared";
 
@@ -119,7 +121,7 @@ export function handleRouteError(error: unknown) {
     );
   }
 
-  console.error("Unhandled API route error", error);
+  console.error("Unhandled API route error", redactSensitiveData(error));
 
   return fail(
     {

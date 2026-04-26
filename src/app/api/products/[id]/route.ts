@@ -1,3 +1,5 @@
+export const dynamic = "force-dynamic";
+
 import {
   ApiRouteError,
   badRequest,
@@ -5,11 +7,12 @@ import {
   ok,
   type RouteContext,
 } from "@/server/api/http";
+import { logProductsApiError } from "@/server/observability/products-api";
 import { requireRole, requireSessionProfile } from "@/server/api/auth";
 import { getProductDetail } from "@/server/services/products";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: RouteContext<{ id: string }>,
 ) {
   try {
@@ -23,12 +26,19 @@ export async function GET(
     const product = await getProductDetail(id.trim());
     return ok(product);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logProductsApiError({
+      request,
+      route: "/api/products/[id]",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
 export async function PATCH(
-  _request: Request,
+  request: Request,
   context: RouteContext<{ id: string }>,
 ) {
   try {
@@ -52,6 +62,13 @@ export async function PATCH(
       },
     });
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logProductsApiError({
+      request,
+      route: "/api/products/[id]",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

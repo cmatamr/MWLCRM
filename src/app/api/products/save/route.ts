@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { badRequest, handleRouteError, ok } from "@/server/api/http";
 import { requireRole } from "@/server/api/auth";
 import { saveProduct } from "@/server/services/products";
@@ -76,20 +77,6 @@ const saveProductPayloadSchema = z
           .strict(),
       )
       .optional(),
-    images: z
-      .array(
-        z
-          .object({
-            id: z.number().int().optional().nullable(),
-            storage_bucket: z.string().trim().min(1).optional(),
-            storage_path: z.string().trim().min(1),
-            alt_text: z.string().max(300).optional().nullable(),
-            is_primary: z.boolean().optional(),
-            sort_order: z.number().int().min(0).optional(),
-          })
-          .strict(),
-      )
-      .optional(),
     range_prices: z
       .array(
         z
@@ -125,6 +112,15 @@ export async function POST(request: Request) {
       return handleRouteError(badRequest("Invalid JSON body."));
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/products/save",
+      source: "api.products",
+      defaultEventType: "products_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

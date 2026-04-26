@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { z } from "zod";
 
 import {
@@ -97,7 +98,16 @@ export async function GET(request: Request) {
     const response = await listPromotions(params);
     return ok(response);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/promotions",
+      source: "api.commercial",
+      defaultEventType: "commercial_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
@@ -111,6 +121,15 @@ export async function POST(request: Request) {
     const created = await createPromotion(parsed);
     return ok(created, { status: 201 });
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/promotions",
+      source: "api.commercial",
+      defaultEventType: "commercial_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

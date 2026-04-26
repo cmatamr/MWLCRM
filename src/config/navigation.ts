@@ -1,10 +1,13 @@
 import {
   Boxes,
   ChartColumnBig,
+  FileSearch,
   LayoutDashboard,
   Megaphone,
   MessageSquareText,
   PackageSearch,
+  Shield,
+  ShieldUser,
   UsersRound,
 } from "lucide-react";
 
@@ -52,5 +55,23 @@ export const navigationItems: NavigationItem[] = [
     label: "Conversaciones",
     description: "Seguimiento de mensajes",
     icon: MessageSquareText,
+  },
+  {
+    href: "/admin/users",
+    label: "Admin Usuarios",
+    description: "Control de usuarios internos",
+    icon: ShieldUser,
+  },
+  {
+    href: "/admin/security/password-policy",
+    label: "Política Seguridad",
+    description: "Reglas de contraseñas y bloqueo",
+    icon: Shield,
+  },
+  {
+    href: "/admin/logs",
+    label: "Admin Logs",
+    description: "Observabilidad y trazabilidad",
+    icon: FileSearch,
   },
 ];

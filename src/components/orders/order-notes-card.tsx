@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useModalDismiss } from "@/components/ui/modal-dismiss";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { useCreateOrderActivity } from "@/hooks/use-create-order-activity";
 import { useDeleteOrderActivity } from "@/hooks/use-delete-order-activity";
 import { useUpdateOrderActivity } from "@/hooks/use-update-order-activity";
@@ -36,6 +38,7 @@ function AddOrderNoteModal({
   const updateActivityMutation = useUpdateOrderActivity(orderId);
   const [content, setContent] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [isDiscardChangesOpen, setIsDiscardChangesOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isSubmitting = createActivityMutation.isPending || updateActivityMutation.isPending;
   const isEditMode = mode === "edit";
@@ -68,6 +71,27 @@ function AddOrderNoteModal({
 
     onClose();
   }
+
+  const hasUnsavedChanges = content.trim() !== initialContent.trim();
+
+  function requestClose() {
+    if (isSubmitting) {
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      setIsDiscardChangesOpen(true);
+      return;
+    }
+
+    handleClose();
+  }
+
+  const { onBackdropMouseDown } = useModalDismiss({
+    isOpen,
+    onClose: requestClose,
+    isDisabled: isSubmitting,
+  });
 
   async function handleSubmit() {
     setFormError(null);
@@ -118,6 +142,7 @@ function AddOrderNoteModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="add-order-note-title"
+      onMouseDown={onBackdropMouseDown}
     >
       <div className="w-full max-w-2xl rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -162,7 +187,7 @@ function AddOrderNoteModal({
             <Button
               type="button"
               variant="outline"
-              onClick={handleClose}
+              onClick={requestClose}
               disabled={isSubmitting}
             >
               Cancelar
@@ -179,6 +204,16 @@ function AddOrderNoteModal({
           </div>
         </div>
       </div>
+
+      <UnsavedChangesDialog
+        isOpen={isDiscardChangesOpen}
+        onContinueEditing={() => setIsDiscardChangesOpen(false)}
+        onDiscardChanges={() => {
+          setIsDiscardChangesOpen(false);
+          handleClose();
+        }}
+        isDisabled={isSubmitting}
+      />
     </div>
   );
 }
@@ -229,6 +264,12 @@ function OrderNoteItem({
 
     setIsDeleteDialogOpen(false);
   }
+
+  const { onBackdropMouseDown } = useModalDismiss({
+    isOpen: isDeleteDialogOpen,
+    onClose: closeDeleteDialog,
+    isDisabled: deleteActivityMutation.isPending,
+  });
 
   function openEditModal() {
     if (deleteActivityMutation.isPending) {
@@ -302,6 +343,7 @@ function OrderNoteItem({
           role="dialog"
           aria-modal="true"
           aria-labelledby={`delete-note-title-${activity.id}`}
+          onMouseDown={onBackdropMouseDown}
         >
           <div className="w-full max-w-md rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
             <div className="space-y-2">

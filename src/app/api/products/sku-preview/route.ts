@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { badRequest, handleRouteError, ok } from "@/server/api/http";
 import { requireRole } from "@/server/api/auth";
 import { previewProductSku } from "@/server/services/products";
@@ -30,6 +31,15 @@ export async function POST(request: Request) {
       return handleRouteError(badRequest("Invalid JSON body."));
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/products/sku-preview",
+      source: "api.products",
+      defaultEventType: "products_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

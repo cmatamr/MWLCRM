@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { conflict, handleRouteError, notFound, ok, RouteContext, badRequest } from "@/server/api/http";
 import { orderActivityRouteParamsSchema, updateOrderActivitySchema } from "@/domain/crm/schemas";
 import {
@@ -36,7 +37,16 @@ export async function PATCH(
       return handleRouteError(conflict(error.message, error.details));
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/orders/[id]/activity/[activityId]",
+      source: "api.orders",
+      defaultEventType: "orders_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
@@ -62,6 +72,15 @@ export async function DELETE(
       return handleRouteError(conflict(error.message, error.details));
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: _request,
+      route: "/api/orders/[id]/activity/[activityId]",
+      source: "api.orders",
+      defaultEventType: "orders_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

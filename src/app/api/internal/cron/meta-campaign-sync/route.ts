@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { campaignSyncConfig } from "@/config/campaignSync";
 import { fail, handleRouteError, ok } from "@/server/api/http";
 import { MetaApiError, runMetaCampaignSync } from "@/server/services/meta-campaign-sync";
@@ -45,6 +46,15 @@ export async function GET(request: Request) {
       );
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/internal/cron/meta-campaign-sync",
+      source: "api.internal",
+      defaultEventType: "internal_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

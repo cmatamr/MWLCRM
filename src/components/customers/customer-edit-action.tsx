@@ -14,6 +14,8 @@ import {
 import type { CustomerDetail } from "@/server/services/customers/types";
 import { useUpdateCustomer } from "@/hooks/use-update-customer";
 import { Button } from "@/components/ui/button";
+import { useModalDismiss } from "@/components/ui/modal-dismiss";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { formatChannelLabel } from "@/components/customers/customer-presenters";
 
 type EditableCustomer = Pick<
@@ -66,6 +68,7 @@ export function CustomerEditAction({ customer }: CustomerEditActionProps) {
   const [formErrors, setFormErrors] = useState<FormErrors>({});
   const [touchedFields, setTouchedFields] = useState<TouchedState>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [isDiscardChangesOpen, setIsDiscardChangesOpen] = useState(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -110,6 +113,31 @@ export function CustomerEditAction({ customer }: CustomerEditActionProps) {
 
     setIsOpen(false);
   }
+
+  const initialForm = createInitialFormState(customer);
+  const hasUnsavedChanges =
+    form.externalId.trim() !== initialForm.externalId.trim() ||
+    form.displayName.trim() !== initialForm.displayName.trim() ||
+    form.customerStatus.trim() !== initialForm.customerStatus.trim();
+
+  function requestClose() {
+    if (updateCustomerMutation.isPending) {
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      setIsDiscardChangesOpen(true);
+      return;
+    }
+
+    handleClose();
+  }
+
+  const { onBackdropMouseDown } = useModalDismiss({
+    isOpen,
+    onClose: requestClose,
+    isDisabled: updateCustomerMutation.isPending,
+  });
 
   async function handleSubmit() {
     const nextErrors = validateForm(form, customer);
@@ -170,6 +198,7 @@ export function CustomerEditAction({ customer }: CustomerEditActionProps) {
           role="dialog"
           aria-modal="true"
           aria-labelledby="edit-customer-title"
+          onMouseDown={onBackdropMouseDown}
         >
           <div className="mx-auto w-full max-w-2xl rounded-[32px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
             {formError ? (
@@ -215,7 +244,7 @@ export function CustomerEditAction({ customer }: CustomerEditActionProps) {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={handleClose}
+                  onClick={requestClose}
                   disabled={updateCustomerMutation.isPending}
                   className="w-full"
                 >
@@ -324,6 +353,16 @@ export function CustomerEditAction({ customer }: CustomerEditActionProps) {
           </div>
         </div>
       ) : null}
+
+      <UnsavedChangesDialog
+        isOpen={isDiscardChangesOpen}
+        onContinueEditing={() => setIsDiscardChangesOpen(false)}
+        onDiscardChanges={() => {
+          setIsDiscardChangesOpen(false);
+          handleClose();
+        }}
+        isDisabled={updateCustomerMutation.isPending}
+      />
     </>
   );
 }

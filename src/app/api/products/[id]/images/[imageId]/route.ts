@@ -1,13 +1,15 @@
+import { logApiRouteError } from "@/server/observability/api-route";
+export const dynamic = "force-dynamic";
+
 import { badRequest, handleRouteError, ok, type RouteContext } from "@/server/api/http";
 import { requireRole } from "@/server/api/auth";
 import { deleteProductImage, updateProductImage } from "@/server/services/products";
+import { canManageProductImages } from "@/server/services/products/image-permissions";
 import { z } from "zod";
 
 const updateProductImageSchema = z
   .object({
     alt_text: z.string().optional().nullable(),
-    is_primary: z.boolean().optional(),
-    sort_order: z.number().int().min(0).optional(),
   })
   .strict()
   .refine((value) => Object.values(value).some((fieldValue) => fieldValue !== undefined), {
@@ -30,12 +32,17 @@ export async function PATCH(
   context: RouteContext<{ id: string; imageId: string }>,
 ) {
   try {
-    await requireRole("admin");
+    const session = await requireRole("admin");
     const { id, imageId } = await context.params;
 
     if (!id?.trim()) {
       throw badRequest('Route param "id" is required.');
     }
+
+    canManageProductImages(
+      { id: session.user.id, role: session.profile.role },
+      { id: id.trim() },
+    );
 
     const body = updateProductImageSchema.parse(await request.json());
     const product = await updateProductImage(id.trim(), parseImageId(imageId), body);
@@ -46,7 +53,16 @@ export async function PATCH(
       return handleRouteError(badRequest("Invalid JSON body."));
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/products/[id]/images/[imageId]",
+      source: "api.products",
+      defaultEventType: "products_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
@@ -55,16 +71,30 @@ export async function DELETE(
   context: RouteContext<{ id: string; imageId: string }>,
 ) {
   try {
-    await requireRole("admin");
+    const session = await requireRole("admin");
     const { id, imageId } = await context.params;
 
     if (!id?.trim()) {
       throw badRequest('Route param "id" is required.');
     }
 
+    canManageProductImages(
+      { id: session.user.id, role: session.profile.role },
+      { id: id.trim() },
+    );
+
     const product = await deleteProductImage(id.trim(), parseImageId(imageId));
     return ok(product);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: _request,
+      route: "/api/products/[id]/images/[imageId]",
+      source: "api.products",
+      defaultEventType: "products_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

@@ -3,6 +3,11 @@ type SupabasePublicEnv = {
   anonKey: string;
 };
 
+type SupabaseServiceEnv = {
+  url: string;
+  serviceRoleKey: string;
+};
+
 export function getSupabasePublicEnv(): SupabasePublicEnv {
   // Use static env property access so Next can inline values in edge middleware/runtime.
   const nextPublicUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
@@ -26,5 +31,27 @@ export function getSupabasePublicEnv(): SupabasePublicEnv {
   return {
     url,
     anonKey,
+  };
+}
+
+export function getSupabaseServiceEnv(): SupabaseServiceEnv {
+  const nextPublicUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const serverUrl = process.env.SUPABASE_URL?.trim();
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+
+  const url = nextPublicUrl || serverUrl;
+
+  if (!url || !serviceRoleKey) {
+    const debug =
+      `NEXT_PUBLIC_SUPABASE_URL=${nextPublicUrl ? "set" : "missing"}, ` +
+      `SUPABASE_URL=${serverUrl ? "set" : "missing"}, ` +
+      `SUPABASE_SERVICE_ROLE_KEY=${serviceRoleKey ? "set" : "missing"}`;
+
+    throw new Error(`Missing required Supabase service environment variable. Checked: ${debug}`);
+  }
+
+  return {
+    url,
+    serviceRoleKey,
   };
 }

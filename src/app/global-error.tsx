@@ -10,7 +10,7 @@ type GlobalErrorPageProps = {
   reset: () => void;
 };
 
-export default function GlobalErrorPage({ error, reset }: GlobalErrorPageProps) {
+export default function GlobalErrorPage({ error: _error, reset }: GlobalErrorPageProps) {
   return (
     <html lang="es">
       <body className="min-h-screen">
@@ -18,11 +18,7 @@ export default function GlobalErrorPage({ error, reset }: GlobalErrorPageProps) 
           <StateDisplay
             eyebrow="Error"
             title="El CRM no pudo inicializarse"
-            description={
-              error.message?.trim()
-                ? `Ocurrió un error al cargar la aplicación: ${error.message}`
-                : "Ocurrió un error al cargar la aplicación. Puedes intentar nuevamente."
-            }
+            description="Ocurrió un error al cargar la aplicación. Puedes intentar nuevamente."
             tone="error"
             action={
               <Button type="button" onClick={reset}>

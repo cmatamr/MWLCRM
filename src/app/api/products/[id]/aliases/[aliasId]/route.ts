@@ -1,3 +1,6 @@
+import { logApiRouteError } from "@/server/observability/api-route";
+export const dynamic = "force-dynamic";
+
 import { badRequest, handleRouteError, ok, type RouteContext } from "@/server/api/http";
 import { requireRole } from "@/server/api/auth";
 import { deleteProductAlias } from "@/server/services/products";
@@ -28,6 +31,15 @@ export async function DELETE(
     const product = await deleteProductAlias(id.trim(), parseAliasId(aliasId));
     return ok(product);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: _request,
+      route: "/api/products/[id]/aliases/[aliasId]",
+      source: "api.products",
+      defaultEventType: "products_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

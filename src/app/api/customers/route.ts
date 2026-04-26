@@ -1,3 +1,6 @@
+import { logApiRouteError } from "@/server/observability/api-route";
+export const dynamic = "force-dynamic";
+
 import {
   createCustomerSchema,
   listCustomersParamsSchema,
@@ -15,7 +18,16 @@ export async function GET(request: Request) {
     );
     return ok(customers);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/customers",
+      source: "api.customers",
+      defaultEventType: "customers_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
@@ -34,6 +46,15 @@ export async function POST(request: Request) {
       return handleRouteError(conflict(error.message, error.details));
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/customers",
+      source: "api.customers",
+      defaultEventType: "customers_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

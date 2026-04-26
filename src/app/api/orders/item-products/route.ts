@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { handleRouteError, ok, parsePositiveIntParam, parseStringParam } from "@/server/api/http";
 import { requireSessionProfile } from "@/server/api/auth";
 import { listOrderCatalogProductOptions } from "@/server/services/orders";
@@ -13,6 +14,15 @@ export async function GET(request: Request) {
 
     return ok(options);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/orders/item-products",
+      source: "api.orders",
+      defaultEventType: "orders_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

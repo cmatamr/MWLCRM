@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { listCampaignsParamsSchema, parseQueryParams } from "@/domain/crm/schemas";
 import { handleRouteError, ok } from "@/server/api/http";
 import { requireSessionProfile } from "@/server/api/auth";
@@ -11,6 +12,15 @@ export async function GET(request: Request) {
     );
     return ok(campaigns);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/campaigns",
+      source: "api.commercial",
+      defaultEventType: "commercial_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

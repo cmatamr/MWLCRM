@@ -22,6 +22,10 @@ type LoginApiResponse =
       success: true;
       data: {
         authenticated: true;
+        redirectTo: string;
+        sessionMode: "normal" | "password_change_only";
+        warningMessage?: string;
+        daysUntilExpiration?: number;
       };
     }
   | {
@@ -82,6 +86,14 @@ function mapLoginApiError(error: ApiErrorPayload | undefined): string {
       return "Captcha no disponible temporalmente. Contacta al administrador.";
     case "PROFILE_ACCESS_DENIED":
       return "Acceso denegado: tu perfil interno no esta activo o autorizado.";
+    case "ACCOUNT_LOCKED":
+      return "Tu cuenta fue bloqueada por seguridad. Restablece tu contrasena para continuar.";
+    case "SERVICE_ACCOUNT_RESTRICTED":
+      return "Cuenta de servicio sin acceso al dashboard.";
+    case "INVALID_AUTH_REQUEST":
+      return "Solicitud rechazada por seguridad. No se permite enviar credenciales en URL.";
+    case "PASSWORD_EXPIRED":
+      return "Tu contrasena vencio. Debes cambiarla para continuar.";
     default:
       return error.message ?? "No se pudo iniciar sesion. Intenta de nuevo.";
   }
@@ -110,9 +122,11 @@ export function LoginForm({ nextPath }: LoginFormProps) {
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [isTurnstileScriptReady, setIsTurnstileScriptReady] = useState(false);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileStatus, setTurnstileStatus] = useState<TurnstileStatus>("idle");
+  const [showInlinePasswordResetLink, setShowInlinePasswordResetLink] = useState(false);
 
   useEffect(() => {
     if (!siteKey || !isTurnstileScriptReady || !turnstileContainerRef.current || !window.turnstile) {
@@ -143,6 +157,7 @@ export function LoginForm({ nextPath }: LoginFormProps) {
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorMessage(null);
+    setInfoMessage(null);
 
     if (!siteKey) {
       setErrorMessage("Captcha no disponible temporalmente. Contacta al administrador.");
@@ -172,7 +187,9 @@ export function LoginForm({ nextPath }: LoginFormProps) {
       const payload = (await response.json()) as LoginApiResponse;
 
       if (!response.ok || !payload.success) {
+        const errorCode = payload.success ? undefined : payload.error?.code;
         setIsSubmitting(false);
+        setShowInlinePasswordResetLink(errorCode === "INVALID_CREDENTIALS");
         setErrorMessage(mapLoginApiError(payload.success ? undefined : payload.error));
 
         if (window.turnstile && turnstileWidgetIdRef.current) {
@@ -184,11 +201,56 @@ export function LoginForm({ nextPath }: LoginFormProps) {
         return;
       }
 
-      router.replace(resolveSafeNextPath(nextPath));
+      const redirectTo = payload.data.redirectTo
+        ? resolveSafeNextPath(payload.data.redirectTo)
+        : resolveSafeNextPath(nextPath);
+
+      router.replace(redirectTo);
       router.refresh();
     } catch {
       setIsSubmitting(false);
       setErrorMessage("No se pudo iniciar sesion por un error inesperado. Intenta de nuevo.");
+    }
+  }
+
+  async function onRequestPasswordReset() {
+    setErrorMessage(null);
+    setInfoMessage(null);
+
+    if (!email.trim()) {
+      setErrorMessage("Ingresa tu correo para solicitar el reset.");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const response = await fetch("/api/auth/request-password-reset", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+        }),
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok || !payload?.success) {
+        setIsSubmitting(false);
+        setErrorMessage(payload?.error?.message ?? "No se pudo solicitar reset de contrasena.");
+        return;
+      }
+
+      setInfoMessage(
+        payload?.data?.message ??
+          "Si el correo existe, recibiras un enlace para restablecer tu contrasena.",
+      );
+      setIsSubmitting(false);
+    } catch {
+      setIsSubmitting(false);
+      setErrorMessage("No se pudo solicitar reset de contrasena.");
     }
   }
 
@@ -212,7 +274,6 @@ export function LoginForm({ nextPath }: LoginFormProps) {
           </label>
           <input
             id="email"
-            name="email"
             type="email"
             autoComplete="email"
             required
@@ -230,7 +291,6 @@ export function LoginForm({ nextPath }: LoginFormProps) {
           </label>
           <input
             id="password"
-            name="password"
             type="password"
             autoComplete="current-password"
             required
@@ -263,13 +323,39 @@ export function LoginForm({ nextPath }: LoginFormProps) {
           </p>
         ) : null}
 
-        <Button
-          type="submit"
-          className="w-full rounded-2xl border border-[#2b4f7a]/70 bg-[linear-gradient(135deg,#0c2d57_0%,#165085_100%)] py-6 text-sm font-semibold text-white shadow-[0_12px_28px_-14px_rgba(2,6,23,0.75)] hover:brightness-110"
-          disabled={isSubmitting || !siteKey}
-        >
-          {isSubmitting ? "Ingresando..." : "Ingresar"}
-        </Button>
+        {infoMessage ? (
+          <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {infoMessage}
+          </p>
+        ) : null}
+
+        <div className="space-y-2">
+          <Button
+            type="submit"
+            className="w-full rounded-2xl border border-[#2b4f7a]/70 bg-[linear-gradient(135deg,#0c2d57_0%,#165085_100%)] py-6 text-sm font-semibold text-white shadow-[0_12px_28px_-14px_rgba(2,6,23,0.75)] hover:brightness-110"
+            disabled={isSubmitting || !siteKey}
+          >
+            {isSubmitting ? "Ingresando..." : "Ingresar"}
+          </Button>
+        </div>
+
+        <p className="text-sm text-muted-foreground">
+          ¿Problemas para ingresar?{" "}
+          {showInlinePasswordResetLink ? (
+            <>
+              <button
+                type="button"
+                onClick={onRequestPasswordReset}
+                disabled={isSubmitting}
+                className="font-medium text-slate-700 underline decoration-slate-400 underline-offset-2 transition hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                Restablece tu contrasena
+              </button>{" "}
+              o{" "}
+            </>
+          ) : null}
+          Contacta al administrador.
+        </p>
       </form>
     </>
   );

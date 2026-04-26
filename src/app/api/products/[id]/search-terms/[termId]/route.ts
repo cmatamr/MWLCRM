@@ -1,3 +1,6 @@
+import { logApiRouteError } from "@/server/observability/api-route";
+export const dynamic = "force-dynamic";
+
 import { badRequest, handleRouteError, ok, type RouteContext } from "@/server/api/http";
 import { requireRole } from "@/server/api/auth";
 import { deleteProductSearchTerm, updateProductSearchTerm } from "@/server/services/products";
@@ -63,7 +66,16 @@ export async function PATCH(
       return handleRouteError(badRequest("Invalid JSON body."));
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/products/[id]/search-terms/[termId]",
+      source: "api.products",
+      defaultEventType: "products_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
@@ -82,6 +94,15 @@ export async function DELETE(
     const product = await deleteProductSearchTerm(id.trim(), parseTermId(termId));
     return ok(product);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: _request,
+      route: "/api/products/[id]/search-terms/[termId]",
+      source: "api.products",
+      defaultEventType: "products_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

@@ -2,6 +2,8 @@ import { OrderStatusEnum, Prisma } from "@prisma/client";
 import type { PrismaClient } from "@prisma/client";
 
 import { ApiRouteError, badRequest, notFound } from "@/server/api/http";
+import { redactSensitiveData } from "@/lib/security/redaction";
+import { createSupabaseServiceClient } from "@/lib/supabase/admin";
 import {
   isSearchTermUsefulForNova,
   NOVA_SEARCH_TERM_QUALITY_RULE_EN,
@@ -15,7 +17,6 @@ import {
 
 import type {
   AddProductAliasInput,
-  AddProductImageInput,
   AddProductSearchTermInput,
   CatalogProductRow,
   CreateProductInput,
@@ -37,11 +38,11 @@ import type {
   ProductsPerformanceResponse,
   ProductsCatalogResponse,
   SaveProductAliasInput,
-  SaveProductImageInput,
   SaveProductInput,
   SaveProductRangePriceInput,
   SaveProductResult,
   SaveProductSearchTermInput,
+  UploadProductImageInput,
   UpdateProductInput,
   UpdateProductImageInput,
   UpdateProductSearchTermInput,
@@ -49,10 +50,24 @@ import type {
 
 const PRODUCT_PRICING_MODES = ["fixed", "range", "variable"] as const;
 const POSTGRES_INT4_MAX = 2_147_483_647;
+const PRODUCT_STORAGE_BUCKET = "mwl-products";
+const PRODUCT_MAIN_IMAGE_NAME = "main.webp";
+const PRODUCT_IMAGE_MAX_BYTES = 3 * 1024 * 1024;
+const PRODUCT_IMAGE_SIGNED_URL_TTL_SECONDS = 120;
+const PRODUCT_ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const PRODUCT_DEFAULTS = {
   requires_design_approval: true,
   discount_visibility: "only_if_customer_requests",
 } as const;
+
+type ProductImageDbRow = Omit<ProductImageMeta, "created_at" | "signed_url"> & {
+  created_at: Date | string;
+};
+
+type StorageRef = {
+  bucket: string;
+  path: string;
+};
 
 type ProductListRawRow = {
   id: string;
@@ -183,6 +198,123 @@ function normalizeAltText(value: string | null | undefined): string | null | und
   return normalized;
 }
 
+function normalizeProductStoragePath(value: string) {
+  return value.replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+function getProductMainImagePath(productId: string) {
+  return `products/${productId}/${PRODUCT_MAIN_IMAGE_NAME}`;
+}
+
+function getProductSerialImagePath(productId: string, serial: number) {
+  return `products/${productId}/${productId}_${serial}.webp`;
+}
+
+function detectMagicMime(buffer: Buffer): "image/jpeg" | "image/png" | "image/webp" | null {
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+
+  if (
+    buffer.length >= 8 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+
+  if (
+    buffer.length >= 12 &&
+    buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+    buffer.subarray(8, 12).toString("ascii") === "WEBP"
+  ) {
+    return "image/webp";
+  }
+
+  return null;
+}
+
+function validateImageUploadInput(input: UploadProductImageInput) {
+  const mimeType = input.mime_type.trim().toLowerCase();
+  const normalizedSize = input.size_bytes;
+
+  if (!PRODUCT_ALLOWED_MIME_TYPES.has(mimeType)) {
+    throw badRequest("Formato no permitido. Usa JPG, PNG o WEBP.", {
+      field: "file",
+      reason: "mime_not_allowed",
+    });
+  }
+
+  if (!Buffer.isBuffer(input.file_buffer) || input.file_buffer.length === 0) {
+    throw badRequest("Archivo invalido o vacio.", {
+      field: "file",
+      reason: "empty_buffer",
+    });
+  }
+
+  if (!Number.isFinite(normalizedSize) || normalizedSize <= 0) {
+    throw badRequest("Tamano de archivo invalido.", {
+      field: "file",
+      reason: "invalid_size",
+    });
+  }
+
+  if (normalizedSize > PRODUCT_IMAGE_MAX_BYTES) {
+    throw badRequest("El archivo excede el limite de 3MB.", {
+      field: "file",
+      reason: "size_exceeded",
+      max_bytes: PRODUCT_IMAGE_MAX_BYTES,
+    });
+  }
+
+  const magicMime = detectMagicMime(input.file_buffer);
+  if (!magicMime) {
+    throw badRequest("El archivo no parece ser una imagen valida.", {
+      field: "file",
+      reason: "invalid_magic_bytes",
+    });
+  }
+
+  if (magicMime !== mimeType) {
+    throw badRequest("El MIME del archivo no coincide con su contenido real.", {
+      field: "file",
+      reason: "mime_magic_mismatch",
+    });
+  }
+
+}
+
+async function processProductImageBuffer(buffer: Buffer): Promise<Buffer> {
+  try {
+    const { default: sharp } = await import("sharp");
+
+    return await sharp(buffer, {
+      failOn: "error",
+    })
+      .rotate()
+      .resize(1600, 1600, {
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({
+        quality: 88,
+      })
+      .toBuffer();
+  } catch (error) {
+    console.error("Product image processing failed", redactSensitiveData(error));
+    throw badRequest("No se pudo procesar la imagen.", {
+      field: "file",
+      reason: "image_processing_failed",
+    });
+  }
+}
+
 function normalizeRequiredText(value: string, field: string): string {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -233,10 +365,13 @@ async function refreshSearchIndexSafely(
       error instanceof Error && error.message.trim().length > 0
         ? error.message
         : "unknown_error";
-    console.error("Failed to refresh mwl product search index", {
-      ...context,
-      error,
-    });
+    console.error(
+      "Failed to refresh mwl product search index",
+      redactSensitiveData({
+        ...context,
+        error,
+      }),
+    );
     return {
       success: false,
       error,
@@ -349,6 +484,290 @@ async function reindexProductImageSortOrder(
   `);
 }
 
+async function ensureProductBucketIsPrivate() {
+  const supabase = createSupabaseServiceClient();
+  const { data, error } = await supabase.storage.listBuckets();
+
+  if (error) {
+    console.error("Failed to list storage buckets", redactSensitiveData(error));
+    throw new ApiRouteError({
+      status: 503,
+      code: "STORAGE_BUCKET_LOOKUP_FAILED",
+      message: "No se pudo validar el bucket de imagenes.",
+    });
+  }
+
+  const bucket = (data ?? []).find((entry) => entry.name === PRODUCT_STORAGE_BUCKET);
+  if (!bucket) {
+    throw new ApiRouteError({
+      status: 500,
+      code: "STORAGE_BUCKET_NOT_FOUND",
+      message: "No existe el bucket de imagenes configurado.",
+    });
+  }
+
+  if (bucket.public) {
+    throw new ApiRouteError({
+      status: 500,
+      code: "STORAGE_BUCKET_MUST_BE_PRIVATE",
+      message: "El bucket de imagenes debe ser privado.",
+    });
+  }
+}
+
+async function createSignedUrlMap(
+  refs: StorageRef[],
+): Promise<Map<string, string>> {
+  const groupedByBucket = new Map<string, string[]>();
+
+  for (const ref of refs) {
+    const bucket = ref.bucket.trim();
+    const path = normalizeProductStoragePath(ref.path);
+
+    if (!bucket || !path) {
+      continue;
+    }
+
+    const bucketPaths = groupedByBucket.get(bucket) ?? [];
+    if (!bucketPaths.includes(path)) {
+      bucketPaths.push(path);
+      groupedByBucket.set(bucket, bucketPaths);
+    }
+  }
+
+  if (groupedByBucket.size === 0) {
+    return new Map();
+  }
+
+  const supabase = createSupabaseServiceClient();
+  const signedUrlMap = new Map<string, string>();
+
+  for (const [bucket, paths] of groupedByBucket) {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrls(paths, PRODUCT_IMAGE_SIGNED_URL_TTL_SECONDS);
+
+    if (error) {
+      console.error("Failed to create signed URLs for product images", redactSensitiveData(error));
+      continue;
+    }
+
+    for (const entry of data ?? []) {
+      const signedUrl = entry.signedUrl;
+      const rawPath = entry.path;
+      const keyPath = typeof rawPath === "string" ? normalizeProductStoragePath(rawPath) : "";
+
+      if (!signedUrl || !keyPath) {
+        continue;
+      }
+
+      signedUrlMap.set(`${bucket}:${keyPath}`, signedUrl);
+    }
+  }
+
+  return signedUrlMap;
+}
+
+function buildSignedUrlLookupKey(bucket: string, path: string) {
+  return `${bucket.trim()}:${normalizeProductStoragePath(path)}`;
+}
+
+function parseSerialFromStoragePath(productId: string, path: string): number | null {
+  const normalizedPath = normalizeProductStoragePath(path);
+  const pattern = new RegExp(`^products/${escapeRegexLiteral(productId)}/${escapeRegexLiteral(productId)}_(\\d+)\\.webp$`);
+  const match = normalizedPath.match(pattern);
+
+  if (!match?.[1]) {
+    return null;
+  }
+
+  const serial = Number.parseInt(match[1], 10);
+  return Number.isInteger(serial) && serial > 0 ? serial : null;
+}
+
+function getNextImageSerial(productId: string, images: Array<Pick<ProductImageMeta, "storage_path">>) {
+  let maxSerial = 0;
+
+  for (const image of images) {
+    const serial = parseSerialFromStoragePath(productId, image.storage_path);
+    if (serial != null && serial > maxSerial) {
+      maxSerial = serial;
+    }
+  }
+
+  return maxSerial + 1;
+}
+
+async function listProductImagesFromDb(
+  db: Prisma.TransactionClient | PrismaClient,
+  productId: string,
+): Promise<ProductImageDbRow[]> {
+  return db.$queryRaw<ProductImageDbRow[]>(Prisma.sql`
+    SELECT
+      id::integer AS id,
+      product_id,
+      storage_bucket,
+      storage_path,
+      alt_text,
+      is_primary,
+      sort_order,
+      created_at
+    FROM public.mwl_product_images
+    WHERE product_id = ${productId}
+    ORDER BY is_primary DESC, sort_order ASC, id ASC
+  `);
+}
+
+async function normalizeProductImageFlagsAndSortOrder(
+  tx: Prisma.TransactionClient | PrismaClient,
+  productId: string,
+) {
+  await tx.$executeRaw(Prisma.sql`
+    UPDATE public.mwl_product_images
+    SET is_primary = FALSE
+    WHERE product_id = ${productId}
+      AND storage_path <> ${getProductMainImagePath(productId)}
+      AND is_primary = TRUE
+  `);
+
+  await tx.$executeRaw(Prisma.sql`
+    UPDATE public.mwl_product_images
+    SET is_primary = TRUE, sort_order = 0
+    WHERE product_id = ${productId}
+      AND storage_path = ${getProductMainImagePath(productId)}
+  `);
+
+  await tx.$executeRaw(Prisma.sql`
+    WITH secondary AS (
+      SELECT
+        id,
+        ROW_NUMBER() OVER (ORDER BY sort_order ASC, id ASC) AS next_sort
+      FROM public.mwl_product_images
+      WHERE product_id = ${productId}
+        AND storage_path <> ${getProductMainImagePath(productId)}
+    )
+    UPDATE public.mwl_product_images i
+    SET sort_order = secondary.next_sort, is_primary = FALSE
+    FROM secondary
+    WHERE i.id = secondary.id
+      AND i.product_id = ${productId}
+  `);
+}
+
+async function assertProductImageConsistency(
+  db: Prisma.TransactionClient | PrismaClient,
+  productId: string,
+  operation: "upload" | "delete",
+) {
+  const rows = await listProductImagesFromDb(db, productId);
+  const mainPath = getProductMainImagePath(productId);
+  const primaryRows = rows.filter((row) => row.is_primary);
+  const issues: string[] = [];
+
+  if (primaryRows.length > 1) {
+    issues.push("more_than_one_primary");
+  }
+
+  if (rows.length > 0 && primaryRows.length === 0) {
+    issues.push("missing_primary_with_existing_images");
+  }
+
+  if (primaryRows.some((row) => normalizeProductStoragePath(row.storage_path) !== mainPath)) {
+    issues.push("primary_not_pointing_to_main_webp");
+  }
+
+  const storage = createSupabaseServiceClient().storage.from(PRODUCT_STORAGE_BUCKET);
+  const { data, error } = await storage.list(`products/${productId}`, {
+    limit: 100,
+    search: PRODUCT_MAIN_IMAGE_NAME,
+  });
+
+  if (error) {
+    console.error("Product image consistency check failed while listing storage", redactSensitiveData(error));
+    throw new ApiRouteError({
+      status: 503,
+      code: "PRODUCT_IMAGE_CONSISTENCY_CHECK_FAILED",
+      message: "No se pudo validar la consistencia de imagenes.",
+    });
+  }
+
+  const storageMainExists = (data ?? []).some((entry) => entry.name === PRODUCT_MAIN_IMAGE_NAME);
+  const dbPointsToMainPrimary = rows.some(
+    (row) => row.is_primary && normalizeProductStoragePath(row.storage_path) === mainPath,
+  );
+
+  if (storageMainExists && !dbPointsToMainPrimary) {
+    issues.push("storage_main_exists_but_db_not_pointing_to_main");
+  }
+
+  if (issues.length > 0) {
+    console.error(
+      "Product image consistency validation failed",
+      redactSensitiveData({
+        operation,
+        productId,
+        issues,
+        storageMainExists,
+        rows: rows.map((row) => ({
+          id: row.id,
+          is_primary: row.is_primary,
+          sort_order: row.sort_order,
+          storage_path: row.storage_path,
+        })),
+      }),
+    );
+
+    throw new ApiRouteError({
+      status: 500,
+      code: "PRODUCT_IMAGE_INCONSISTENT_STATE",
+      message: "Se detecto un estado inconsistente en las imagenes del producto.",
+      details: {
+        product_id: productId,
+        operation,
+        issues,
+      },
+    });
+  }
+}
+
+async function runCompensationSteps(input: {
+  steps: Array<{ name: string; run: () => Promise<void> }>;
+  operation: "upload" | "delete";
+  productId: string;
+}) {
+  const errors: Array<{ step: string; error: unknown }> = [];
+
+  for (const step of input.steps) {
+    try {
+      await step.run();
+    } catch (error) {
+      errors.push({ step: step.name, error });
+      console.error(
+        "Product image compensation step failed",
+        redactSensitiveData({
+          operation: input.operation,
+          productId: input.productId,
+          step: step.name,
+          error,
+        }),
+      );
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new ApiRouteError({
+      status: 500,
+      code: "PRODUCT_IMAGE_COMPENSATION_FAILED",
+      message: "No se pudo completar la compensacion de imagenes. Requiere revision manual.",
+      details: {
+        operation: input.operation,
+        product_id: input.productId,
+        failed_steps: errors.map((entry) => entry.step),
+      },
+    });
+  }
+}
+
 function hasUsablePrice(input: {
   pricing_mode: string;
   price_crc: number | null;
@@ -412,7 +831,7 @@ function getIntegrityAlerts(input: {
   return alerts;
 }
 
-function mapCatalogRow(row: ProductListRawRow): CatalogProductRow {
+function mapCatalogRow(row: ProductListRawRow, primaryImageSignedUrl: string | null): CatalogProductRow {
   return {
     id: row.id,
     sku: row.sku,
@@ -436,6 +855,7 @@ function mapCatalogRow(row: ProductListRawRow): CatalogProductRow {
     updated_at: toIsoString(row.updated_at),
     primary_image_bucket: row.primary_image_bucket,
     primary_image_path: row.primary_image_path,
+    primary_image_signed_url: primaryImageSignedUrl,
     primary_image_alt: row.primary_image_alt,
     aliases: row.aliases ?? [],
     integrity_alerts: getIntegrityAlerts(row),
@@ -829,8 +1249,29 @@ export async function listCatalogProducts(
       left.localeCompare(right, "es", { sensitivity: "base" }),
     );
 
+  const primarySignedUrls = await createSignedUrlMap(
+    rows
+      .filter(
+        (row): row is ProductListRawRow & { primary_image_bucket: string; primary_image_path: string } =>
+          Boolean(row.primary_image_bucket && row.primary_image_path),
+      )
+      .map((row) => ({
+        bucket: row.primary_image_bucket,
+        path: row.primary_image_path,
+      })),
+  );
+
   return {
-    items: rows.map(mapCatalogRow),
+    items: rows.map((row) =>
+      mapCatalogRow(
+        row,
+        row.primary_image_bucket && row.primary_image_path
+          ? (primarySignedUrls.get(
+              buildSignedUrlLookupKey(row.primary_image_bucket, row.primary_image_path),
+            ) ?? null)
+          : null,
+      ),
+    ),
     pagination: createPaginationMeta({
       page: pagination.page,
       pageSize: pagination.pageSize,
@@ -922,20 +1363,7 @@ export async function getProductDetail(
   }
 
   const [images, aliases, searchTerms, discountRules, rangePrices] = await Promise.all([
-    db.$queryRaw<ProductImageMeta[]>(Prisma.sql`
-      SELECT
-        id::integer AS id,
-        product_id,
-        storage_bucket,
-        storage_path,
-        alt_text,
-        is_primary,
-        sort_order,
-        created_at
-      FROM public.mwl_product_images
-      WHERE product_id = ${productId}
-      ORDER BY is_primary DESC, sort_order ASC, id ASC
-    `),
+    listProductImagesFromDb(db, productId),
     db.$queryRaw<ProductAliasMeta[]>(Prisma.sql`
       SELECT
         id::integer AS id,
@@ -991,7 +1419,19 @@ export async function getProductDetail(
     `),
   ]);
 
-  const base = mapCatalogRow(row);
+  const signedUrlMap = await createSignedUrlMap(
+    images.map((image) => ({
+      bucket: image.storage_bucket,
+      path: image.storage_path,
+    })),
+  );
+
+  const base = mapCatalogRow(
+    row,
+    row.primary_image_bucket && row.primary_image_path
+      ? (signedUrlMap.get(buildSignedUrlLookupKey(row.primary_image_bucket, row.primary_image_path)) ?? null)
+      : null,
+  );
 
   return {
     id: row.id,
@@ -1032,6 +1472,8 @@ export async function getProductDetail(
     search_boost: row.search_boost,
     images: images.map((image) => ({
       ...image,
+      signed_url:
+        signedUrlMap.get(buildSignedUrlLookupKey(image.storage_bucket, image.storage_path)) ?? null,
       created_at: toIsoString(image.created_at),
     })),
     search_meta: {
@@ -1046,6 +1488,12 @@ export async function getProductDetail(
       search_boost: row.search_boost,
       storage_bucket: row.primary_image_bucket,
       storage_path: row.primary_image_path,
+      storage_signed_url:
+        row.primary_image_bucket && row.primary_image_path
+          ? (signedUrlMap.get(
+              buildSignedUrlLookupKey(row.primary_image_bucket, row.primary_image_path),
+            ) ?? null)
+          : null,
       alt_text: row.primary_image_alt,
       exact_match: false,
       direct_match: false,
@@ -1064,6 +1512,28 @@ export async function getProductDetail(
     integrity_alerts: base.integrity_alerts,
     ui_created_locally: false,
   };
+}
+
+export async function getProductImages(
+  productId: string,
+  options?: ServiceOptions,
+): Promise<ProductImageMeta[]> {
+  const db = resolveDb(options);
+  await ensureProductExists(db, productId);
+
+  const images = await listProductImagesFromDb(db, productId);
+  const signedUrlMap = await createSignedUrlMap(
+    images.map((image) => ({
+      bucket: image.storage_bucket,
+      path: image.storage_path,
+    })),
+  );
+
+  return images.map((image) => ({
+    ...image,
+    signed_url: signedUrlMap.get(buildSignedUrlLookupKey(image.storage_bucket, image.storage_path)) ?? null,
+    created_at: toIsoString(image.created_at),
+  }));
 }
 
 const PRICING_RESOLUTION_QUOTABLE_MODES = [
@@ -2338,7 +2808,6 @@ export async function saveProduct(
   const normalizedCore = buildCreateDefaults(normalizeCreatePayload(payload.product));
   const normalizedAliases = normalizeAliasesForSave(payload.aliases);
   const normalizedSearchTerms = normalizeSearchTermsForSave(payload.search_terms);
-  const normalizedImages = normalizeImagesForSave(payload.images);
   const normalizedRangePrices = normalizeRangePricesForSave(payload.range_prices);
   const publicationMode = payload.publication_mode;
 
@@ -2535,10 +3004,6 @@ export async function saveProduct(
       productId: resolvedProductId,
       terms: normalizedSearchTerms,
     });
-    await syncImagesInTransaction(tx, {
-      productId: resolvedProductId,
-      images: normalizedImages,
-    });
     await syncRangePricesInTransaction(tx, {
       productId: resolvedProductId,
       pricingMode: normalizedCore.pricing_mode,
@@ -2601,72 +3066,222 @@ export async function saveProduct(
 
 export async function addProductImage(
   productId: string,
-  payload: AddProductImageInput,
+  payload: UploadProductImageInput,
   options?: ServiceOptions,
 ): Promise<ProductDetail> {
   const db = resolveDb(options);
   await ensureProductExists(db, productId);
+  await ensureProductBucketIsPrivate();
 
-  const storageBucket = normalizeRequiredText(
-    payload.storage_bucket?.trim() || "mwl-products",
-    "storage_bucket",
-  );
-  const storagePath = normalizeRequiredText(payload.storage_path, "storage_path");
+  validateImageUploadInput(payload);
+  const processedBuffer = await processProductImageBuffer(payload.file_buffer);
   const altText = normalizeAltText(payload.alt_text);
-  const isPrimary = payload.is_primary ?? false;
+  const markAsPrimary = payload.mark_as_primary === true;
+  const storage = createSupabaseServiceClient().storage.from(PRODUCT_STORAGE_BUCKET);
+  const mainPath = getProductMainImagePath(productId);
 
-  if (payload.sort_order != null && payload.sort_order < 0) {
-    throw badRequest("sort_order must be greater than or equal to 0.", { field: "sort_order" });
-  }
+  const existingImages = await listProductImagesFromDb(db, productId);
+  const currentMain = existingImages.find(
+    (image) => normalizeProductStoragePath(image.storage_path) === mainPath || image.is_primary,
+  );
+  const nextSerial = getNextImageSerial(productId, existingImages);
+  const serialPath = getProductSerialImagePath(productId, nextSerial);
 
-  await db.$transaction(async (tx) => {
-    let sortOrder = payload.sort_order;
+  let uploadedNewMain = false;
+  let uploadedNewSerial = false;
+  let movedMainToSerial = false;
 
-    if (sortOrder == null) {
+  try {
+    if (!currentMain) {
+      const { error: uploadMainError } = await storage.upload(mainPath, processedBuffer, {
+        contentType: "image/webp",
+        upsert: true,
+      });
+      if (uploadMainError) {
+        throw uploadMainError;
+      }
+      uploadedNewMain = true;
+
+      await db.$transaction(async (tx) => {
+        await tx.$executeRaw(Prisma.sql`
+          INSERT INTO public.mwl_product_images (
+            product_id,
+            storage_bucket,
+            storage_path,
+            alt_text,
+            is_primary,
+            sort_order
+          ) VALUES (
+            ${productId},
+            ${PRODUCT_STORAGE_BUCKET},
+            ${mainPath},
+            ${altText ?? null},
+            TRUE,
+            0
+          )
+        `);
+
+        await normalizeProductImageFlagsAndSortOrder(tx, productId);
+      });
+
+      await assertProductImageConsistency(db, productId, "upload");
+
+      return getProductDetail(productId, options);
+    }
+
+    if (markAsPrimary) {
+      const currentMainPath = normalizeProductStoragePath(currentMain.storage_path);
+      const { error: moveError } = await storage.move(currentMainPath, serialPath);
+      if (moveError) {
+        throw moveError;
+      }
+      movedMainToSerial = true;
+
+      const { error: uploadMainError } = await storage.upload(mainPath, processedBuffer, {
+        contentType: "image/webp",
+        upsert: true,
+      });
+      if (uploadMainError) {
+        throw uploadMainError;
+      }
+      uploadedNewMain = true;
+
+      await db.$transaction(async (tx) => {
+        await tx.$executeRaw(Prisma.sql`
+          UPDATE public.mwl_product_images
+          SET
+            storage_path = ${serialPath},
+            is_primary = FALSE,
+            sort_order = (
+              SELECT COALESCE(MAX(sort_order), 0) + 1
+              FROM public.mwl_product_images
+              WHERE product_id = ${productId}
+            )
+          WHERE id = ${currentMain.id}
+            AND product_id = ${productId}
+        `);
+
+        await tx.$executeRaw(Prisma.sql`
+          INSERT INTO public.mwl_product_images (
+            product_id,
+            storage_bucket,
+            storage_path,
+            alt_text,
+            is_primary,
+            sort_order
+          ) VALUES (
+            ${productId},
+            ${PRODUCT_STORAGE_BUCKET},
+            ${mainPath},
+            ${altText ?? null},
+            TRUE,
+            0
+          )
+        `);
+
+        await normalizeProductImageFlagsAndSortOrder(tx, productId);
+      });
+
+      await assertProductImageConsistency(db, productId, "upload");
+
+      return getProductDetail(productId, options);
+    }
+
+    const { error: uploadSerialError } = await storage.upload(serialPath, processedBuffer, {
+      contentType: "image/webp",
+      upsert: false,
+    });
+    if (uploadSerialError) {
+      throw uploadSerialError;
+    }
+    uploadedNewSerial = true;
+
+    await db.$transaction(async (tx) => {
       const [maxSort] = await tx.$queryRaw<Array<{ max_sort_order: number | null }>>(Prisma.sql`
         SELECT MAX(sort_order) AS max_sort_order
         FROM public.mwl_product_images
         WHERE product_id = ${productId}
+          AND storage_path <> ${mainPath}
       `);
-      sortOrder = (maxSort?.max_sort_order ?? -1) + 1;
-    } else {
+
       await tx.$executeRaw(Prisma.sql`
-        UPDATE public.mwl_product_images
-        SET sort_order = sort_order + 1
-        WHERE product_id = ${productId}
-          AND sort_order >= ${sortOrder}
+        INSERT INTO public.mwl_product_images (
+          product_id,
+          storage_bucket,
+          storage_path,
+          alt_text,
+          is_primary,
+          sort_order
+        ) VALUES (
+          ${productId},
+          ${PRODUCT_STORAGE_BUCKET},
+          ${serialPath},
+          ${altText ?? null},
+          FALSE,
+          ${(maxSort?.max_sort_order ?? 0) + 1}
+        )
       `);
+
+      await normalizeProductImageFlagsAndSortOrder(tx, productId);
+    });
+
+    await assertProductImageConsistency(db, productId, "upload");
+  } catch (error) {
+    console.error("Product image upload transaction failed", redactSensitiveData(error));
+
+    const compensationSteps: Array<{ name: string; run: () => Promise<void> }> = [];
+
+    if (uploadedNewMain) {
+      compensationSteps.push({
+        name: "remove_uploaded_main",
+        run: async () => {
+          const { error: removeMainError } = await storage.remove([mainPath]);
+          if (removeMainError) {
+            throw removeMainError;
+          }
+        },
+      });
     }
 
-    if (isPrimary) {
-      await tx.$executeRaw(Prisma.sql`
-        UPDATE public.mwl_product_images
-        SET is_primary = FALSE
-        WHERE product_id = ${productId}
-      `);
+    if (uploadedNewSerial) {
+      compensationSteps.push({
+        name: "remove_uploaded_serial",
+        run: async () => {
+          const { error: removeSerialError } = await storage.remove([serialPath]);
+          if (removeSerialError) {
+            throw removeSerialError;
+          }
+        },
+      });
     }
 
-    await tx.$executeRaw(Prisma.sql`
-      INSERT INTO public.mwl_product_images (
-        product_id,
-        storage_bucket,
-        storage_path,
-        alt_text,
-        is_primary,
-        sort_order
-      )
-      VALUES (
-        ${productId},
-        ${storageBucket},
-        ${storagePath},
-        ${altText},
-        ${isPrimary},
-        ${sortOrder}
-      )
-    `);
+    if (movedMainToSerial) {
+      compensationSteps.push({
+        name: "restore_previous_main_location",
+        run: async () => {
+          const rollbackMainPath = normalizeProductStoragePath(currentMain?.storage_path ?? mainPath);
+          const { error: moveBackError } = await storage.move(serialPath, rollbackMainPath);
+          if (moveBackError) {
+            throw moveBackError;
+          }
+        },
+      });
+    }
 
-    await reindexProductImageSortOrder(tx, productId);
-  });
+    if (compensationSteps.length > 0) {
+      await runCompensationSteps({
+        steps: compensationSteps,
+        operation: "upload",
+        productId,
+      });
+    }
+
+    throw new ApiRouteError({
+      status: 503,
+      code: "PRODUCT_IMAGE_UPLOAD_FAILED",
+      message: "No se pudo cargar la imagen del producto.",
+    });
+  }
 
   return getProductDetail(productId, options);
 }
@@ -2682,9 +3297,8 @@ export async function updateProductImage(
   const [image] = await db.$queryRaw<Array<{
     id: number;
     product_id: string;
-    sort_order: number;
   }>>(Prisma.sql`
-    SELECT id::integer AS id, product_id, sort_order
+    SELECT id::integer AS id, product_id
     FROM public.mwl_product_images
     WHERE id = ${imageId}
     LIMIT 1
@@ -2696,67 +3310,17 @@ export async function updateProductImage(
 
   const normalizedAlt = normalizeAltText(payload.alt_text);
 
-  await db.$transaction(async (tx) => {
-    if (payload.sort_order !== undefined) {
-      if (payload.sort_order < 0) {
-        throw badRequest("sort_order must be greater than or equal to 0.", {
-          field: "sort_order",
-        });
-      }
+  if (payload.is_primary !== undefined || payload.sort_order !== undefined) {
+    throw badRequest("No se permite editar is_primary o sort_order manualmente.", {
+      field: "is_primary|sort_order",
+    });
+  }
 
-      const currentOrder = image.sort_order;
-      const nextOrder = payload.sort_order;
-
-      if (nextOrder > currentOrder) {
-        await tx.$executeRaw(Prisma.sql`
-          UPDATE public.mwl_product_images
-          SET sort_order = sort_order - 1
-          WHERE product_id = ${productId}
-            AND id <> ${imageId}
-            AND sort_order > ${currentOrder}
-            AND sort_order <= ${nextOrder}
-        `);
-      } else if (nextOrder < currentOrder) {
-        await tx.$executeRaw(Prisma.sql`
-          UPDATE public.mwl_product_images
-          SET sort_order = sort_order + 1
-          WHERE product_id = ${productId}
-            AND id <> ${imageId}
-            AND sort_order >= ${nextOrder}
-            AND sort_order < ${currentOrder}
-        `);
-      }
-    }
-
-    if (payload.is_primary === true) {
-      await tx.$executeRaw(Prisma.sql`
-        UPDATE public.mwl_product_images
-        SET is_primary = FALSE
-        WHERE product_id = ${productId}
-      `);
-    }
-
-    const updates: Prisma.Sql[] = [];
-    if (payload.alt_text !== undefined) {
-      updates.push(Prisma.sql`alt_text = ${normalizedAlt}`);
-    }
-    if (payload.sort_order !== undefined) {
-      updates.push(Prisma.sql`sort_order = ${payload.sort_order}`);
-    }
-    if (payload.is_primary !== undefined) {
-      updates.push(Prisma.sql`is_primary = ${payload.is_primary}`);
-    }
-
-    if (updates.length > 0) {
-      await tx.$executeRaw(Prisma.sql`
-        UPDATE public.mwl_product_images
-        SET ${Prisma.join(updates, ", ")}
-        WHERE id = ${imageId} AND product_id = ${productId}
-      `);
-    }
-
-    await reindexProductImageSortOrder(tx, productId);
-  });
+  await db.$executeRaw(Prisma.sql`
+    UPDATE public.mwl_product_images
+    SET alt_text = ${normalizedAlt ?? null}
+    WHERE id = ${imageId} AND product_id = ${productId}
+  `);
 
   return getProductDetail(productId, options);
 }
@@ -2767,44 +3331,107 @@ export async function deleteProductImage(
   options?: ServiceOptions,
 ): Promise<ProductDetail> {
   const db = resolveDb(options);
+  await ensureProductBucketIsPrivate();
+  await ensureProductExists(db, productId);
+  const storage = createSupabaseServiceClient().storage.from(PRODUCT_STORAGE_BUCKET);
+  const mainPath = getProductMainImagePath(productId);
 
-  await db.$transaction(async (tx) => {
-    const [target] = await tx.$queryRaw<Array<{ id: number; is_primary: boolean }>>(Prisma.sql`
-      SELECT id::integer AS id, is_primary
-      FROM public.mwl_product_images
-      WHERE id = ${imageId} AND product_id = ${productId}
-      LIMIT 1
-    `);
+  const [target] = await db.$queryRaw<Array<{
+    id: number;
+    storage_path: string;
+    is_primary: boolean;
+  }>>(Prisma.sql`
+    SELECT id::integer AS id, storage_path, is_primary
+    FROM public.mwl_product_images
+    WHERE id = ${imageId} AND product_id = ${productId}
+    LIMIT 1
+  `);
 
-    if (!target) {
-      throw notFound("Product image not found for this product.", { productId, imageId });
-    }
+  if (!target) {
+    throw notFound("Product image not found for this product.", { productId, imageId });
+  }
 
-    await tx.$executeRaw(Prisma.sql`
-      DELETE FROM public.mwl_product_images
-      WHERE id = ${imageId} AND product_id = ${productId}
-    `);
-
-    if (target.is_primary) {
-      const [candidate] = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
-        SELECT id::integer AS id
+  const [candidateBeforeDelete] = target.is_primary
+    ? await db.$queryRaw<Array<{ id: number; storage_path: string }>>(Prisma.sql`
+        SELECT id::integer AS id, storage_path
         FROM public.mwl_product_images
         WHERE product_id = ${productId}
+          AND id <> ${imageId}
         ORDER BY sort_order ASC, id ASC
         LIMIT 1
-      `);
+      `)
+    : [undefined];
 
-      if (candidate) {
-        await tx.$executeRaw(Prisma.sql`
-          UPDATE public.mwl_product_images
-          SET is_primary = TRUE
-          WHERE id = ${candidate.id}
-        `);
+  const originalTargetPath = normalizeProductStoragePath(target.storage_path);
+  const candidateOriginalPath = candidateBeforeDelete
+    ? normalizeProductStoragePath(candidateBeforeDelete.storage_path)
+    : null;
+  const movedCandidateToMain =
+    Boolean(target.is_primary && candidateOriginalPath && candidateOriginalPath !== mainPath);
+
+  try {
+    if (target.is_primary && candidateOriginalPath && candidateOriginalPath !== mainPath) {
+      const { error: moveError } = await storage.move(candidateOriginalPath, mainPath);
+      if (moveError) {
+        throw moveError;
       }
     }
 
-    await reindexProductImageSortOrder(tx, productId);
-  });
+    const { error: removeError } = await storage.remove([originalTargetPath]);
+    if (removeError) {
+      throw removeError;
+    }
+
+    await db.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`
+        DELETE FROM public.mwl_product_images
+        WHERE id = ${imageId} AND product_id = ${productId}
+      `);
+
+      if (target.is_primary && candidateBeforeDelete) {
+        await tx.$executeRaw(Prisma.sql`
+          UPDATE public.mwl_product_images
+          SET storage_path = ${mainPath}
+          WHERE id = ${candidateBeforeDelete.id}
+            AND product_id = ${productId}
+        `);
+      }
+
+      await normalizeProductImageFlagsAndSortOrder(tx, productId);
+    });
+
+    await assertProductImageConsistency(db, productId, "delete");
+  } catch (error) {
+    console.error("Product image delete transaction failed", redactSensitiveData(error));
+
+    const compensationSteps: Array<{ name: string; run: () => Promise<void> }> = [];
+
+    if (movedCandidateToMain && candidateOriginalPath) {
+      compensationSteps.push({
+        name: "restore_promoted_image_path",
+        run: async () => {
+          const { error: restoreMoveError } = await storage.move(mainPath, candidateOriginalPath);
+          if (restoreMoveError) {
+            throw restoreMoveError;
+          }
+        },
+      });
+    }
+
+    if (compensationSteps.length > 0) {
+      await runCompensationSteps({
+        steps: compensationSteps,
+        operation: "delete",
+        productId,
+      });
+    }
+
+    throw new ApiRouteError({
+      status: 503,
+      code: "PRODUCT_IMAGE_DELETE_FAILED",
+      message: "No se pudo eliminar la imagen del producto.",
+    });
+  }
 
   return getProductDetail(productId, options);
 }
@@ -2986,74 +3613,6 @@ function normalizeSearchTermsForSave(
   }
 
   return normalizedTerms;
-}
-
-function normalizeImagesForSave(
-  input: SaveProductImageInput[] | undefined,
-): Array<{
-  id: number | null;
-  storage_bucket: string;
-  storage_path: string;
-  alt_text: string | null | undefined;
-  is_primary: boolean;
-  sort_order: number;
-}> {
-  if (!input) {
-    return [];
-  }
-
-  const normalizedImages: Array<{
-    id: number | null;
-    storage_bucket: string;
-    storage_path: string;
-    alt_text: string | null | undefined;
-    is_primary: boolean;
-    sort_order: number;
-  }> = [];
-
-  let firstPrimaryIndex: number | null = null;
-
-  for (let index = 0; index < input.length; index += 1) {
-    const entry = input[index]!;
-    const rawId = entry.id ?? null;
-    const id = typeof rawId === "number" && Number.isInteger(rawId) && rawId > 0 ? rawId : null;
-    const storageBucket = normalizeRequiredText(
-      entry.storage_bucket?.trim() || "mwl-products",
-      "storage_bucket",
-    );
-    const storagePath = normalizeRequiredText(entry.storage_path, "storage_path");
-    const altText = normalizeAltText(entry.alt_text);
-
-    let sortOrder = entry.sort_order ?? index;
-    if (!Number.isInteger(sortOrder) || sortOrder < 0) {
-      throw badRequest("sort_order must be an integer greater than or equal to 0.", {
-        field: "images.sort_order",
-        value: entry.sort_order,
-      });
-    }
-
-    const wantsPrimary = entry.is_primary === true;
-    if (wantsPrimary && firstPrimaryIndex === null) {
-      firstPrimaryIndex = index;
-    }
-
-    normalizedImages.push({
-      id,
-      storage_bucket: storageBucket,
-      storage_path: storagePath,
-      alt_text: altText,
-      is_primary: wantsPrimary,
-      sort_order: sortOrder,
-    });
-  }
-
-  if (firstPrimaryIndex !== null) {
-    normalizedImages.forEach((image, index) => {
-      image.is_primary = index === firstPrimaryIndex;
-    });
-  }
-
-  return normalizedImages;
 }
 
 function normalizeRangePricesForSave(
@@ -3256,90 +3815,6 @@ async function syncSearchTermsInTransaction(
       )
     `);
   }
-}
-
-async function syncImagesInTransaction(
-  tx: Prisma.TransactionClient,
-  input: {
-    productId: string;
-    images: Array<{
-      id: number | null;
-      storage_bucket: string;
-      storage_path: string;
-      alt_text: string | null | undefined;
-      is_primary: boolean;
-      sort_order: number;
-    }>;
-  },
-) {
-  const existingImages = await tx.$queryRaw<Array<{ id: number }>>(Prisma.sql`
-    SELECT id::integer AS id
-    FROM public.mwl_product_images
-    WHERE product_id = ${input.productId}
-  `);
-  const existingIds = new Set(existingImages.map((row) => row.id));
-
-  for (const image of input.images) {
-    if (image.id != null && !existingIds.has(image.id)) {
-      throw badRequest("A provided image id does not belong to this product.", {
-        field: "images.id",
-        imageId: image.id,
-      });
-    }
-  }
-
-  const keepIds = input.images.map((image) => image.id).filter((id): id is number => id != null);
-  if (keepIds.length > 0) {
-    await tx.$executeRaw(Prisma.sql`
-      DELETE FROM public.mwl_product_images
-      WHERE product_id = ${input.productId}
-        AND id <> ALL(${keepIds}::int[])
-    `);
-  } else {
-    await tx.$executeRaw(Prisma.sql`
-      DELETE FROM public.mwl_product_images
-      WHERE product_id = ${input.productId}
-    `);
-  }
-
-  for (let index = 0; index < input.images.length; index += 1) {
-    const image = input.images[index]!;
-
-    if (image.id != null) {
-      await tx.$executeRaw(Prisma.sql`
-        UPDATE public.mwl_product_images
-        SET
-          storage_bucket = ${image.storage_bucket},
-          storage_path = ${image.storage_path},
-          alt_text = ${image.alt_text ?? null},
-          is_primary = ${image.is_primary},
-          sort_order = ${image.sort_order}
-        WHERE id = ${image.id} AND product_id = ${input.productId}
-      `);
-      continue;
-    }
-
-    await tx.$executeRaw(Prisma.sql`
-      INSERT INTO public.mwl_product_images (
-        product_id,
-        storage_bucket,
-        storage_path,
-        alt_text,
-        is_primary,
-        sort_order
-      )
-      VALUES (
-        ${input.productId},
-        ${image.storage_bucket},
-        ${image.storage_path},
-        ${image.alt_text ?? null},
-        ${image.is_primary},
-        ${image.sort_order}
-      )
-    `);
-  }
-
-  await reindexProductImageSortOrder(tx, input.productId);
 }
 
 async function syncRangePricesInTransaction(

@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { z } from "zod";
 
 import { handleRouteError, ok, parseUuidRouteParam, type RouteContext } from "@/server/api/http";
@@ -52,7 +53,16 @@ export async function GET(_request: Request, context: RouteContext<{ id: string 
     const detail = await getPromotionDetail(id);
     return ok(detail);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: _request,
+      route: "/api/promotions/[id]",
+      source: "api.commercial",
+      defaultEventType: "commercial_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
@@ -67,7 +77,16 @@ export async function PATCH(request: Request, context: RouteContext<{ id: string
     const updated = await updatePromotion(id, parsed);
     return ok(updated);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/promotions/[id]",
+      source: "api.commercial",
+      defaultEventType: "commercial_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
@@ -79,6 +98,15 @@ export async function DELETE(_request: Request, context: RouteContext<{ id: stri
     const deleted = await deletePromotion(id);
     return ok(deleted);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: _request,
+      route: "/api/promotions/[id]",
+      source: "api.commercial",
+      defaultEventType: "commercial_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

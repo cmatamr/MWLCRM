@@ -5,6 +5,7 @@ import { Megaphone, PackageSearch, Search, UsersRound } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { StateDisplay } from "@/components/ui/state-display";
 import { formatCurrencyCRC, formatDate, formatDateTime } from "@/lib/formatters";
+import { toSafeLinkHref } from "@/lib/security/url";
 import type {
   CampaignSearchResult,
   CustomerSearchResult,
@@ -62,7 +63,7 @@ function SearchSection({
 function CustomerResultCard({ customer }: { customer: CustomerSearchResult }) {
   return (
     <Link
-      href={customer.href}
+      href={toSafeLinkHref(customer.href, "/customers")}
       className="block rounded-[24px] border border-border/70 bg-slate-50/70 p-5 transition-colors hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -96,7 +97,7 @@ function CustomerResultCard({ customer }: { customer: CustomerSearchResult }) {
 function OrderResultCard({ order }: { order: OrderSearchResult }) {
   return (
     <Link
-      href={order.href}
+      href={toSafeLinkHref(order.href, "/orders")}
       className="block rounded-[24px] border border-border/70 bg-slate-50/70 p-5 transition-colors hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -128,7 +129,7 @@ function OrderResultCard({ order }: { order: OrderSearchResult }) {
 function CampaignResultCard({ campaign }: { campaign: CampaignSearchResult }) {
   return (
     <Link
-      href={campaign.href}
+      href={toSafeLinkHref(campaign.href, "/campaigns")}
       className="block rounded-[24px] border border-border/70 bg-slate-50/70 p-5 transition-colors hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">

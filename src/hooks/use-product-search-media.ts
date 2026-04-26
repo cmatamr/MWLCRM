@@ -7,7 +7,6 @@ import { crmApiClient } from "@/lib/api/crm";
 import { queryKeys } from "@/lib/query-config";
 import type {
   AddProductAliasInput,
-  AddProductImageInput,
   AddProductSearchTermInput,
   ProductDetail,
   UpdateProductImageInput,
@@ -38,7 +37,7 @@ export function useProductSearchMedia() {
 
   return {
     isPending,
-    addImage: (productId: string, input: AddProductImageInput) =>
+    addImage: (productId: string, input: FormData) =>
       applyWithRefresh(() => crmApiClient.addProductImage(productId, input)),
     updateImage: (productId: string, imageId: number, input: UpdateProductImageInput) =>
       applyWithRefresh(() => crmApiClient.updateProductImage(productId, imageId, input)),

@@ -1,3 +1,6 @@
+import { logApiRouteError } from "@/server/observability/api-route";
+export const dynamic = "force-dynamic";
+
 import { crmEntityIdParamsSchema } from "@/domain/crm/schemas";
 import {
   handleRouteError,
@@ -20,6 +23,15 @@ export async function GET(_request: Request, context: RouteContext<{ id: string 
 
     return ok(conversation);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: _request,
+      route: "/api/conversations/[id]",
+      source: "api.messages",
+      defaultEventType: "messages_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

@@ -10,6 +10,8 @@ import {
 import { useCreateOrder } from "@/hooks/use-create-order";
 import { useCustomers } from "@/hooks/use-customers";
 import { Button } from "@/components/ui/button";
+import { useModalDismiss } from "@/components/ui/modal-dismiss";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { crmApiClient } from "@/lib/api/crm";
 import { FetcherError } from "@/lib/fetcher";
 import { formatCurrencyCRC } from "@/lib/formatters";
@@ -56,6 +58,7 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
   const [draftItems, setDraftItems] = useState<DraftOrderItem[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [isFinalRepricing, setIsFinalRepricing] = useState(false);
+  const [isDiscardChangesOpen, setIsDiscardChangesOpen] = useState(false);
   const quoteRequestByProductRef = useRef<Record<string, number>>({});
   const customersQuery = useCustomers({
     page: 1,
@@ -211,10 +214,6 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
     [draftItemSummaries],
   );
 
-  if (!isOpen) {
-    return null;
-  }
-
   const customerResults = customersQuery.data?.items ?? [];
   const selectedProductIds = draftItems.map((item) => item.product.id);
 
@@ -224,6 +223,32 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
     }
 
     onClose();
+  }
+
+  const hasUnsavedChanges =
+    selectedCustomer != null || customerSearch.trim().length > 0 || draftItems.length > 0;
+
+  function requestClose() {
+    if (createOrderMutation.isPending) {
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      setIsDiscardChangesOpen(true);
+      return;
+    }
+
+    handleClose();
+  }
+
+  const { onBackdropMouseDown } = useModalDismiss({
+    isOpen,
+    onClose: requestClose,
+    isDisabled: createOrderMutation.isPending,
+  });
+
+  if (!isOpen) {
+    return null;
   }
 
   async function handleAddDraftItem(input: { product: OrderItemProductOption; quantity: number }) {
@@ -440,6 +465,7 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="create-order-title"
+      onMouseDown={onBackdropMouseDown}
     >
       <div className="mx-auto w-full max-w-6xl rounded-[32px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
         {formError ? (
@@ -475,7 +501,7 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
           </div>
 
           <div className="flex flex-wrap gap-3">
-            <Button type="button" variant="outline" onClick={handleClose} disabled={createOrderMutation.isPending}>
+            <Button type="button" variant="outline" onClick={requestClose} disabled={createOrderMutation.isPending}>
               Cancelar
             </Button>
             <Button
@@ -757,6 +783,16 @@ export function CreateOrderModal({ isOpen, onClose }: CreateOrderModalProps) {
           </aside>
         </div>
       </div>
+
+      <UnsavedChangesDialog
+        isOpen={isDiscardChangesOpen}
+        onContinueEditing={() => setIsDiscardChangesOpen(false)}
+        onDiscardChanges={() => {
+          setIsDiscardChangesOpen(false);
+          handleClose();
+        }}
+        isDisabled={createOrderMutation.isPending}
+      />
     </div>
   );
 }

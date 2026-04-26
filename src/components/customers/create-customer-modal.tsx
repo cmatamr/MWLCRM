@@ -7,6 +7,8 @@ import type { ChannelType } from "@prisma/client";
 
 import { useCreateCustomer } from "@/hooks/use-create-customer";
 import { Button } from "@/components/ui/button";
+import { useModalDismiss } from "@/components/ui/modal-dismiss";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { formatChannelLabel } from "@/components/customers/customer-presenters";
 
 type CreateCustomerModalProps = {
@@ -78,6 +80,7 @@ export function CreateCustomerModal({
   const [formErrors, setFormErrors] = useState<FormErrors>({});
   const [touchedFields, setTouchedFields] = useState<TouchedState>({});
   const [formError, setFormError] = useState<string | null>(null);
+  const [isDiscardChangesOpen, setIsDiscardChangesOpen] = useState(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -97,10 +100,6 @@ export function CreateCustomerModal({
     () => getExternalIdPlaceholder(form.primaryChannel),
     [form.primaryChannel],
   );
-
-  if (!isOpen) {
-    return null;
-  }
 
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({
@@ -128,6 +127,35 @@ export function CreateCustomerModal({
     }
 
     onClose();
+  }
+
+  const hasUnsavedChanges =
+    form.primaryChannel !== INITIAL_FORM_STATE.primaryChannel ||
+    form.externalId.trim() !== INITIAL_FORM_STATE.externalId ||
+    form.displayName.trim() !== INITIAL_FORM_STATE.displayName ||
+    form.customerStatus.trim() !== INITIAL_FORM_STATE.customerStatus;
+
+  function requestClose() {
+    if (createCustomerMutation.isPending) {
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      setIsDiscardChangesOpen(true);
+      return;
+    }
+
+    handleClose();
+  }
+
+  const { onBackdropMouseDown } = useModalDismiss({
+    isOpen,
+    onClose: requestClose,
+    isDisabled: createCustomerMutation.isPending,
+  });
+
+  if (!isOpen) {
+    return null;
   }
 
   async function handleSubmit() {
@@ -172,6 +200,7 @@ export function CreateCustomerModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="create-customer-title"
+      onMouseDown={onBackdropMouseDown}
     >
       <div className="mx-auto w-full max-w-2xl rounded-[32px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
         {formError ? (
@@ -218,7 +247,7 @@ export function CreateCustomerModal({
             <Button
               type="button"
               variant="outline"
-              onClick={handleClose}
+              onClick={requestClose}
               disabled={createCustomerMutation.isPending}
               className="w-full"
             >
@@ -313,6 +342,16 @@ export function CreateCustomerModal({
           </label>
         </div>
       </div>
+
+      <UnsavedChangesDialog
+        isOpen={isDiscardChangesOpen}
+        onContinueEditing={() => setIsDiscardChangesOpen(false)}
+        onDiscardChanges={() => {
+          setIsDiscardChangesOpen(false);
+          handleClose();
+        }}
+        isDisabled={createCustomerMutation.isPending}
+      />
     </div>
   );
 }

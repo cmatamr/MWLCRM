@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { crmEntityIdParamsSchema, updateOrderDeliveryDateSchema } from "@/domain/crm/schemas";
 import { badRequest, handleRouteError, notFound, ok, RouteContext } from "@/server/api/http";
 import { requireAnyRole } from "@/server/api/auth";
@@ -29,6 +30,15 @@ export async function PATCH(
       }
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/orders/[id]/delivery-date",
+      source: "api.orders",
+      defaultEventType: "orders_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

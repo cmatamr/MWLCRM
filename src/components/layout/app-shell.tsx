@@ -13,8 +13,9 @@ type AppShellProps = {
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const isAuthRoute = pathname.startsWith("/auth");
+  const isSecurityRoute = pathname.startsWith("/account/security");
 
-  if (isAuthRoute) {
+  if (isAuthRoute || isSecurityRoute) {
     return <div className="min-h-screen px-4 md:px-6 lg:px-8">{children}</div>;
   }
 

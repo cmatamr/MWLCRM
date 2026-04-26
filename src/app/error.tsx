@@ -10,17 +10,13 @@ type ErrorPageProps = {
   reset: () => void;
 };
 
-export default function ErrorPage({ error, reset }: ErrorPageProps) {
+export default function ErrorPage({ error: _error, reset }: ErrorPageProps) {
   return (
     <div className="py-8">
       <StateDisplay
         eyebrow="Error"
         title="No pudimos cargar esta vista"
-        description={
-          error.message?.trim()
-            ? `La aplicación encontró un problema inesperado: ${error.message}`
-            : "La aplicación encontró un problema inesperado mientras intentaba cargar el módulo."
-        }
+        description="La aplicación encontró un problema inesperado mientras intentaba cargar el módulo."
         tone="error"
         action={
           <Button type="button" onClick={reset}>

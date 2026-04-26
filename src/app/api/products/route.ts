@@ -6,6 +6,7 @@ import {
   parsePositiveIntParam,
   parseStringParam,
 } from "@/server/api/http";
+import { logProductsApiError } from "@/server/observability/products-api";
 import { requireRole, requireSessionProfile } from "@/server/api/auth";
 import {
   listCatalogProducts,
@@ -78,11 +79,18 @@ export async function GET(request: Request) {
     const products = await listCatalogProducts(params);
     return ok(products);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logProductsApiError({
+      request,
+      route: "/api/products",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
-export async function POST(_request: Request) {
+export async function POST(request: Request) {
   try {
     await requireRole("admin");
     throw new ApiRouteError({
@@ -98,6 +106,13 @@ export async function POST(_request: Request) {
       },
     });
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logProductsApiError({
+      request,
+      route: "/api/products",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

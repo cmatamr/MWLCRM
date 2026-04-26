@@ -6,6 +6,7 @@ import {
   parsePositiveIntParam,
   parseStringParam,
 } from "@/server/api/http";
+import { logProductsApiError } from "@/server/observability/products-api";
 import { requireSessionProfile } from "@/server/api/auth";
 import {
   getProductsPerformance,
@@ -77,6 +78,13 @@ export async function GET(request: Request) {
     const data = await getProductsPerformance(params);
     return ok(data);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logProductsApiError({
+      request,
+      route: "/api/products/performance",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

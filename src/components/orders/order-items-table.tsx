@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useModalDismiss } from "@/components/ui/modal-dismiss";
 import { TableEmptyStateRow } from "@/components/ui/state-display";
 import { useCreateOrderItem } from "@/hooks/use-create-order-item";
 import { useUpdateOrderItemDeliveryDate } from "@/hooks/use-update-order-item-event-date";
@@ -50,6 +51,12 @@ function AddOrderItemModal({ isOpen, onClose, orderId }: AddOrderItemModalProps)
     onClose();
   }
 
+  const { onBackdropMouseDown } = useModalDismiss({
+    isOpen,
+    onClose: handleClose,
+    isDisabled: createMutation.isPending,
+  });
+
   async function handleSubmit(input: { product: { id: string }; quantity: number }) {
     setFormError(null);
 
@@ -79,6 +86,7 @@ function AddOrderItemModal({ isOpen, onClose, orderId }: AddOrderItemModalProps)
       role="dialog"
       aria-modal="true"
       aria-labelledby="add-order-item-title"
+      onMouseDown={onBackdropMouseDown}
     >
       <div className="w-full max-w-2xl rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
         <div className="flex flex-col gap-3">
@@ -242,6 +250,12 @@ function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
     setIsDeleteDialogOpen(false);
   }
 
+  const { onBackdropMouseDown } = useModalDismiss({
+    isOpen: isDeleteDialogOpen,
+    onClose: closeDeleteDialog,
+    isDisabled: isDeleting,
+  });
+
   async function handleDeliveryDateBlur() {
     setDeliveryDateTouched(true);
 
@@ -394,6 +408,7 @@ function OrderItemRow({ item, orderId, itemCount }: OrderItemRowProps) {
           role="dialog"
           aria-modal="true"
           aria-labelledby={`delete-item-title-${item.id}`}
+          onMouseDown={onBackdropMouseDown}
         >
           <div className="w-full max-w-md rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
             <div className="space-y-2">

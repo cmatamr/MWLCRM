@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { isProfileAllowed } from "@/lib/auth/profile";
+import "@/lib/security/install-log-redaction";
+import { isAppRole, isGovernedPasswordRole } from "@/lib/auth/profile";
 import {
   createSupabaseMiddlewareContext,
   mergeSupabaseCookies,
@@ -15,15 +16,31 @@ const PROTECTED_PAGE_PREFIXES = [
   "/funnel",
   "/conversations",
   "/search",
+  "/admin",
+  "/account",
 ];
 
-const PUBLIC_PATH_PREFIXES = [
-  "/auth/login",
-  "/auth/access-denied",
-  "/auth/logout",
-];
+const PUBLIC_PATH_PREFIXES = ["/auth/login", "/auth/access-denied", "/auth/logout"];
 
 const EXEMPT_API_PATHS = ["/api/internal/cron/meta-campaign-sync"];
+
+const PASSWORD_CHANGE_ONLY_PATHS = ["/account/security/change-password"];
+const SENSITIVE_QUERY_KEYS = new Set([
+  "password",
+  "currentpassword",
+  "current_password",
+  "newpassword",
+  "new_password",
+  "confirmpassword",
+  "confirm_password",
+  "token",
+  "access_token",
+  "refresh_token",
+  "authorization",
+  "apikey",
+  "api_key",
+  "service_role",
+]);
 
 function isExemptApiPath(pathname: string): boolean {
   return EXEMPT_API_PATHS.some((path) => pathname === path);
@@ -54,6 +71,26 @@ function isProtectedPath(pathname: string): boolean {
   );
 }
 
+function isPasswordChangePath(pathname: string): boolean {
+  return PASSWORD_CHANGE_ONLY_PATHS.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function isPasswordExpired(passwordExpiresAt: string | null): boolean {
+  if (!passwordExpiresAt) {
+    return true;
+  }
+
+  const expiresAt = new Date(passwordExpiresAt);
+
+  if (Number.isNaN(expiresAt.getTime())) {
+    return true;
+  }
+
+  return expiresAt.getTime() <= Date.now();
+}
+
 function buildLoginRedirectUrl(request: NextRequest): URL {
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
   let base = request.nextUrl.origin;
@@ -77,8 +114,35 @@ function buildLoginRedirectUrl(request: NextRequest): URL {
   return url;
 }
 
+function buildRedirect(request: NextRequest, pathname: string): URL {
+  const url = request.nextUrl.clone();
+  url.pathname = pathname;
+  url.search = "";
+  return url;
+}
+
+function removeSensitiveQueryParams(url: URL): { changed: boolean; url: URL } {
+  const sanitized = new URL(url.toString());
+  let changed = false;
+
+  const keys = Array.from(sanitized.searchParams.keys());
+  for (const key of keys) {
+    if (SENSITIVE_QUERY_KEYS.has(key.toLowerCase())) {
+      sanitized.searchParams.delete(key);
+      changed = true;
+    }
+  }
+
+  return { changed, url: sanitized };
+}
+
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+
+  const sanitized = removeSensitiveQueryParams(request.nextUrl);
+  if (sanitized.changed && pathname !== "/api/auth/login") {
+    return NextResponse.redirect(sanitized.url);
+  }
 
   if (isExemptApiPath(pathname)) {
     return NextResponse.next();
@@ -109,28 +173,71 @@ export async function middleware(request: NextRequest) {
 
   const { data: profile, error } = await supabase
     .from("app_user_profiles")
-    .select("role, is_active, full_name")
+    .select("role, is_active, status, is_locked, password_reset_required, password_expires_at")
     .eq("id", user.id)
-    .maybeSingle();
+    .maybeSingle<{
+      role: string;
+      is_active: boolean;
+      status: string;
+      is_locked: boolean;
+      password_reset_required: boolean;
+      password_expires_at: string | null;
+    }>();
 
-  const hasAccess = !error && isProfileAllowed(profile);
+  const hasBaseAccess =
+    !error && profile && profile.is_active === true && profile.status !== "inactive" && isAppRole(profile.role);
 
-  if (!hasAccess) {
+  if (!hasBaseAccess || profile.is_locked || profile.status === "locked") {
     if (pathname === "/auth/access-denied") {
       return getResponse();
     }
 
-    const deniedUrl = request.nextUrl.clone();
-    deniedUrl.pathname = "/auth/access-denied";
-    deniedUrl.search = "";
-    return mergeSupabaseCookies(NextResponse.redirect(deniedUrl), getResponse());
+    return mergeSupabaseCookies(
+      NextResponse.redirect(buildRedirect(request, "/auth/access-denied")),
+      getResponse(),
+    );
+  }
+
+  if (profile.role === "service" && protectedPath) {
+    return mergeSupabaseCookies(
+      NextResponse.redirect(buildRedirect(request, "/auth/access-denied")),
+      getResponse(),
+    );
+  }
+
+  if (pathname.startsWith("/admin") && profile.role !== "admin") {
+    return mergeSupabaseCookies(
+      NextResponse.redirect(buildRedirect(request, "/auth/access-denied")),
+      getResponse(),
+    );
+  }
+
+  if (isGovernedPasswordRole(profile.role)) {
+    const requiresPasswordChange =
+      profile.password_reset_required === true || isPasswordExpired(profile.password_expires_at);
+
+    if (requiresPasswordChange && protectedPath && !isPasswordChangePath(pathname)) {
+      return mergeSupabaseCookies(
+        NextResponse.redirect(buildRedirect(request, "/account/security/change-password")),
+        getResponse(),
+      );
+    }
+
+    if (requiresPasswordChange && pathname === "/auth/login") {
+      return mergeSupabaseCookies(
+        NextResponse.redirect(buildRedirect(request, "/account/security/change-password")),
+        getResponse(),
+      );
+    }
   }
 
   if (pathname === "/auth/login") {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/dashboard";
-    redirectUrl.search = "";
-    return mergeSupabaseCookies(NextResponse.redirect(redirectUrl), getResponse());
+    const redirectTarget = profile.role === "service" ? "/auth/access-denied" : "/dashboard";
+
+    return mergeSupabaseCookies(
+      NextResponse.redirect(buildRedirect(request, redirectTarget)),
+      getResponse(),
+    );
   }
 
   const response = getResponse();

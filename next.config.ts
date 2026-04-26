@@ -68,6 +68,14 @@ function buildContentSecurityPolicy(): string {
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  webpack: (config, { dev }) => {
+    if (dev) {
+      // Avoid stale on-disk webpack cache artifacts that can cause ChunkLoadError in local dev.
+      config.cache = false;
+    }
+
+    return config;
+  },
   images: supabaseHostname
     ? {
         remotePatterns: [
@@ -75,6 +83,11 @@ const nextConfig: NextConfig = {
             protocol: supabaseProtocol ?? "https",
             hostname: supabaseHostname,
             pathname: "/storage/v1/object/public/**",
+          },
+          {
+            protocol: supabaseProtocol ?? "https",
+            hostname: supabaseHostname,
+            pathname: "/storage/v1/object/sign/**",
           },
         ],
       }

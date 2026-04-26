@@ -10,6 +10,7 @@ import { formatCalendarDate, formatCurrencyCRC, formatDateTime } from "@/lib/for
 import type { OrdersListResponse } from "@/server/services/orders/types";
 import { useDeleteOrder } from "@/hooks/use-delete-order";
 import { Button } from "@/components/ui/button";
+import { useModalDismiss } from "@/components/ui/modal-dismiss";
 
 import {
   formatCustomerName,
@@ -69,6 +70,12 @@ function OrderRow({ order }: { order: OrdersListResponse["items"][number] }) {
     setIsDeleteDialogOpen(false);
   }
 
+  const { onBackdropMouseDown } = useModalDismiss({
+    isOpen: isDeleteDialogOpen,
+    onClose: closeDeleteDialog,
+    isDisabled: deleteOrderMutation.isPending,
+  });
+
   return (
     <>
       <tr className="text-sm text-slate-700">
@@ -123,6 +130,7 @@ function OrderRow({ order }: { order: OrdersListResponse["items"][number] }) {
               role="dialog"
               aria-modal="true"
               aria-labelledby={`delete-order-title-${order.id}`}
+              onMouseDown={onBackdropMouseDown}
             >
               <div className="w-full max-w-md rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
                 <div className="space-y-2">

@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { crmEntityIdParamsSchema, orderPaymentActionSchema, updateOrderSchema } from "@/domain/crm/schemas";
 import {
   badRequest,
@@ -29,7 +30,16 @@ export async function GET(_request: Request, context: RouteContext<{ id: string 
 
     return ok(order);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: _request,
+      route: "/api/orders/[id]",
+      source: "api.orders",
+      defaultEventType: "orders_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
@@ -77,7 +87,16 @@ export async function PATCH(request: Request, context: RouteContext<{ id: string
       return handleRouteError(badRequest(error.message, error.details));
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/orders/[id]",
+      source: "api.orders",
+      defaultEventType: "orders_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }
 
@@ -95,6 +114,15 @@ export async function DELETE(_request: Request, context: RouteContext<{ id: stri
       }
     }
 
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: _request,
+      route: "/api/orders/[id]",
+      source: "api.orders",
+      defaultEventType: "orders_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

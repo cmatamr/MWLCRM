@@ -8,7 +8,9 @@ import { useEffect, useMemo, useState } from "react";
 import { orderStatusesRequiringValidatedReceipt } from "@/domain/crm/orders";
 import { useUpdateOrder } from "@/hooks/use-update-order";
 import { Button } from "@/components/ui/button";
+import { useModalDismiss } from "@/components/ui/modal-dismiss";
 import { StatusBadgeFromViewModel } from "@/components/ui/status-badge";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 
 import {
   formatOrderStatusLabel,
@@ -49,6 +51,7 @@ export function OrderEditAction({ order }: OrderEditActionProps) {
   const [deliveryDate, setDeliveryDate] = useState(normalizeDateValueForInput(order.deliveryDate));
   const [deliveryDateTouched, setDeliveryDateTouched] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [isDiscardChangesOpen, setIsDiscardChangesOpen] = useState(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -95,6 +98,25 @@ export function OrderEditAction({ order }: OrderEditActionProps) {
 
     setIsOpen(false);
   }
+
+  function requestClose() {
+    if (updateOrderMutation.isPending) {
+      return;
+    }
+
+    if (hasChanges) {
+      setIsDiscardChangesOpen(true);
+      return;
+    }
+
+    handleClose();
+  }
+
+  const { onBackdropMouseDown } = useModalDismiss({
+    isOpen,
+    onClose: requestClose,
+    isDisabled: updateOrderMutation.isPending,
+  });
 
   async function handleSubmit() {
     setFormError(null);
@@ -151,6 +173,7 @@ export function OrderEditAction({ order }: OrderEditActionProps) {
           role="dialog"
           aria-modal="true"
           aria-labelledby={`edit-order-title-${order.id}`}
+          onMouseDown={onBackdropMouseDown}
         >
           <div className="mx-auto w-full max-w-2xl rounded-[32px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
             {formError ? (
@@ -200,7 +223,7 @@ export function OrderEditAction({ order }: OrderEditActionProps) {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={handleClose}
+                  onClick={requestClose}
                   disabled={updateOrderMutation.isPending}
                   className="w-full"
                 >
@@ -281,6 +304,16 @@ export function OrderEditAction({ order }: OrderEditActionProps) {
           </div>
         </div>
       ) : null}
+
+      <UnsavedChangesDialog
+        isOpen={isDiscardChangesOpen}
+        onContinueEditing={() => setIsDiscardChangesOpen(false)}
+        onDiscardChanges={() => {
+          setIsDiscardChangesOpen(false);
+          handleClose();
+        }}
+        isDisabled={updateOrderMutation.isPending}
+      />
     </>
   );
 }

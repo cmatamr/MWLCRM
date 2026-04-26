@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useBanks } from "@/hooks/use-banks";
 import { Button } from "@/components/ui/button";
+import { useModalDismiss } from "@/components/ui/modal-dismiss";
+import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import type {
   BankListItem,
   CreatePaymentReceiptInput,
@@ -253,6 +255,7 @@ export function PaymentReceiptModal({
   const [form, setForm] = useState<FormState>(INITIAL_FORM_STATE);
   const [touchedFields, setTouchedFields] = useState<Partial<Record<keyof FormState, boolean>>>({});
   const [localError, setLocalError] = useState<string | null>(null);
+  const [isDiscardChangesOpen, setIsDiscardChangesOpen] = useState(false);
   const isEditMode = mode === "edit";
 
   useEffect(() => {
@@ -286,10 +289,6 @@ export function PaymentReceiptModal({
 
   const formErrors = useMemo(() => validateForm(form), [form]);
 
-  if (!isOpen) {
-    return null;
-  }
-
   function updateField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
     setLocalError(null);
@@ -305,6 +304,44 @@ export function PaymentReceiptModal({
     }
 
     onClose();
+  }
+
+  const initialForm = useMemo(
+    () => buildInitialFormState(initialReceipt, banks),
+    [initialReceipt, banks],
+  );
+  const hasUnsavedChanges =
+    form.amountCrc.trim() !== initialForm.amountCrc.trim() ||
+    form.bankId !== initialForm.bankId ||
+    form.reference.trim() !== initialForm.reference.trim() ||
+    form.senderName.trim() !== initialForm.senderName.trim() ||
+    form.recipientName.trim() !== initialForm.recipientName.trim() ||
+    form.destinationPhone.trim() !== initialForm.destinationPhone.trim() ||
+    form.receiptDateTime.trim() !== initialForm.receiptDateTime.trim() ||
+    form.transferType !== initialForm.transferType ||
+    form.internalNotes.trim() !== initialForm.internalNotes.trim();
+
+  function requestClose() {
+    if (isSubmitting) {
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      setIsDiscardChangesOpen(true);
+      return;
+    }
+
+    handleClose();
+  }
+
+  const { onBackdropMouseDown } = useModalDismiss({
+    isOpen,
+    onClose: requestClose,
+    isDisabled: isSubmitting,
+  });
+
+  if (!isOpen) {
+    return null;
   }
 
   async function handleSubmit() {
@@ -375,6 +412,7 @@ export function PaymentReceiptModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="payment-receipt-modal-title"
+      onMouseDown={onBackdropMouseDown}
     >
       <div className="mx-auto w-full max-w-3xl rounded-[32px] border border-white/70 bg-white/95 p-6 shadow-[0_30px_90px_rgba(15,23,42,0.18)]">
         <div className="flex flex-col gap-3 border-b border-border/70 pb-6 sm:flex-row sm:items-start sm:justify-between">
@@ -525,7 +563,7 @@ export function PaymentReceiptModal({
         ) : null}
 
         <div className="mt-6 flex justify-end gap-3">
-          <Button type="button" variant="outline" onClick={handleClose} disabled={isSubmitting}>
+          <Button type="button" variant="outline" onClick={requestClose} disabled={isSubmitting}>
             Cancelar
           </Button>
           <Button type="button" onClick={() => void handleSubmit()} disabled={isSubmitting}>
@@ -539,6 +577,16 @@ export function PaymentReceiptModal({
           </Button>
         </div>
       </div>
+
+      <UnsavedChangesDialog
+        isOpen={isDiscardChangesOpen}
+        onContinueEditing={() => setIsDiscardChangesOpen(false)}
+        onDiscardChanges={() => {
+          setIsDiscardChangesOpen(false);
+          handleClose();
+        }}
+        isDisabled={isSubmitting}
+      />
     </div>
   );
 }

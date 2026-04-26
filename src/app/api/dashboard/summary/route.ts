@@ -1,3 +1,4 @@
+import { logApiRouteError } from "@/server/observability/api-route";
 import { OrderStatusEnum } from "@prisma/client";
 
 import { ok, handleRouteError } from "@/server/api/http";
@@ -49,6 +50,15 @@ export async function GET(request: Request) {
     });
     return ok(summary);
   } catch (error) {
-    return handleRouteError(error);
+    const response = handleRouteError(error);
+    await logApiRouteError({
+      request: request,
+      route: "/api/dashboard/summary",
+      source: "api.dashboard",
+      defaultEventType: "dashboard_api_error",
+      error,
+      httpStatus: response.status,
+    });
+    return response;
   }
 }

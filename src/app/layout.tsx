@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import "@/lib/security/install-log-redaction";
 import { AppShell } from "@/components/layout/app-shell";
 import { QueryProvider } from "@/providers/query-provider";
 import "@/app/globals.css";
