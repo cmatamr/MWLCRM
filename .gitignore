@@ -6,3 +6,7 @@ node_modules
 dist
 build
 .DS_Store
+# Next.js build artifacts
+.next/
+.next_stale_*/
+out/
