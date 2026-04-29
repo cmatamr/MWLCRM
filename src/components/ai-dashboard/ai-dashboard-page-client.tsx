@@ -7,7 +7,12 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { StateDisplay } from "@/components/ui/state-display";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { useAiDashboardSummary, useToggleClientAgent } from "@/hooks/use-ai-dashboard";
+import {
+  useAiDashboardSummary,
+  useSyncOpenAICosts,
+  useToggleClientAgent,
+  useUpsertOpenAIProviderProject,
+} from "@/hooks/use-ai-dashboard";
 import { cn } from "@/lib/utils";
 
 const CLIENT_CODE = "made-with-love";
@@ -29,34 +34,37 @@ function dateTime(value: string | null) {
   });
 }
 
+function maskProjectId(value: string | null) {
+  if (!value) return "No configurado";
+  if (value.length <= 10) return `${value.slice(0, 3)}***${value.slice(-2)}`;
+  return `${value.slice(0, 8)}...${value.slice(-3)}`;
+}
+
 export function AiDashboardPageClient() {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [isProviderModalOpen, setIsProviderModalOpen] = useState(false);
   const [confirmText, setConfirmText] = useState("");
+  const [providerForm, setProviderForm] = useState({
+    providerProjectId: "",
+    providerProjectName: "",
+    monthlyBudgetUsd: "0",
+    status: "active" as "active" | "inactive" | "suspended" | "revoked",
+  });
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
   const query = useAiDashboardSummary(CLIENT_CODE);
   const toggle = useToggleClientAgent(CLIENT_CODE, AGENT_CODE);
+  const upsertProject = useUpsertOpenAIProviderProject(CLIENT_CODE);
+  const syncCosts = useSyncOpenAICosts(CLIENT_CODE);
 
   const agent = query.data?.agent;
   const requiresTypedConfirm = agent?.enabled === true;
 
   const canSubmitToggle = useMemo(() => {
-    if (!agent || toggle.isPending) {
-      return false;
-    }
-
-    if (!requiresTypedConfirm) {
-      return true;
-    }
-
+    if (!agent || toggle.isPending) return false;
+    if (!requiresTypedConfirm) return true;
     return confirmText.trim().toLowerCase() === "pausar";
   }, [agent, toggle.isPending, requiresTypedConfirm, confirmText]);
-
-  async function onConfirmToggle() {
-    if (!agent) return;
-    await toggle.mutateAsync(!agent.enabled);
-    setIsConfirmOpen(false);
-    setConfirmText("");
-  }
 
   if (query.isLoading && !query.data) {
     return <StateDisplay title="Cargando Dashboard IA" description="Obteniendo estado y consumo de IA." />;
@@ -82,7 +90,89 @@ export function AiDashboardPageClient() {
     );
   }
 
-  const { billing, balance, dailyUsage, recentActivity, reconciliation } = query.data;
+  const {
+    billing,
+    balance,
+    dailyUsage,
+    recentActivity,
+    reconciliation,
+    providerProject,
+    integrationStatus,
+    permissions,
+  } = query.data;
+
+  const canManageOpenAI = permissions.canManageOpenAIConfig;
+  const canSync = Boolean(
+    integrationStatus.openaiAdminKeyConfigured && providerProject.configured && balance,
+  );
+
+  async function onConfirmToggle() {
+    if (!agent) return;
+    await toggle.mutateAsync(!agent.enabled);
+    setIsConfirmOpen(false);
+    setConfirmText("");
+  }
+
+  function openProviderModal() {
+    setProviderForm({
+      providerProjectId: providerProject.providerProjectId ?? "",
+      providerProjectName: providerProject.providerProjectName ?? "",
+      monthlyBudgetUsd: String(providerProject.monthlyBudgetUsd ?? 0),
+      status:
+        providerProject.status === "not_configured"
+          ? "active"
+          : providerProject.status,
+    });
+    setIsProviderModalOpen(true);
+    setFeedbackMessage(null);
+  }
+
+  async function submitProviderConfig() {
+    const monthlyBudgetUsd = Number.parseFloat(providerForm.monthlyBudgetUsd);
+    if (!providerForm.providerProjectId.trim()) {
+      setFeedbackMessage("Project ID es requerido.");
+      return;
+    }
+    if (!providerForm.providerProjectName.trim()) {
+      setFeedbackMessage("Project Name es requerido.");
+      return;
+    }
+    if (Number.isNaN(monthlyBudgetUsd) || monthlyBudgetUsd < 0) {
+      setFeedbackMessage("Budget mensual debe ser mayor o igual a 0.");
+      return;
+    }
+
+    try {
+      await upsertProject.mutateAsync({
+        provider: "openai",
+        providerProjectId: providerForm.providerProjectId.trim(),
+        providerProjectName: providerForm.providerProjectName.trim(),
+        monthlyBudgetUsd,
+        status: providerForm.status,
+      });
+      setIsProviderModalOpen(false);
+      setFeedbackMessage("Configuración OpenAI guardada correctamente.");
+    } catch (error) {
+      setFeedbackMessage(error instanceof Error ? error.message : "No se pudo guardar configuración OpenAI.");
+    }
+  }
+
+  async function syncCurrentPeriod() {
+    if (!balance) {
+      setFeedbackMessage("No hay periodo de balance para sincronizar.");
+      return;
+    }
+
+    try {
+      await syncCosts.mutateAsync({
+        periodStart: `${balance.periodStart}T00:00:00.000Z`,
+        periodEnd: `${balance.periodEnd}T23:59:59.999Z`,
+      });
+      setFeedbackMessage("Sincronización de consumo completada.");
+    } catch (error) {
+      setFeedbackMessage(error instanceof Error ? error.message : "No se pudo sincronizar consumo.");
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -90,6 +180,12 @@ export function AiDashboardPageClient() {
         title="Dashboard IA"
         description="Control de NOVA, consumo de crédito y actividad reciente de IA."
       />
+
+      {feedbackMessage ? (
+        <section className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          {feedbackMessage}
+        </section>
+      ) : null}
 
       <section className={FLOATING_CARD_CLASSNAME}>
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -172,6 +268,75 @@ export function AiDashboardPageClient() {
         </div>
       </section>
 
+      <section className={FLOATING_CARD_CLASSNAME}>
+        <div className="space-y-5">
+          <div className="space-y-2">
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-primary/70">
+              OpenAI
+            </p>
+            <div className="space-y-1">
+              <h3 className="text-2xl font-semibold tracking-tight text-slate-950">
+                Configuración OpenAI
+              </h3>
+              <p className="text-sm leading-6 text-muted-foreground">
+                Estado de integración del cliente y habilitación de sincronización de consumo real.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl bg-slate-950 px-4 py-4 text-white">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-300">Admin API Key</p>
+              <p className="mt-2 text-2xl font-semibold">
+                {integrationStatus.openaiAdminKeyConfigured ? "Sí" : "No"}
+              </p>
+            </div>
+            <div className="rounded-2xl bg-secondary px-4 py-4 text-secondary-foreground">
+              <p className="text-xs uppercase tracking-[0.18em]">Proyecto cliente</p>
+              <p className="mt-2 text-2xl font-semibold">
+                {providerProject.configured ? "Configurado" : "No configurado"}
+              </p>
+            </div>
+            <div className="rounded-2xl bg-muted px-4 py-4 text-slate-900">
+              <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Estado</p>
+              <p className="mt-2 text-2xl font-semibold">{providerProject.status}</p>
+            </div>
+          </div>
+
+          <article className="rounded-[24px] border border-border/70 bg-muted/30 p-4">
+            <div className="grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
+              <p>Provider: <span className="font-semibold text-slate-950">OpenAI</span></p>
+              <p>Project Name: <span className="font-semibold text-slate-950">{providerProject.providerProjectName ?? "No configurado"}</span></p>
+              <p>Project ID: <span className="font-semibold text-slate-950">{maskProjectId(providerProject.providerProjectId)}</span></p>
+              <p>Budget mensual: <span className="font-semibold text-slate-950">{providerProject.monthlyBudgetUsd == null ? "No configurado" : currency(providerProject.monthlyBudgetUsd)}</span></p>
+            </div>
+          </article>
+        </div>
+
+        {!integrationStatus.openaiAdminKeyConfigured ? (
+          <p className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+            OpenAI Admin Key no configurada en servidor. Configúrala en variables de entorno.
+          </p>
+        ) : null}
+
+        {!providerProject.configured ? (
+          <p className="mt-4 rounded-2xl border border-border/70 bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+            Este cliente no tiene un proyecto OpenAI asociado. No es posible sincronizar consumo real.
+          </p>
+        ) : null}
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          {canManageOpenAI ? (
+            <Button variant="outline" onClick={openProviderModal}>
+              {providerProject.configured ? "Editar configuración" : "Configurar OpenAI"}
+            </Button>
+          ) : null}
+          <Button onClick={() => void syncCurrentPeriod()} disabled={!canSync || syncCosts.isPending}>
+            Sincronizar consumo
+          </Button>
+        </div>
+      </section>
+
       <section className="grid gap-4 xl:grid-cols-2">
         <article className={FLOATING_CARD_CLASSNAME}>
           <div className="mb-1 flex items-center gap-2">
@@ -233,34 +398,110 @@ export function AiDashboardPageClient() {
 
       {isConfirmOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
-          <div className={cn("w-full max-w-lg rounded-2xl border border-border bg-white p-6 shadow-xl")}>
-            <h3 className="text-xl font-semibold text-slate-900">
-              {agent.enabled ? "Pausar atención automática" : "Activar atención automática"}
-            </h3>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {agent.enabled
-                ? "Al pausar NOVA, la atención automática quedará deshabilitada y las conversaciones deberán ser gestionadas manualmente por el equipo."
-                : "NOVA comenzará a gestionar automáticamente la atención al cliente."}
-            </p>
+          <div className={cn("w-full max-w-2xl rounded-[30px] border border-white/75 bg-white/95 p-6 shadow-[0_40px_78px_-30px_rgba(2,6,23,0.45),0_18px_34px_-18px_rgba(2,6,23,0.3)] backdrop-blur")}>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary/70">NOVA</p>
+              <h3 className="text-3xl font-semibold tracking-tight text-slate-950">
+                {agent.enabled ? "Pausar atención automática" : "Activar atención automática"}
+              </h3>
+              <p className="text-sm leading-6 text-muted-foreground">
+                {agent.enabled
+                  ? "Al pausar NOVA, la atención automática quedará deshabilitada y las conversaciones deberán ser gestionadas manualmente por el equipo."
+                  : "NOVA comenzará a gestionar automáticamente la atención al cliente."}
+              </p>
+            </div>
 
             {agent.enabled ? (
-              <div className="mt-4 space-y-2">
-                <p className="text-sm font-medium text-slate-800">Escribe Pausar para confirmar.</p>
+              <div className="mt-5 rounded-[24px] border border-border/70 bg-muted/20 p-4">
+                <p className="text-sm font-semibold text-slate-800">Escribe Pausar para confirmar.</p>
                 <input
                   value={confirmText}
                   onChange={(event) => setConfirmText(event.target.value)}
                   placeholder='Escribe "Pausar"'
-                  className="w-full rounded-lg border border-border px-3 py-2 text-sm outline-none ring-primary/20 focus:ring"
+                  className="mt-3 w-full rounded-2xl border border-border/80 bg-white px-4 py-3 text-sm text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground/70 focus:border-primary/65 focus:ring-2 focus:ring-primary/20"
                 />
               </div>
             ) : null}
 
-            <div className="mt-5 flex justify-end gap-2">
+            <div className="mt-5 flex justify-end gap-2 border-t border-border/70 pt-4">
               <Button variant="outline" onClick={() => setIsConfirmOpen(false)}>
                 Cancelar
               </Button>
               <Button onClick={() => void onConfirmToggle()} disabled={!canSubmitToggle}>
                 {agent.enabled ? "Pausar NOVA" : "Activar NOVA"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isProviderModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
+          <div className={cn("w-full max-w-2xl rounded-[30px] border border-white/75 bg-white/95 p-6 shadow-[0_40px_78px_-30px_rgba(2,6,23,0.45),0_18px_34px_-18px_rgba(2,6,23,0.3)] backdrop-blur") }>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary/70">OpenAI</p>
+              <h3 className="text-3xl font-semibold tracking-tight text-slate-950">Configurar integración</h3>
+              <p className="text-sm leading-6 text-muted-foreground">
+                Asocia el proyecto OpenAI del cliente para habilitar sincronización de costos reales.
+              </p>
+            </div>
+
+            <div className="mt-5 rounded-[24px] border border-border/70 bg-muted/20 p-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="text-sm sm:col-span-2">
+                  <span className="mb-1 block text-slate-700">Project ID</span>
+                  <input
+                    value={providerForm.providerProjectId}
+                    onChange={(event) => setProviderForm((prev) => ({ ...prev, providerProjectId: event.target.value }))}
+                    className="w-full rounded-2xl border border-border/80 bg-white px-4 py-3 text-sm text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground/70 focus:border-primary/65 focus:ring-2 focus:ring-primary/20"
+                  />
+                </label>
+                <label className="text-sm sm:col-span-2">
+                  <span className="mb-1 block text-slate-700">Project Name</span>
+                  <input
+                    value={providerForm.providerProjectName}
+                    onChange={(event) => setProviderForm((prev) => ({ ...prev, providerProjectName: event.target.value }))}
+                    className="w-full rounded-2xl border border-border/80 bg-white px-4 py-3 text-sm text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground/70 focus:border-primary/65 focus:ring-2 focus:ring-primary/20"
+                  />
+                </label>
+                <label className="text-sm">
+                  <span className="mb-1 block text-slate-700">Budget mensual (USD)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={providerForm.monthlyBudgetUsd}
+                    onChange={(event) => setProviderForm((prev) => ({ ...prev, monthlyBudgetUsd: event.target.value }))}
+                    className="w-full rounded-2xl border border-border/80 bg-white px-4 py-3 text-sm text-foreground shadow-sm outline-none transition placeholder:text-muted-foreground/70 focus:border-primary/65 focus:ring-2 focus:ring-primary/20"
+                  />
+                </label>
+                <label className="text-sm">
+                  <span className="mb-1 block text-slate-700">Status</span>
+                  <select
+                    value={providerForm.status}
+                    onChange={(event) =>
+                      setProviderForm((prev) => ({
+                        ...prev,
+                        status: event.target.value as "active" | "inactive" | "suspended" | "revoked",
+                      }))
+                    }
+                    className="w-full rounded-2xl border border-border/80 bg-white px-4 py-3 text-sm text-foreground shadow-sm outline-none transition focus:border-primary/65 focus:ring-2 focus:ring-primary/20"
+                  >
+                    <option value="active">active</option>
+                    <option value="inactive">inactive</option>
+                    <option value="suspended">suspended</option>
+                    <option value="revoked">revoked</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2 border-t border-border/70 pt-4">
+              <Button variant="outline" onClick={() => setIsProviderModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={() => void submitProviderConfig()} disabled={upsertProject.isPending}>
+                Guardar configuración
               </Button>
             </div>
           </div>

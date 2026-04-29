@@ -52,6 +52,20 @@ export type AiDashboardSummary = {
     status: "pending" | "matched" | "mismatch" | "reviewed" | null;
     lastSyncAt: string | null;
   };
+  providerProject: {
+    provider: "openai";
+    providerProjectId: string | null;
+    providerProjectName: string | null;
+    monthlyBudgetUsd: number | null;
+    status: "active" | "inactive" | "suspended" | "revoked" | "not_configured";
+    configured: boolean;
+  };
+  integrationStatus: {
+    openaiAdminKeyConfigured: boolean;
+  };
+  permissions: {
+    canManageOpenAIConfig: boolean;
+  };
 };
 
 export type ToggleClientAgentInput = {
@@ -87,4 +101,29 @@ export type SyncOpenAICostsResult = {
   providerReportedCostUsd: number;
   differenceUsd: number;
   status: "pending" | "matched" | "mismatch" | "reviewed";
+};
+
+export type UpsertOpenAIProviderProjectInput = {
+  clientCode: string;
+  actor: {
+    userId: string;
+    email: string | null;
+    name: string | null;
+  };
+  provider: "openai";
+  providerProjectId: string;
+  providerProjectName: string;
+  monthlyBudgetUsd: number;
+  status: "active" | "inactive" | "suspended" | "revoked";
+};
+
+export type UpsertOpenAIProviderProjectResult = {
+  clientCode: string;
+  provider: "openai";
+  providerProjectId: string;
+  providerProjectName: string;
+  monthlyBudgetUsd: number;
+  status: "active" | "inactive" | "suspended" | "revoked";
+  configured: true;
+  operation: "created" | "updated";
 };

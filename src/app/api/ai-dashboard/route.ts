@@ -28,6 +28,7 @@ export async function GET(request: Request) {
     }
 
     const summary = await getAiDashboardSummary(query.data.clientCode);
+    summary.permissions.canManageOpenAIConfig = session.profile.role === "admin";
     return ok(summary);
   } catch (error) {
     const response = handleRouteError(error);

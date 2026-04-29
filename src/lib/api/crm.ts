@@ -1,5 +1,6 @@
 import type { OrderStatusEnum } from "@prisma/client";
 import type { AiDashboardSummary } from "@/server/services/ai-dashboard";
+import type { SyncOpenAICostsResult, UpsertOpenAIProviderProjectResult } from "@/server/services/ai-dashboard";
 
 import type { DashboardSummary } from "@/server/services/dashboard/types";
 import type { DashboardDailySalesRangeDays } from "@/server/services/dashboard/types";
@@ -108,6 +109,53 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
         {
           method: "PATCH",
           body: JSON.stringify({ enabled }),
+          headers: {
+            "Content-Type": "application/json",
+            ...init?.headers,
+          },
+          ...init,
+        },
+      );
+    },
+    upsertOpenAIProviderProject(
+      clientCode: string,
+      input: {
+        provider: "openai";
+        providerProjectId: string;
+        providerProjectName: string;
+        monthlyBudgetUsd: number;
+        status: "active" | "inactive" | "suspended" | "revoked";
+      },
+      init?: RequestInit,
+    ) {
+      return get<UpsertOpenAIProviderProjectResult>(
+        `/api/admin/clients/${clientCode}/ai-provider-project`,
+        undefined,
+        {
+          method: "PUT",
+          body: JSON.stringify(input),
+          headers: {
+            "Content-Type": "application/json",
+            ...init?.headers,
+          },
+          ...init,
+        },
+      );
+    },
+    syncOpenAICosts(
+      input: {
+        clientCode: string;
+        periodStart: string;
+        periodEnd: string;
+      },
+      init?: RequestInit,
+    ) {
+      return get<SyncOpenAICostsResult>(
+        "/api/admin/ai-usage/sync-openai-costs",
+        undefined,
+        {
+          method: "POST",
+          body: JSON.stringify(input),
           headers: {
             "Content-Type": "application/json",
             ...init?.headers,
