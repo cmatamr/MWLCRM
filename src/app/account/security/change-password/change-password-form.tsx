@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 type AccountSecurityApiResponse =
@@ -9,6 +10,14 @@ type AccountSecurityApiResponse =
       data: {
         passwordResetRequired: boolean;
         daysUntilExpiration: number | null;
+        policy: {
+          minimumLength: number;
+          minimumUppercase: number;
+          minimumLowercase: number;
+          minimumNumbers: number;
+          minimumSymbols: number;
+          passwordHistoryCheckCount: number;
+        };
       };
     }
   | {
@@ -19,6 +28,14 @@ type AccountSecurityApiResponse =
     };
 
 export function ChangePasswordForm() {
+  const [policy, setPolicy] = useState({
+    minimumLength: 8,
+    minimumUppercase: 1,
+    minimumLowercase: 1,
+    minimumNumbers: 1,
+    minimumSymbols: 1,
+    passwordHistoryCheckCount: 3,
+  });
   const [currentPasswordRequired, setCurrentPasswordRequired] = useState(true);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -27,6 +44,44 @@ export function ChangePasswordForm() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const router = useRouter();
+  const uppercaseCount = (newPassword.match(/[A-Z]/g) ?? []).length;
+  const lowercaseCount = (newPassword.match(/[a-z]/g) ?? []).length;
+  const numbersCount = (newPassword.match(/[0-9]/g) ?? []).length;
+  const symbolsCount = (newPassword.match(/[^A-Za-z0-9]/g) ?? []).length;
+
+  const passwordRequirements = [
+    {
+      id: "length",
+      label: `Mínimo ${policy.minimumLength} caracteres.`,
+      met: newPassword.length >= policy.minimumLength,
+    },
+    {
+      id: "uppercase",
+      label: `Al menos ${policy.minimumUppercase} mayúscula(s).`,
+      met: uppercaseCount >= policy.minimumUppercase,
+    },
+    {
+      id: "lowercase",
+      label: `Al menos ${policy.minimumLowercase} minúscula(s).`,
+      met: lowercaseCount >= policy.minimumLowercase,
+    },
+    {
+      id: "numbers",
+      label: `Al menos ${policy.minimumNumbers} número(s).`,
+      met: numbersCount >= policy.minimumNumbers,
+    },
+    {
+      id: "symbols",
+      label: `Al menos ${policy.minimumSymbols} símbolo(s).`,
+      met: symbolsCount >= policy.minimumSymbols,
+    },
+    {
+      id: "history",
+      label: `No reutilizar las últimas ${policy.passwordHistoryCheckCount} contraseña(s).`,
+      met: false,
+      onlyServerSide: true,
+    },
+  ] as const;
 
   useEffect(() => {
     let active = true;
@@ -45,6 +100,7 @@ export function ChangePasswordForm() {
         const expired = days == null || days <= 0;
 
         setCurrentPasswordRequired(!(mustReset || expired));
+        setPolicy(payload.data.policy);
       } catch {
         // Keep secure default: require current password if we cannot determine state.
       }
@@ -105,6 +161,29 @@ export function ChangePasswordForm() {
 
   return (
     <form onSubmit={onSubmit} method="post" action="/account/security/change-password" className="space-y-5">
+      <div className="rounded-[22px] border border-primary/15 bg-white/85 p-5 shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary/70">Seguridad</p>
+        <p className="mt-1 text-xl font-semibold tracking-tight text-slate-950">Requerimientos mínimos de contraseña</p>
+        <ul className="mt-4 space-y-2 text-sm text-slate-700">
+          {passwordRequirements.map((requirement) => (
+            <li key={requirement.id} className="flex items-start gap-2">
+              <span
+                aria-hidden="true"
+                className={`mt-0.5 inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ${
+                  requirement.met ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {requirement.met ? "✓" : "•"}
+              </span>
+              <span className={requirement.met ? "text-emerald-800" : "text-slate-700"}>{requirement.label}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          La regla de historial se valida al guardar, porque depende del servidor.
+        </p>
+      </div>
+
       {currentPasswordRequired ? (
         <div className="space-y-1.5">
           <label htmlFor="currentPassword" className="text-sm font-medium text-foreground">
@@ -168,13 +247,25 @@ export function ChangePasswordForm() {
         </p>
       ) : null}
 
-      <button
-        type="submit"
-        className="inline-flex rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white"
-        disabled={loading}
-      >
-        {loading ? "Guardando..." : "Actualizar Contraseña"}
-      </button>
+      <div className="flex flex-wrap items-center gap-3 pt-1">
+        <button
+          type="submit"
+          className="inline-flex rounded-full bg-primary px-7 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-primary/90"
+          disabled={loading}
+        >
+          {loading ? "Guardando..." : "Actualizar Contraseña"}
+        </button>
+        <Link
+          href="/dashboard"
+          className={`inline-flex rounded-full border border-border bg-white px-7 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 ${
+            loading ? "pointer-events-none opacity-60" : ""
+          }`}
+          aria-disabled={loading}
+          tabIndex={loading ? -1 : 0}
+        >
+          Cancelar
+        </Link>
+      </div>
     </form>
   );
 }

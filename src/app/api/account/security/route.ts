@@ -37,6 +37,7 @@ export async function GET() {
         minimumLowercase: policy.minimum_lowercase,
         minimumNumbers: policy.minimum_numbers,
         minimumSymbols: policy.minimum_symbols,
+        passwordHistoryCheckCount: policy.password_history_check_count,
         passwordExpirationDays: policy.password_expiration_days,
         expirationWarningDays: policy.expiration_warning_days,
         hashAlgorithm: policy.hash_algorithm,

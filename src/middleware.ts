@@ -20,7 +20,7 @@ const PROTECTED_PAGE_PREFIXES = [
   "/account",
 ];
 
-const PUBLIC_PATH_PREFIXES = ["/auth/login", "/auth/access-denied", "/auth/logout"];
+const PUBLIC_PATH_PREFIXES = ["/auth/login", "/auth/access-denied", "/auth/logout", "/auth/recover"];
 
 const EXEMPT_API_PATHS = ["/api/internal/cron/meta-campaign-sync"];
 
@@ -139,8 +139,10 @@ function removeSensitiveQueryParams(url: URL): { changed: boolean; url: URL } {
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
+  const shouldPreserveAuthTokens =
+    pathname === "/auth/recover" || pathname.startsWith("/auth/recover/");
   const sanitized = removeSensitiveQueryParams(request.nextUrl);
-  if (sanitized.changed && pathname !== "/api/auth/login") {
+  if (!shouldPreserveAuthTokens && sanitized.changed && pathname !== "/api/auth/login") {
     return NextResponse.redirect(sanitized.url);
   }
 

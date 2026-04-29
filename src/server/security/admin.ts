@@ -242,11 +242,13 @@ export async function sendPasswordSetupOrResetEmail(
 ): Promise<void> {
   const configuredRedirect = process.env.SUPABASE_AUTH_REDIRECT_TO?.trim();
   const siteUrl = getSiteUrl();
-  const fallbackRedirect =
-    siteUrl.startsWith("http://localhost") || siteUrl.startsWith("http://127.0.0.1")
-      ? null
-      : `${siteUrl}/account/security/change-password`;
-  const redirectTo = configuredRedirect || fallbackRedirect;
+  const isLocalSiteUrl =
+    siteUrl.startsWith("http://localhost") || siteUrl.startsWith("http://127.0.0.1");
+  const fallbackRedirect = isLocalSiteUrl ? null : `${siteUrl}/auth/recover`;
+  const normalizedConfiguredRedirect = configuredRedirect
+    ?.replace(/\/+$/, "")
+    .replace(/\/account\/security\/change-password$/, "/auth/recover");
+  const redirectTo = normalizedConfiguredRedirect || fallbackRedirect;
   const { error } = redirectTo
     ? await service.auth.resetPasswordForEmail(email, { redirectTo })
     : await service.auth.resetPasswordForEmail(email);
