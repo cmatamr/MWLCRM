@@ -5,6 +5,7 @@ export * from "./use-customers";
 export * from "./use-cancel-payment-receipt";
 export * from "./use-banks";
 export * from "./use-dashboard-summary";
+export * from "./use-ai-dashboard";
 export * from "./use-delete-payment-receipt";
 export * from "./use-funnel-summary";
 export * from "./use-orders";

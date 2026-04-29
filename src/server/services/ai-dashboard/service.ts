@@ -1,0 +1,511 @@
+import { z } from "zod";
+
+import { createSupabaseServiceClient } from "@/lib/supabase/admin";
+import { ApiRouteError, badRequest, notFound } from "@/server/api/http";
+
+import type {
+  AiDashboardSummary,
+  SyncOpenAICostsInput,
+  SyncOpenAICostsResult,
+  ToggleClientAgentInput,
+  ToggleClientAgentResult,
+} from "./types";
+
+const openAICostsResponseSchema = z.object({
+  data: z.array(z.record(z.string(), z.unknown())).optional(),
+});
+
+function asNumber(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
+}
+
+function getNestedNumber(source: unknown, paths: string[][]): number {
+  if (!source || typeof source !== "object") {
+    return 0;
+  }
+
+  for (const path of paths) {
+    let cursor: unknown = source;
+    for (const key of path) {
+      if (!cursor || typeof cursor !== "object") {
+        cursor = undefined;
+        break;
+      }
+      cursor = (cursor as Record<string, unknown>)[key];
+    }
+
+    const value = asNumber(cursor);
+    if (value !== 0) {
+      return value;
+    }
+  }
+
+  return 0;
+}
+
+export async function getAiDashboardSummary(clientCode: string): Promise<AiDashboardSummary> {
+  const service = createSupabaseServiceClient();
+
+  const { data: client, error: clientError } = await service
+    .from("clients")
+    .select("id, code, name")
+    .eq("code", clientCode)
+    .maybeSingle<{ id: string; code: string; name: string }>();
+
+  if (clientError) {
+    throw clientError;
+  }
+
+  if (!client) {
+    throw notFound("Cliente no encontrado.");
+  }
+
+  const [
+    agentStatusRes,
+    billingRes,
+    balanceRes,
+    dailyUsageRes,
+    recentActivityRes,
+    reconciliationRes,
+  ] = await Promise.all([
+    service
+      .from("client_agent_status_view")
+      .select(
+        "agent_id, agent_code, agent_name, enabled, updated_at, updated_by, updated_by_email, updated_by_name",
+      )
+      .eq("client_id", client.id)
+      .eq("agent_code", "nova")
+      .maybeSingle<{
+        agent_id: string;
+        agent_code: string;
+        agent_name: string;
+        enabled: boolean;
+        updated_at: string | null;
+        updated_by: string | null;
+        updated_by_email: string | null;
+        updated_by_name: string | null;
+      }>(),
+    service
+      .from("client_ai_billing_settings")
+      .select(
+        "included_monthly_credit_usd, low_balance_threshold_percent, critical_balance_threshold_percent, credits_expire_monthly",
+      )
+      .eq("client_id", client.id)
+      .maybeSingle<{
+        included_monthly_credit_usd: number | string;
+        low_balance_threshold_percent: number | string;
+        critical_balance_threshold_percent: number | string;
+        credits_expire_monthly: boolean;
+      }>(),
+    service
+      .from("client_ai_balance_view")
+      .select(
+        "period_start, period_end, included_credit_usd, extra_credit_usd, consumed_usd, remaining_usd, consumed_percent, status",
+      )
+      .eq("client_id", client.id)
+      .order("period_start", { ascending: false })
+      .limit(1)
+      .maybeSingle<{
+        period_start: string;
+        period_end: string;
+        included_credit_usd: number | string;
+        extra_credit_usd: number | string;
+        consumed_usd: number | string;
+        remaining_usd: number | string;
+        consumed_percent: number | string;
+        status: string;
+      }>(),
+    service
+      .from("client_ai_usage_daily_view")
+      .select("usage_date, total_requests, total_tokens, total_cost_usd")
+      .eq("client_id", client.id)
+      .order("usage_date", { ascending: false })
+      .limit(31)
+      .returns<
+        Array<{
+          usage_date: string;
+          total_requests: number;
+          total_tokens: number | string;
+          total_cost_usd: number | string;
+        }>
+      >(),
+    service
+      .from("client_activity_events")
+      .select("id, event_type, title, description, actor_name, actor_email, source, created_at")
+      .eq("client_id", client.id)
+      .order("created_at", { ascending: false })
+      .limit(15)
+      .returns<
+        Array<{
+          id: string;
+          event_type: string;
+          title: string;
+          description: string | null;
+          actor_name: string | null;
+          actor_email: string | null;
+          source: string;
+          created_at: string;
+        }>
+      >(),
+    service
+      .from("ai_usage_reconciliation")
+      .select("status, created_at")
+      .eq("client_id", client.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle<{ status: "pending" | "matched" | "mismatch" | "reviewed"; created_at: string }>(),
+  ]);
+
+  if (agentStatusRes.error || billingRes.error || balanceRes.error || dailyUsageRes.error || recentActivityRes.error || reconciliationRes.error) {
+    throw (
+      agentStatusRes.error ??
+      billingRes.error ??
+      balanceRes.error ??
+      dailyUsageRes.error ??
+      recentActivityRes.error ??
+      reconciliationRes.error
+    );
+  }
+
+  if (!agentStatusRes.data) {
+    throw notFound("No existe configuracion client_agent para NOVA.");
+  }
+
+  return {
+    client,
+    agent: {
+      id: agentStatusRes.data.agent_id,
+      code: agentStatusRes.data.agent_code,
+      name: agentStatusRes.data.agent_name,
+      enabled: agentStatusRes.data.enabled,
+      updatedAt: agentStatusRes.data.updated_at,
+      updatedBy: {
+        id: agentStatusRes.data.updated_by,
+        email: agentStatusRes.data.updated_by_email,
+        name: agentStatusRes.data.updated_by_name,
+      },
+    },
+    billing: billingRes.data
+      ? {
+          includedMonthlyCreditUsd: asNumber(billingRes.data.included_monthly_credit_usd),
+          lowBalanceThresholdPercent: asNumber(billingRes.data.low_balance_threshold_percent),
+          criticalBalanceThresholdPercent: asNumber(billingRes.data.critical_balance_threshold_percent),
+          creditsExpireMonthly: billingRes.data.credits_expire_monthly,
+        }
+      : null,
+    balance: balanceRes.data
+      ? {
+          periodStart: balanceRes.data.period_start,
+          periodEnd: balanceRes.data.period_end,
+          includedCreditUsd: asNumber(balanceRes.data.included_credit_usd),
+          extraCreditUsd: asNumber(balanceRes.data.extra_credit_usd),
+          consumedUsd: asNumber(balanceRes.data.consumed_usd),
+          remainingUsd: asNumber(balanceRes.data.remaining_usd),
+          consumedPercent: asNumber(balanceRes.data.consumed_percent),
+          status: balanceRes.data.status,
+        }
+      : null,
+    dailyUsage: (dailyUsageRes.data ?? [])
+      .map((row) => ({
+        usageDate: row.usage_date,
+        totalRequests: row.total_requests,
+        totalTokens: asNumber(row.total_tokens),
+        totalCostUsd: asNumber(row.total_cost_usd),
+      }))
+      .reverse(),
+    recentActivity: (recentActivityRes.data ?? []).map((row) => ({
+      id: row.id,
+      eventType: row.event_type,
+      title: row.title,
+      description: row.description,
+      actorName: row.actor_name,
+      actorEmail: row.actor_email,
+      source: row.source,
+      createdAt: row.created_at,
+    })),
+    reconciliation: {
+      status: reconciliationRes.data?.status ?? null,
+      lastSyncAt: reconciliationRes.data?.created_at ?? null,
+    },
+  };
+}
+
+export async function toggleClientAgent(
+  input: ToggleClientAgentInput,
+): Promise<ToggleClientAgentResult> {
+  const service = createSupabaseServiceClient();
+
+  const { data, error } = await service.rpc("toggle_client_agent_with_event", {
+    p_client_code: input.clientCode,
+    p_agent_code: input.agentCode,
+    p_enabled: input.enabled,
+    p_actor_user_id: input.actor.userId,
+    p_actor_email: input.actor.email,
+    p_actor_name: input.actor.name,
+    p_source: "dashboard",
+  });
+
+  if (error) {
+    if (error.message?.includes("CLIENT_NOT_FOUND")) {
+      throw notFound("Cliente no encontrado.");
+    }
+
+    if (error.message?.includes("CLIENT_AGENT_NOT_FOUND")) {
+      throw notFound("Relacion cliente/agente no encontrada.");
+    }
+
+    if (error.message?.includes("AGENT_NOT_FOUND")) {
+      throw notFound("Agente no encontrado.");
+    }
+
+    throw new ApiRouteError({
+      status: 500,
+      code: "TOGGLE_CLIENT_AGENT_RPC_FAILED",
+      message: "No se pudo cambiar el estado del agente de forma atómica.",
+      details: error,
+    });
+  }
+
+  const row = (data as Array<{ enabled: boolean }> | null)?.[0];
+  return { enabled: row?.enabled ?? input.enabled };
+}
+
+export async function syncOpenAICostsForClient(
+  input: SyncOpenAICostsInput,
+): Promise<SyncOpenAICostsResult> {
+  const service = createSupabaseServiceClient();
+  const toleranceUsd = input.toleranceUsd ?? 0.01;
+
+  const { data: client, error: clientError } = await service
+    .from("clients")
+    .select("id, code")
+    .eq("code", input.clientCode)
+    .maybeSingle<{ id: string; code: string }>();
+
+  if (clientError) {
+    throw clientError;
+  }
+  if (!client) {
+    throw notFound("Cliente no encontrado.");
+  }
+
+  const { data: project, error: projectError } = await service
+    .from("client_ai_provider_projects")
+    .select("provider, provider_project_id, provider_project_name, status")
+    .eq("client_id", client.id)
+    .eq("provider", "openai")
+    .eq("status", "active")
+    .maybeSingle<{
+      provider: "openai";
+      provider_project_id: string;
+      provider_project_name: string;
+      status: string;
+    }>();
+
+  if (projectError) {
+    throw projectError;
+  }
+  if (!project) {
+    throw notFound("Proyecto OpenAI activo no encontrado para el cliente.");
+  }
+
+  const adminApiKey = process.env.OPENAI_ADMIN_API_KEY?.trim();
+  if (!adminApiKey) {
+    throw badRequest("OPENAI_ADMIN_API_KEY no está configurada.");
+  }
+
+  const periodStart = new Date(input.periodStart);
+  const periodEnd = new Date(input.periodEnd);
+  if (Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime()) || periodEnd <= periodStart) {
+    throw badRequest("periodStart/periodEnd inválidos.");
+  }
+
+  let providerReportedCostUsd = 0;
+  let rawProviderPayload: unknown = {};
+  let status: "pending" | "matched" | "mismatch" | "reviewed" = "pending";
+  let parsedCostEntries = 0;
+
+  {
+    const url = new URL("https://api.openai.com/v1/organization/costs");
+    url.searchParams.set("start_time", `${Math.floor(periodStart.getTime() / 1000)}`);
+    url.searchParams.set("end_time", `${Math.floor(periodEnd.getTime() / 1000)}`);
+    url.searchParams.set("bucket_width", "1d");
+    url.searchParams.set("project_ids[]", project.provider_project_id);
+
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${adminApiKey}`,
+        "Content-Type": "application/json",
+      },
+      cache: "no-store",
+    });
+
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      throw new ApiRouteError({
+        status: 502,
+        code: "OPENAI_COSTS_API_ERROR",
+        message: `OpenAI Costs API respondió ${response.status}.`,
+        details: { responseBodyPreview: responseText.slice(0, 600) },
+      });
+    }
+
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(responseText);
+    } catch {
+      throw new ApiRouteError({
+        status: 502,
+        code: "OPENAI_COSTS_INVALID_JSON",
+        message: "OpenAI Costs API devolvió JSON inválido.",
+      });
+    }
+
+    const payload = openAICostsResponseSchema.parse(parsedJson);
+    rawProviderPayload = payload;
+
+    providerReportedCostUsd = (payload.data ?? []).reduce<number>((acc, item) => {
+      const value = getNestedNumber(item, [
+        ["amount", "value"],
+        ["cost", "value"],
+        ["results", "amount", "value"],
+        ["results", "cost", "value"],
+      ]);
+
+      if (value !== 0) {
+        parsedCostEntries += 1;
+        return acc + value;
+      }
+
+      if (item && typeof item === "object") {
+        const results = (item as Record<string, unknown>).results;
+        if (Array.isArray(results)) {
+          return (
+            acc +
+            results.reduce(
+              (bucket, result) =>
+                (() => {
+                  const nestedValue = getNestedNumber(result, [
+                  ["amount", "value"],
+                  ["cost", "value"],
+                  ["amount"],
+                  ["cost"],
+                  ]);
+                  if (nestedValue !== 0) {
+                    parsedCostEntries += 1;
+                  }
+                  return bucket + nestedValue;
+                })(),
+              0,
+            )
+          );
+        }
+      }
+
+      return acc;
+    }, 0);
+
+    if ((payload.data ?? []).length > 0 && parsedCostEntries === 0) {
+      throw new ApiRouteError({
+        status: 502,
+        code: "OPENAI_COSTS_PAYLOAD_UNEXPECTED",
+        message: "No se pudieron extraer costos del payload de OpenAI Costs API.",
+        details: {
+          dataItems: (payload.data ?? []).length,
+        },
+      });
+    }
+  }
+
+  const { data: internalRows, error: internalError } = await service
+    .from("ai_usage_ledger")
+    .select("estimated_cost_usd")
+    .eq("client_id", client.id)
+    .gte("created_at", periodStart.toISOString())
+    .lte("created_at", periodEnd.toISOString())
+    .eq("status", "success")
+    .returns<Array<{ estimated_cost_usd: number | string }>>();
+
+  if (internalError) {
+    throw internalError;
+  }
+
+  const internalRecordedCostUsd = (internalRows ?? []).reduce(
+    (acc, row) => acc + asNumber(row.estimated_cost_usd),
+    0,
+  );
+  const differenceUsd = Number((providerReportedCostUsd - internalRecordedCostUsd).toFixed(6));
+
+  status = Math.abs(differenceUsd) <= toleranceUsd ? "matched" : "mismatch";
+
+  const insertPayload = {
+    client_id: client.id,
+    provider: "openai",
+    provider_project_id: project.provider_project_id,
+    period_start: periodStart.toISOString(),
+    period_end: periodEnd.toISOString(),
+    internal_recorded_cost_usd: internalRecordedCostUsd,
+    provider_reported_cost_usd: providerReportedCostUsd,
+    difference_usd: differenceUsd,
+    status,
+    raw_provider_payload: rawProviderPayload,
+    metadata: {
+      providerProjectName: project.provider_project_name,
+      toleranceUsd,
+    },
+  };
+
+  const { error: reconciliationError } = await service
+    .from("ai_usage_reconciliation")
+    .insert(insertPayload);
+
+  if (reconciliationError) {
+    throw reconciliationError;
+  }
+
+  if (status === "mismatch") {
+    await service.from("client_activity_events").insert({
+      client_id: client.id,
+      entity_type: "billing",
+      entity_id: null,
+      event_type: "reconciliation_mismatch",
+      title: "Diferencia de conciliacion detectada",
+      description: `Se detecto diferencia de ${differenceUsd.toFixed(4)} USD en conciliacion OpenAI.`,
+      old_values: null,
+      new_values: {
+        provider_reported_cost_usd: providerReportedCostUsd,
+        internal_recorded_cost_usd: internalRecordedCostUsd,
+        difference_usd: differenceUsd,
+      },
+      source: "admin",
+      metadata: {
+        provider: "openai",
+        provider_project_id: project.provider_project_id,
+      },
+    });
+  }
+
+  return {
+    clientCode: client.code,
+    provider: "openai",
+    providerProjectId: project.provider_project_id,
+    providerProjectName: project.provider_project_name,
+    periodStart: periodStart.toISOString(),
+    periodEnd: periodEnd.toISOString(),
+    internalRecordedCostUsd,
+    providerReportedCostUsd,
+    differenceUsd,
+    status,
+  };
+}

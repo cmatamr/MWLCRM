@@ -9,6 +9,7 @@ import {
   Shield,
   ShieldUser,
   UsersRound,
+  Bot,
 } from "lucide-react";
 
 import type { NavigationItem } from "@/types/navigation";
@@ -55,6 +56,12 @@ export const navigationItems: NavigationItem[] = [
     label: "Conversaciones",
     description: "Seguimiento de mensajes",
     icon: MessageSquareText,
+  },
+  {
+    href: "/ai-dashboard",
+    label: "Consumo IA",
+    description: "Control de NOVA y crédito IA",
+    icon: Bot,
   },
   {
     href: "/admin/users",

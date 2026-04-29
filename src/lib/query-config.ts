@@ -31,6 +31,7 @@ export const queryEndpoints = {
   products: "/api/products",
   productsPerformance: "/api/products/performance",
   promotions: "/api/promotions",
+  aiDashboard: "/api/ai-dashboard",
 } as const;
 
 export const queryRefetchIntervals = {
@@ -47,6 +48,7 @@ export const queryRefetchIntervals = {
   productDetail: 30000,
   promotions: 30000,
   promotionDetail: 30000,
+  aiDashboard: 30000,
 } as const;
 
 export const queryKeys = {
@@ -89,4 +91,6 @@ export const queryKeys = {
   promotions: (params?: ListPromotionsParams) =>
     ["promotions", normalizeQueryKeyParams(params)] as const,
   promotionDetail: (id: string | null) => ["promotions", "detail", id] as const,
+  aiDashboardSummary: (clientCode: string) =>
+    ["ai-dashboard", "summary", normalizeQueryKeyParams({ clientCode })] as const,
 } as const;

@@ -1,4 +1,5 @@
 import type { OrderStatusEnum } from "@prisma/client";
+import type { AiDashboardSummary } from "@/server/services/ai-dashboard";
 
 import type { DashboardSummary } from "@/server/services/dashboard/types";
 import type { DashboardDailySalesRangeDays } from "@/server/services/dashboard/types";
@@ -91,6 +92,29 @@ export function createCrmApiClient(options: CrmApiClientOptions = {}) {
       init?: RequestInit,
     ) {
       return get<DashboardSummary>("/api/dashboard/summary", params, init);
+    },
+    getAiDashboardSummary(clientCode: string, init?: RequestInit) {
+      return get<AiDashboardSummary>("/api/ai-dashboard", { clientCode }, init);
+    },
+    toggleClientAgent(
+      clientCode: string,
+      agentCode: string,
+      enabled: boolean,
+      init?: RequestInit,
+    ) {
+      return get<{ enabled: boolean }>(
+        `/api/clients/${clientCode}/agents/${agentCode}/toggle`,
+        undefined,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ enabled }),
+          headers: {
+            "Content-Type": "application/json",
+            ...init?.headers,
+          },
+          ...init,
+        },
+      );
     },
     listCustomers(params?: ListCustomersParams, init?: RequestInit) {
       return get<CustomersListResponse>("/api/customers", params, init);
