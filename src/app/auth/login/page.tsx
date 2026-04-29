@@ -96,15 +96,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             <div className="pointer-events-none absolute bottom-0 right-0 h-52 w-52 rounded-full bg-black/15 blur-2xl" />
 
             <div className="relative mx-auto w-full max-w-[560px] space-y-14">
-              <div className="space-y-5">
-                <div className="h-[150px] w-full max-w-[520px] overflow-hidden">
+              <div className="space-y-16">
+                <div className="h-[150px] w-full max-w-[520px]">
                   <Image
                     src="/ontraone-logo.png"
                     alt="OntraOne by 4 + [ UNO ]"
                     width={1536}
                     height={1024}
                     priority
-                    className="-mt-24 h-auto w-full"
+                    className="h-full w-full object-contain object-left"
                   />
                 </div>
 

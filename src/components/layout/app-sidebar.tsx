@@ -17,17 +17,17 @@ export function AppSidebar() {
           href="/dashboard"
           className="relative flex items-center gap-3 rounded-3xl border border-white/30 bg-[linear-gradient(145deg,rgba(255,255,255,0.16),rgba(255,255,255,0.06))] px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_18px_30px_-20px_rgba(2,6,23,0.9)]"
         >
-          <div className="-translate-x-4 h-24 w-24 [perspective:900px]">
+          <div className="h-24 w-24 shrink-0 rounded-2xl bg-transparent p-1 [perspective:900px]">
             <Image
               src="/ontraone-icon.png"
               alt="OntraOne icon"
-              width={96}
-              height={96}
-              className="logo-float-3d h-full w-full object-contain"
+              width={120}
+              height={120}
+              className="logo-float-3d h-full w-full bg-transparent object-contain object-center"
               priority
             />
           </div>
-          <div className="-ml-6 space-y-1">
+          <div className="space-y-1">
             <p className="font-serif text-lg font-semibold leading-tight text-slate-50 [text-shadow:0_3px_16px_rgba(2,6,23,0.65)] md:text-xl">
               OntraOne
               <br />
