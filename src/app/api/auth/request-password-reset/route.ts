@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { createSupabaseServiceClient } from "@/lib/supabase/admin";
 import { handleRouteError, ok } from "@/server/api/http";
+import { logWarn } from "@/server/observability/logger";
 import { assertJsonRequest } from "@/server/security/request-guards";
 import { sendPasswordSetupOrResetEmail } from "@/server/security/admin";
 import {
@@ -55,9 +56,19 @@ export async function POST(request: Request) {
             userAgent,
           });
         } catch (error) {
-          console.error("Self-service password reset email failed", {
+          await logWarn({
+            source: "api.auth",
+            eventType: "auth_session_error",
+            message: "Self-service password reset email failed",
             userId: profile.id,
-            error,
+            errorMessage: error instanceof Error ? error.message : "unknown",
+            stackTrace: error instanceof Error ? error.stack : null,
+            metadata: {
+              route: "/api/auth/request-password-reset",
+              method: "POST",
+              operation: "send_password_setup_or_reset_email",
+              environment: process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV?.trim() || "unknown",
+            },
           });
         }
       }

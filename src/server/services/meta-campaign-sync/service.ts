@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { campaignSyncConfig, shouldRunCampaignSyncAt } from "@/config/campaignSync";
+import { logWarn } from "@/server/observability/logger";
 import { resolveDb, type ServiceOptions } from "@/server/services/shared";
 
 import { mapMetaCampaignToCampaignUpsert, mapMetaInsightToCampaignSpendUpsert } from "./mappers";
@@ -358,6 +359,21 @@ export async function runMetaCampaignSync(
           campaignId: campaign.id,
           date: insight.date_start,
           error: error instanceof Error ? error.message : "Unknown mapping error",
+        });
+        await logWarn({
+          source: "service.meta-campaign-sync",
+          eventType: "external_provider_error",
+          message: "Malformed Meta insight row skipped during campaign sync.",
+          errorMessage: error instanceof Error ? error.message : "Unknown mapping error",
+          metadata: {
+            operation: "map_meta_insight",
+            errorStage: "meta_insight_row_mapping",
+            errorName: error instanceof Error ? error.name : "UnknownError",
+            campaignId: campaign.id,
+            insightDate: insight.date_start,
+            externalProvider: "meta",
+            environment: process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV?.trim() || "unknown",
+          },
         });
       }
     }

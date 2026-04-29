@@ -73,11 +73,37 @@ function normalizeHttpStatus(value: unknown): number | null {
   return normalized;
 }
 
+function ensureErrorStageMetadata(input: {
+  level: AppLogLevel;
+  eventType: string;
+  metadata: Record<string, unknown>;
+}): Record<string, unknown> {
+  if (input.level !== "error" && input.level !== "critical") {
+    return input.metadata;
+  }
+
+  const existing = input.metadata.errorStage;
+  if (typeof existing === "string" && existing.trim()) {
+    return input.metadata;
+  }
+
+  return {
+    ...input.metadata,
+    errorStage: input.eventType,
+  };
+}
+
 function buildSanitizedPayload(input: AppLogInput) {
   const level = normalizeLevel(input.level);
   const source = normalizeText(input.source, "app") ?? "app";
   const eventType = normalizeText(input.eventType, "application_event") ?? "application_event";
   const message = normalizeText(input.message, "Application log event") ?? "Application log event";
+
+  const metadata = ensureErrorStageMetadata({
+    level,
+    eventType,
+    metadata: sanitizeLogMetadata(input.metadata),
+  });
 
   return {
     level,
@@ -96,13 +122,11 @@ function buildSanitizedPayload(input: AppLogInput) {
     http_status: normalizeHttpStatus(input.httpStatus),
     error_message: normalizeText(input.errorMessage),
     stack_trace: normalizeText(input.stackTrace),
-    metadata: sanitizeLogMetadata(input.metadata),
+    metadata,
   };
 }
 
 export async function createAppLog(input: AppLogInput): Promise<void> {
-  const service = createSupabaseServiceClient();
-
   let payload: ReturnType<typeof buildSanitizedPayload>;
 
   try {
@@ -130,6 +154,7 @@ export async function createAppLog(input: AppLogInput): Promise<void> {
   }
 
   try {
+    const service = createSupabaseServiceClient();
     const { error } = await service.from("app_logs").insert(payload);
 
     if (error) {

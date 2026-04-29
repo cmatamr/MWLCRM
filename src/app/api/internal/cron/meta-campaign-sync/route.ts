@@ -36,6 +36,16 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     if (error instanceof MetaApiError) {
+      await logApiRouteError({
+        request: request,
+        route: "/api/internal/cron/meta-campaign-sync",
+        source: "api.internal",
+        defaultEventType: "external_provider_error",
+        error,
+        httpStatus: error.status,
+        externalProvider: "meta",
+      });
+
       return fail(
         {
           code: "META_API_ERROR",

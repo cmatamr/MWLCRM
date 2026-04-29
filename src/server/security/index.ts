@@ -4,6 +4,7 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { isGovernedPasswordRole, isLegacyRole, type AppRole } from "@/lib/auth/profile";
 import { maskEmail, redactSensitiveData } from "@/lib/security/redaction";
 import { ApiRouteError } from "@/server/api/http";
+import { logWarn } from "@/server/observability/logger";
 export { isGovernedPasswordRole };
 
 export type PasswordPolicy = {
@@ -247,7 +248,18 @@ export async function logSecurityEvent(
   });
 
   if (error) {
-    console.error("Failed to insert app_user_security_events", redactSensitiveData(error));
+    await logWarn({
+      source: "api.security",
+      eventType: "supabase_query_error",
+      message: "Failed to insert app_user_security_events",
+      errorMessage: error.message,
+      metadata: redactSensitiveData({
+        operation: "insert_security_event",
+        userId: input.userId ?? null,
+        actorUserId: input.actorUserId ?? null,
+        eventType: input.eventType,
+      }),
+    });
   }
 }
 

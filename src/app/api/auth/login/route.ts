@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { maskEmail } from "@/lib/security/redaction";
@@ -34,6 +34,7 @@ type LoginErrorContext = {
   hasTurnstileToken: boolean;
   turnstileSuccess?: boolean;
   turnstileStatusCode?: number;
+  stage?: string;
 };
 
 const LOGIN_ROUTE = "/api/auth/login";
@@ -42,12 +43,25 @@ const REQUEST_ID_HEADERS = [
   "x-correlation-id",
   "cf-ray",
 ] as const;
+const SESSION_ERROR_STAGES = new Set([
+  "create_supabase_server_client",
+  "session_sign_in",
+  "session_get_user",
+  "session_sign_out",
+]);
+const DATABASE_ERROR_CODES = new Set([
+  "PASSWORD_POLICY_NOT_AVAILABLE",
+  "AUTH_USER_LOOKUP_FAILED",
+  "PROFILE_LOOKUP_FAILED",
+  "PROFILE_UPDATE_FAILED",
+  "ACTIVE_ADMIN_COUNT_FAILED",
+]);
 
 function resolveEnvironment(): string {
   return process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV?.trim() || "unknown";
 }
 
-function resolveRequestId(request: Request): string | null {
+function resolveRequestId(request: Request): string {
   for (const headerName of REQUEST_ID_HEADERS) {
     const value = request.headers.get(headerName)?.trim();
     if (value) {
@@ -55,7 +69,11 @@ function resolveRequestId(request: Request): string | null {
     }
   }
 
-  return null;
+  return randomUUID();
+}
+
+function resolveCorrelationId(request: Request, requestId: string): string {
+  return request.headers.get("x-correlation-id")?.trim() || requestId;
 }
 
 function truncateUserAgent(userAgent: string | undefined, maxLength = 160): string | null {
@@ -132,6 +150,37 @@ function resolveStackTrace(error: unknown): string | null {
   return null;
 }
 
+function looksLikeDatabaseError(error: unknown): boolean {
+  const code = resolveErrorCode(error);
+  if (code && DATABASE_ERROR_CODES.has(code)) {
+    return true;
+  }
+
+  const message = resolveErrorMessage(error).toLowerCase();
+  return (
+    message.includes("database") ||
+    message.includes("postgrest") ||
+    message.includes("supabase") ||
+    message.includes("query") ||
+    message.includes("relation")
+  );
+}
+
+function looksLikeSessionError(error: unknown): boolean {
+  const code = resolveErrorCode(error);
+  if (code && code.includes("SESSION")) {
+    return true;
+  }
+
+  const message = resolveErrorMessage(error).toLowerCase();
+  return (
+    message.includes("session") ||
+    message.includes("cookie") ||
+    message.includes("jwt") ||
+    message.includes("auth api")
+  );
+}
+
 function extractTurnstileStatusCode(error: unknown): number | undefined {
   if (!(error instanceof ApiRouteError)) {
     return undefined;
@@ -187,7 +236,11 @@ function validateLoginConfigInProduction(): void {
   }
 }
 
-function classifyLoginErrorEventType(error: unknown, httpStatus: number): string | null {
+function classifyLoginErrorEventType(
+  error: unknown,
+  httpStatus: number,
+  context: LoginErrorContext,
+): string | null {
   const errorCode = resolveErrorCode(error);
   const errorMessage = resolveErrorMessage(error);
 
@@ -211,6 +264,14 @@ function classifyLoginErrorEventType(error: unknown, httpStatus: number): string
   }
 
   if (httpStatus >= 500) {
+    if (looksLikeDatabaseError(error)) {
+      return "auth_database_error";
+    }
+
+    if (SESSION_ERROR_STAGES.has(context.stage ?? "") || looksLikeSessionError(error)) {
+      return "auth_session_error";
+    }
+
     return "auth_login_error";
   }
 
@@ -235,6 +296,8 @@ async function logLoginError(params: {
     ipHash: hashIpAddress(params.ip),
     errorName: resolveErrorName(params.error),
     errorCode: resolveErrorCode(params.error),
+    requestId: resolveRequestId(params.request),
+    errorStage: params.context.stage ?? null,
   };
 
   if (typeof params.context.turnstileSuccess === "boolean") {
@@ -246,6 +309,8 @@ async function logLoginError(params: {
   }
 
   try {
+    const requestId = resolveRequestId(params.request);
+    const correlationId = resolveCorrelationId(params.request, requestId);
     await logError({
       source: "api.auth",
       eventType: params.eventType,
@@ -253,7 +318,8 @@ async function logLoginError(params: {
       httpStatus: params.httpStatus,
       errorMessage: resolveErrorMessage(params.error),
       stackTrace: resolveStackTrace(params.error),
-      requestId: resolveRequestId(params.request),
+      requestId,
+      correlationId,
       metadata,
     });
   } catch {
@@ -269,13 +335,16 @@ async function logLoginSuccess(params: {
   hasTurnstileToken: boolean;
 }): Promise<void> {
   try {
+    const requestId = resolveRequestId(params.request);
+    const correlationId = resolveCorrelationId(params.request, requestId);
     await logInfo({
       source: "api.auth",
       eventType: "auth_login_success",
       message: "Login API succeeded",
       httpStatus: 200,
       userId: params.userId,
-      requestId: resolveRequestId(params.request),
+      requestId,
+      correlationId,
       metadata: {
         route: LOGIN_ROUTE,
         method: "POST",
@@ -396,13 +465,16 @@ export async function POST(request: Request) {
   };
 
   try {
+    errorContext.stage = "validate_config";
     validateLoginConfigInProduction();
 
+    errorContext.stage = "validate_query_params";
     const queryViolationResponse = await rejectIfSensitiveQueryParams(request);
     if (queryViolationResponse) {
       return queryViolationResponse;
     }
 
+    errorContext.stage = "parse_payload";
     const payload = await parseLoginPayload(request);
     const email = normalizeEmail(payload.email);
     errorContext.hasTurnstileToken = payload.turnstileToken.trim().length > 0;
@@ -412,6 +484,7 @@ export async function POST(request: Request) {
     let turnstileResult;
 
     try {
+      errorContext.stage = "turnstile_verify";
       turnstileResult = await verifyTurnstileToken({
         token: payload.turnstileToken,
         remoteIp: ip,
@@ -428,22 +501,28 @@ export async function POST(request: Request) {
       throw mapTurnstileErrors(turnstileResult.errorCodes);
     }
 
+    errorContext.stage = "create_supabase_server_client";
     const supabase = await createSupabaseServerClient();
+    errorContext.stage = "create_supabase_service_client";
     const service = createSupabaseServiceClient();
+    errorContext.stage = "load_password_policy";
     const policy = await getActivePasswordPolicy(service);
 
+    errorContext.stage = "auth_user_lookup";
     const authUser = await getAuthUserByEmail(email, service);
 
     if (!authUser?.id) {
       throw invalidCredentialsError();
     }
 
+    errorContext.stage = "profile_lookup";
     const profile = await getProfileByUserId(service, authUser.id);
 
     if (!profile) {
       throw invalidCredentialsError();
     }
 
+    errorContext.stage = "assert_profile_access";
     try {
       assertProfileCanLogin(profile);
     } catch (error) {
@@ -460,6 +539,7 @@ export async function POST(request: Request) {
       throw invalidCredentialsError();
     }
 
+    errorContext.stage = "session_sign_in";
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password: payload.password,
@@ -485,6 +565,7 @@ export async function POST(request: Request) {
       );
     }
 
+    errorContext.stage = "session_get_user";
     const {
       data: { user },
       error: userError,
@@ -494,18 +575,21 @@ export async function POST(request: Request) {
       throw invalidCredentialsError();
     }
 
+    errorContext.stage = "mark_login_success";
     await markLoginSuccess(service, user, {
       ip,
       userAgent,
       email,
     });
 
+    errorContext.stage = "profile_reload";
     const refreshedProfile = await getProfileByUserId(service, user.id);
 
     if (!refreshedProfile) {
       throw invalidCredentialsError();
     }
 
+    errorContext.stage = "resolve_login_decision";
     const decision = await resolveLoginDecision(service, refreshedProfile, policy, {
       ip,
       userAgent,
@@ -525,6 +609,7 @@ export async function POST(request: Request) {
         userAgent,
       });
 
+      errorContext.stage = "session_sign_out";
       await supabase.auth.signOut();
 
       return fail(
@@ -536,6 +621,7 @@ export async function POST(request: Request) {
       );
     }
 
+    errorContext.stage = "log_login_success";
     await logLoginSuccess({
       request,
       ip,
@@ -554,7 +640,7 @@ export async function POST(request: Request) {
   } catch (error) {
     const response = handleRouteError(error);
     const status = response.status;
-    const eventType = classifyLoginErrorEventType(error, status);
+    const eventType = classifyLoginErrorEventType(error, status, errorContext);
 
     if (eventType) {
       await logLoginError({

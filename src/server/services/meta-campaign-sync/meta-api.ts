@@ -1,4 +1,5 @@
 import { campaignSyncConfig } from "@/config/campaignSync";
+import { logError } from "@/server/observability/logger";
 
 import type { MetaCampaignApiRecord, MetaInsightApiRecord } from "./types";
 
@@ -46,6 +47,15 @@ export interface MetaApiClientOptions {
 
 function normalizeAdAccountId(value: string): string {
   return value.startsWith("act_") ? value : `act_${value}`;
+}
+
+function sanitizeMetaApiUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return null;
+  }
 }
 
 export class MetaApiClient {
@@ -185,8 +195,48 @@ export class MetaApiClient {
       }
 
       if (error instanceof Error && error.name === "AbortError") {
+        await logError({
+          source: "service.meta-campaign-sync",
+          eventType: "external_provider_error",
+          message: "Meta API request timed out while fetching sync data.",
+          httpStatus: 504,
+          errorMessage: error.message,
+          stackTrace: error.stack,
+          externalProvider: "meta",
+          metadata: {
+            operation: "meta_api_fetch_json",
+            errorStage: "meta_api_request_timeout",
+            errorName: error.name,
+            externalProvider: "meta",
+            endpoint: sanitizeMetaApiUrl(url),
+            apiVersion: this.apiVersion,
+            requestTimeoutMs: this.requestTimeoutMs,
+            environment: process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV?.trim() || "unknown",
+          },
+        });
+
         throw new MetaApiError(`Meta API request timed out after ${this.requestTimeoutMs}ms.`, 504);
       }
+
+      await logError({
+        source: "service.meta-campaign-sync",
+        eventType: "external_provider_error",
+        message: "Meta API request failed before receiving a valid response.",
+        httpStatus: 502,
+        errorMessage: error instanceof Error ? error.message : "Meta API request failed.",
+        stackTrace: error instanceof Error ? error.stack : null,
+        externalProvider: "meta",
+        metadata: {
+          operation: "meta_api_fetch_json",
+          errorStage: "meta_api_request_failed",
+          errorName: error instanceof Error ? error.name : "UnknownError",
+          externalProvider: "meta",
+          endpoint: sanitizeMetaApiUrl(url),
+          apiVersion: this.apiVersion,
+          requestTimeoutMs: this.requestTimeoutMs,
+          environment: process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV?.trim() || "unknown",
+        },
+      });
 
       throw new MetaApiError("Meta API request failed.", 502, error);
     } finally {

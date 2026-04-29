@@ -7,7 +7,7 @@ import { maskEmail, redactSensitiveData } from "@/lib/security/redaction";
 import { getSiteUrl } from "@/lib/site-url";
 import { LEGACY_AGENT_ROLE, type AppRole } from "@/lib/auth/profile";
 import { conflict, forbidden, notFound, ApiRouteError } from "@/server/api/http";
-import { logInfo, logWarn } from "@/server/observability/logger";
+import { logError, logInfo, logWarn } from "@/server/observability/logger";
 import {
   countActiveAdmins,
   getActivePasswordPolicy,
@@ -286,14 +286,21 @@ export async function sendPasswordSetupOrResetEmail(
         "No se pudo enviar el correo de setup/reset por configuracion SMTP (Resend) en Supabase. Revisa host, puerto, usuario, password y remitente verificado.";
     }
 
-    console.error("Password setup/reset email failed", redactSensitiveData({
-      email,
-      redirectTo,
-      configuredRedirect: configuredRedirect || null,
-      siteUrl,
-      reason,
-      authError: error,
-    }));
+    await logError({
+      source: "api.admin",
+      eventType: "supabase_auth_error",
+      message: "Password setup/reset email failed",
+      httpStatus: 500,
+      errorMessage: error instanceof Error ? error.message : "unknown",
+      stackTrace: error instanceof Error ? error.stack : null,
+      metadata: redactSensitiveData({
+        operation: "send_password_setup_or_reset_email",
+        redirectTo,
+        configuredRedirect: configuredRedirect || null,
+        siteUrl,
+        reason,
+      }),
+    });
 
     throw new ApiRouteError({
       status: 500,
@@ -692,10 +699,17 @@ export async function loadTargetUserOrThrow(
   try {
     authUser = await getAuthUserById(authSchemaClient, userId);
   } catch (error) {
-    console.warn(
-      "Auth user lookup failed in loadTargetUserOrThrow. Continuing with profile only.",
-      redactSensitiveData({ userId, error }),
-    );
+    await logWarn({
+      source: "api.admin",
+      eventType: "supabase_auth_error",
+      message: "Auth user lookup failed in loadTargetUserOrThrow. Continuing with profile only.",
+      errorMessage: error instanceof Error ? error.message : "unknown",
+      stackTrace: error instanceof Error ? error.stack : null,
+      metadata: redactSensitiveData({
+        operation: "load_target_user_auth_lookup",
+        target_user_id: userId,
+      }),
+    });
   }
 
   return {

@@ -1,6 +1,9 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+import { ZodError } from "zod";
 import { ApiRouteError } from "@/server/api/http";
+import { classifyApiErrorEvent } from "@/server/observability/error-taxonomy";
 import { logCritical, logError } from "@/server/observability/logger";
 
 type LogApiRouteErrorInput = {
@@ -25,6 +28,12 @@ type PrismaErrorLike = {
 };
 
 type UnknownRecord = Record<string, unknown>;
+const REQUEST_ID_HEADERS = ["x-request-id", "x-correlation-id", "cf-ray"] as const;
+const LEGACY_EVENT_TYPE_MAP: Record<string, string> = {
+  commercial_api_error: "leads_api_error",
+  security_api_error: "api_unhandled_error",
+  internal_api_error: "api_unhandled_error",
+};
 
 function asRecord(value: unknown): UnknownRecord | null {
   if (!value || typeof value !== "object") {
@@ -44,6 +53,32 @@ function resolveErrorMessage(error: unknown): string {
   }
 
   return "API route error";
+}
+
+function resolveErrorName(error: unknown): string {
+  if (error instanceof Error && error.name.trim()) {
+    return error.name.trim();
+  }
+
+  const record = asRecord(error);
+  if (typeof record?.name === "string" && record.name.trim()) {
+    return record.name.trim();
+  }
+
+  return "UnknownError";
+}
+
+function resolveErrorCode(error: unknown): string | null {
+  if (error instanceof ApiRouteError) {
+    return error.code;
+  }
+
+  const record = asRecord(error);
+  if (typeof record?.code === "string" && record.code.trim()) {
+    return record.code.trim();
+  }
+
+  return null;
 }
 
 function resolveStackTrace(error: unknown): string | null {
@@ -76,8 +111,8 @@ function resolveHttpStatus(error: unknown, responseStatus?: number | null): numb
 function resolvePrismaCode(error: unknown): string | null {
   const prismaError = asRecord(error) as PrismaErrorLike | null;
 
-  if (typeof prismaError?.code === "string" && prismaError.code.trim()) {
-    return prismaError.code.trim();
+  if (typeof prismaError?.code === "string" && /^P\d{4}$/i.test(prismaError.code.trim())) {
+    return prismaError.code.trim().toUpperCase();
   }
 
   return null;
@@ -94,6 +129,37 @@ function resolvePrismaClientVersion(error: unknown): string | null {
   }
 
   return null;
+}
+
+function resolveSupabaseCode(error: unknown): string | null {
+  const record = asRecord(error);
+  const code = record?.code;
+
+  if (typeof code === "string" && /^(PGRST|22|23|28|42)/i.test(code.trim())) {
+    return code.trim();
+  }
+
+  return null;
+}
+
+function resolveRequestId(request: Request): string {
+  for (const headerName of REQUEST_ID_HEADERS) {
+    const value = request.headers.get(headerName)?.trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return randomUUID();
+}
+
+function resolveCorrelationId(request: Request, requestId: string): string {
+  const correlationId = request.headers.get("x-correlation-id")?.trim();
+  return correlationId || requestId;
+}
+
+function resolveEnvironment(): string {
+  return process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV?.trim() || "unknown";
 }
 
 function looksLikeSupabaseError(error: unknown): boolean {
@@ -114,6 +180,16 @@ function looksLikeSupabaseError(error: unknown): boolean {
   return /supabase|postgrest/i.test(message);
 }
 
+function looksLikeSupabaseStorageError(error: unknown): boolean {
+  const message = resolveErrorMessage(error);
+  return /supabase.*storage|storage bucket|signed url|object storage|storage/i.test(message);
+}
+
+function looksLikeSupabaseAuthError(error: unknown): boolean {
+  const message = resolveErrorMessage(error);
+  return /supabase.*auth|auth\.admin|jwt|session|unauthorized|invalid api key/i.test(message);
+}
+
 function looksLikeExternalProviderError(error: unknown, input: LogApiRouteErrorInput): boolean {
   if (resolveExternalProvider(error, input)) {
     return true;
@@ -130,9 +206,47 @@ function looksLikeExternalProviderError(error: unknown, input: LogApiRouteErrorI
   return /meta api|external provider|upstream/i.test(message);
 }
 
-function buildSearchParams(request: Request): Record<string, string> {
+function mapExternalProviderEventType(provider: string | null): string {
+  if (!provider) {
+    return "external_provider_error";
+  }
+
+  const normalized = provider.toLowerCase();
+
+  if (normalized.includes("ycloud")) {
+    return "ycloud_api_error";
+  }
+
+  if (normalized.includes("whatsapp")) {
+    return "whatsapp_api_error";
+  }
+
+  if (normalized.includes("nova")) {
+    return "nova_api_error";
+  }
+
+  if (normalized.includes("n8n")) {
+    return "n8n_webhook_error";
+  }
+
+  return "external_provider_error";
+}
+
+function isValidationError(error: unknown, httpStatus: number | null): boolean {
+  if (error instanceof ZodError) {
+    return true;
+  }
+
+  if (error instanceof ApiRouteError) {
+    return error.status === 400 || error.code === "BAD_REQUEST";
+  }
+
+  return httpStatus === 400;
+}
+
+function buildSearchParamKeys(request: Request): string[] {
   const params = new URL(request.url).searchParams;
-  return Object.fromEntries(params.entries());
+  return Array.from(new Set(params.keys())).slice(0, 30);
 }
 
 function deriveEntityMetadata(request: Request): Record<string, string> {
@@ -146,6 +260,7 @@ function deriveEntityMetadata(request: Request): Record<string, string> {
     const orderId = segments[ordersIndex + 1];
     if (orderId) {
       output.order_id = orderId;
+      output.orderId = orderId;
     }
   }
 
@@ -154,6 +269,7 @@ function deriveEntityMetadata(request: Request): Record<string, string> {
     const threadId = segments[conversationsIndex + 1];
     if (threadId) {
       output.thread_id = threadId;
+      output.threadId = threadId;
     }
   }
 
@@ -162,6 +278,7 @@ function deriveEntityMetadata(request: Request): Record<string, string> {
     const customerId = segments[customersIndex + 1];
     if (customerId) {
       output.customer_id = customerId;
+      output.customerId = customerId;
     }
   }
 
@@ -178,6 +295,20 @@ function resolveExternalProvider(error: unknown, input: LogApiRouteErrorInput): 
 
   if (name === "MetaApiError") {
     return "meta";
+  }
+
+  const message = resolveErrorMessage(error).toLowerCase();
+  if (message.includes("ycloud")) {
+    return "ycloud";
+  }
+  if (message.includes("whatsapp")) {
+    return "whatsapp";
+  }
+  if (message.includes("nova")) {
+    return "nova";
+  }
+  if (message.includes("n8n")) {
+    return "n8n";
   }
 
   return null;
@@ -209,54 +340,19 @@ function resolveExternalRequestId(error: unknown, input: LogApiRouteErrorInput):
 function classifyEventType(input: LogApiRouteErrorInput): {
   eventType: string;
   message: string;
+  errorStage: string;
   prismaCode: string | null;
   prismaClientVersion: string | null;
+  supabaseCode: string | null;
 } {
-  const prismaCode = resolvePrismaCode(input.error);
-  const prismaClientVersion = resolvePrismaClientVersion(input.error);
-
-  if (prismaCode === "P2024") {
-    return {
-      eventType: "prisma_connection_pool_timeout",
-      message: "Connection pool timeout in API route",
-      prismaCode,
-      prismaClientVersion,
-    };
-  }
-
-  if (prismaCode) {
-    return {
-      eventType: "prisma_query_error",
-      message: input.message ?? `API route error in ${input.route}`,
-      prismaCode,
-      prismaClientVersion,
-    };
-  }
-
-  if (looksLikeSupabaseError(input.error)) {
-    return {
-      eventType: "supabase_query_error",
-      message: input.message ?? `API route error in ${input.route}`,
-      prismaCode,
-      prismaClientVersion,
-    };
-  }
-
-  if (looksLikeExternalProviderError(input.error, input)) {
-    return {
-      eventType: "external_provider_error",
-      message: input.message ?? `API route error in ${input.route}`,
-      prismaCode,
-      prismaClientVersion,
-    };
-  }
-
-  return {
-    eventType: input.defaultEventType,
-    message: input.message ?? `API route error in ${input.route}`,
-    prismaCode,
-    prismaClientVersion,
-  };
+  return classifyApiErrorEvent({
+    error: input.error,
+    route: input.route,
+    defaultEventType: input.defaultEventType,
+    httpStatus: resolveHttpStatus(input.error, input.httpStatus),
+    message: input.message,
+    externalProvider: input.externalProvider,
+  });
 }
 
 function shouldLogCritical(eventType: string, httpStatus: number | null): boolean {
@@ -273,7 +369,10 @@ function shouldLogCritical(eventType: string, httpStatus: number | null): boolea
 
 export async function logApiRouteError(input: LogApiRouteErrorInput): Promise<void> {
   const httpStatus = resolveHttpStatus(input.error, input.httpStatus);
-  const { eventType, message, prismaCode, prismaClientVersion } = classifyEventType(input);
+  const requestId = resolveRequestId(input.request);
+  const correlationId = resolveCorrelationId(input.request, requestId);
+  const { eventType, message, errorStage, prismaCode, prismaClientVersion, supabaseCode } =
+    classifyEventType(input);
   const externalProvider = resolveExternalProvider(input.error, input);
   const externalRequestId = resolveExternalRequestId(input.error, input);
 
@@ -285,6 +384,8 @@ export async function logApiRouteError(input: LogApiRouteErrorInput): Promise<vo
     userId: input.userId ?? null,
     leadId: input.leadId ?? null,
     threadId: input.threadId ?? null,
+    correlationId,
+    requestId,
     externalProvider,
     externalRequestId,
     errorMessage: resolveErrorMessage(input.error),
@@ -292,9 +393,18 @@ export async function logApiRouteError(input: LogApiRouteErrorInput): Promise<vo
     metadata: {
       route: input.route,
       method: input.request.method,
-      searchParams: buildSearchParams(input.request),
+      requestId,
+      environment: resolveEnvironment(),
+      searchParamKeys: buildSearchParamKeys(input.request),
+      errorName: resolveErrorName(input.error),
+      errorCode: resolveErrorCode(input.error),
+      httpStatus,
+      errorStage,
       prismaCode,
       prismaClientVersion,
+      supabaseCode,
+      externalProvider,
+      externalRequestId,
       ...deriveEntityMetadata(input.request),
       ...input.metadata,
     },
@@ -314,4 +424,29 @@ export async function logApiRouteError(input: LogApiRouteErrorInput): Promise<vo
 
 export function buildSyntheticApiRequest(route: string, method: string): Request {
   return new Request(`http://localhost${route}`, { method });
+}
+
+export function classifyApiRouteErrorForTest(input: {
+  route: string;
+  defaultEventType: string;
+  error: unknown;
+  httpStatus?: number | null;
+  source?: string;
+}): {
+  eventType: string;
+  message: string;
+  errorStage: string;
+  prismaCode: string | null;
+  prismaClientVersion: string | null;
+  supabaseCode: string | null;
+} {
+  const synthetic = buildSyntheticApiRequest(input.route, "GET");
+  return classifyEventType({
+    request: synthetic,
+    route: input.route,
+    source: input.source ?? "api.test",
+    defaultEventType: input.defaultEventType,
+    error: input.error,
+    httpStatus: input.httpStatus,
+  });
 }

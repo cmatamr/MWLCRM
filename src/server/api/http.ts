@@ -5,6 +5,7 @@ import "@/lib/security/install-log-redaction";
 import { redactSensitiveData } from "@/lib/security/redaction";
 import type { ApiErrorBody, ApiErrorResponse, ApiSuccessResponse } from "@/types/api";
 import { isUuid } from "@/server/services/shared";
+import { logError } from "@/server/observability/logger";
 
 export type RouteContext<TParams extends Record<string, string>> = {
   params: Promise<TParams>;
@@ -121,7 +122,18 @@ export function handleRouteError(error: unknown) {
     );
   }
 
-  console.error("Unhandled API route error", redactSensitiveData(error));
+  void logError({
+    source: "api.unhandled",
+    eventType: "api_unhandled_error",
+    message: "Unhandled API route error",
+    httpStatus: 500,
+    errorMessage: error instanceof Error ? error.message : "unknown",
+    stackTrace: error instanceof Error ? error.stack : null,
+    metadata: {
+      error: redactSensitiveData(error),
+      environment: process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV?.trim() || "unknown",
+    },
+  });
 
   return fail(
     {

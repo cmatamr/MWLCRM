@@ -13,6 +13,16 @@ export async function POST() {
     return ok(result);
   } catch (error) {
     if (error instanceof MetaApiError) {
+      await logApiRouteError({
+        request: buildSyntheticApiRequest("/api/campaigns/sync", "POST"),
+        route: "/api/campaigns/sync",
+        source: "api.commercial",
+        defaultEventType: "external_provider_error",
+        error,
+        httpStatus: error.status,
+        externalProvider: "meta",
+      });
+
       return fail(
         {
           code: "META_API_ERROR",

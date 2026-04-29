@@ -99,8 +99,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
               <div className="space-y-5">
                 <div className="h-[150px] w-full max-w-[520px] overflow-hidden">
                   <Image
-                    src="/nexacore-logo.png"
-                    alt="NexaCore by 4 + [ UNO ]"
+                    src="/ontraone-logo.png"
+                    alt="OntraOne by 4 + [ UNO ]"
                     width={1536}
                     height={1024}
                     priority
@@ -161,7 +161,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
 
               <div className="mt-6 border-t border-border/80 pt-4">
                 <p className="text-xs font-medium uppercase tracking-[0.15em] text-muted-foreground/90">
-                  Powered by NexaCore®
+                  Powered by OntraOne®
                 </p>
               </div>
             </div>

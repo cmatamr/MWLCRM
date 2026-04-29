@@ -4,6 +4,7 @@ import type { PrismaClient } from "@prisma/client";
 import { ApiRouteError, badRequest, notFound } from "@/server/api/http";
 import { redactSensitiveData } from "@/lib/security/redaction";
 import { createSupabaseServiceClient } from "@/lib/supabase/admin";
+import { logError, logWarn } from "@/server/observability/logger";
 import {
   isSearchTermUsefulForNova,
   NOVA_SEARCH_TERM_QUALITY_RULE_EN,
@@ -307,7 +308,16 @@ async function processProductImageBuffer(buffer: Buffer): Promise<Buffer> {
       })
       .toBuffer();
   } catch (error) {
-    console.error("Product image processing failed", redactSensitiveData(error));
+    await logWarn({
+      source: "api.products",
+      eventType: "product_image_upload_error",
+      message: "Product image processing failed",
+      errorMessage: error instanceof Error ? error.message : "unknown",
+      stackTrace: error instanceof Error ? error.stack : null,
+      metadata: {
+        operation: "process_product_image_buffer",
+      },
+    });
     throw badRequest("No se pudo procesar la imagen.", {
       field: "file",
       reason: "image_processing_failed",
@@ -365,13 +375,16 @@ async function refreshSearchIndexSafely(
       error instanceof Error && error.message.trim().length > 0
         ? error.message
         : "unknown_error";
-    console.error(
-      "Failed to refresh mwl product search index",
-      redactSensitiveData({
+    await logError({
+      source: "api.products",
+      eventType: "catalog_api_error",
+      message: "Failed to refresh mwl product search index",
+      errorMessage: error instanceof Error ? error.message : "unknown",
+      stackTrace: error instanceof Error ? error.stack : null,
+      metadata: redactSensitiveData({
         ...context,
-        error,
       }),
-    );
+    });
     return {
       success: false,
       error,
@@ -489,7 +502,16 @@ async function ensureProductBucketIsPrivate() {
   const { data, error } = await supabase.storage.listBuckets();
 
   if (error) {
-    console.error("Failed to list storage buckets", redactSensitiveData(error));
+    await logError({
+      source: "api.products",
+      eventType: "supabase_storage_error",
+      message: "Failed to list storage buckets",
+      errorMessage: error.message,
+      metadata: {
+        operation: "ensure_product_bucket_is_private",
+        bucket: PRODUCT_STORAGE_BUCKET,
+      },
+    });
     throw new ApiRouteError({
       status: 503,
       code: "STORAGE_BUCKET_LOOKUP_FAILED",
@@ -548,7 +570,17 @@ async function createSignedUrlMap(
       .createSignedUrls(paths, PRODUCT_IMAGE_SIGNED_URL_TTL_SECONDS);
 
     if (error) {
-      console.error("Failed to create signed URLs for product images", redactSensitiveData(error));
+      await logWarn({
+        source: "api.products",
+        eventType: "supabase_storage_error",
+        message: "Failed to create signed URLs for product images",
+        errorMessage: error.message,
+        metadata: {
+          operation: "create_signed_urls",
+          bucket,
+          pathCount: paths.length,
+        },
+      });
       continue;
     }
 
@@ -683,7 +715,16 @@ async function assertProductImageConsistency(
   });
 
   if (error) {
-    console.error("Product image consistency check failed while listing storage", redactSensitiveData(error));
+    await logError({
+      source: "api.products",
+      eventType: "supabase_storage_error",
+      message: "Product image consistency check failed while listing storage",
+      errorMessage: error.message,
+      metadata: {
+        operation: "assert_product_image_consistency",
+        productId,
+      },
+    });
     throw new ApiRouteError({
       status: 503,
       code: "PRODUCT_IMAGE_CONSISTENCY_CHECK_FAILED",
@@ -701,9 +742,11 @@ async function assertProductImageConsistency(
   }
 
   if (issues.length > 0) {
-    console.error(
-      "Product image consistency validation failed",
-      redactSensitiveData({
+    await logError({
+      source: "api.products",
+      eventType: "catalog_api_error",
+      message: "Product image consistency validation failed",
+      metadata: redactSensitiveData({
         operation,
         productId,
         issues,
@@ -715,7 +758,7 @@ async function assertProductImageConsistency(
           storage_path: row.storage_path,
         })),
       }),
-    );
+    });
 
     throw new ApiRouteError({
       status: 500,
@@ -742,15 +785,18 @@ async function runCompensationSteps(input: {
       await step.run();
     } catch (error) {
       errors.push({ step: step.name, error });
-      console.error(
-        "Product image compensation step failed",
-        redactSensitiveData({
+      await logError({
+        source: "api.products",
+        eventType: "catalog_api_error",
+        message: "Product image compensation step failed",
+        errorMessage: error instanceof Error ? error.message : "unknown",
+        stackTrace: error instanceof Error ? error.stack : null,
+        metadata: redactSensitiveData({
           operation: input.operation,
           productId: input.productId,
           step: step.name,
-          error,
         }),
-      );
+      });
     }
   }
 
@@ -3227,7 +3273,17 @@ export async function addProductImage(
 
     await assertProductImageConsistency(db, productId, "upload");
   } catch (error) {
-    console.error("Product image upload transaction failed", redactSensitiveData(error));
+    await logError({
+      source: "api.products",
+      eventType: "product_image_upload_error",
+      message: "Product image upload transaction failed",
+      errorMessage: error instanceof Error ? error.message : "unknown",
+      stackTrace: error instanceof Error ? error.stack : null,
+      metadata: {
+        operation: "upload_product_image",
+        productId,
+      },
+    });
 
     const compensationSteps: Array<{ name: string; run: () => Promise<void> }> = [];
 
@@ -3402,7 +3458,18 @@ export async function deleteProductImage(
 
     await assertProductImageConsistency(db, productId, "delete");
   } catch (error) {
-    console.error("Product image delete transaction failed", redactSensitiveData(error));
+    await logError({
+      source: "api.products",
+      eventType: "product_image_delete_error",
+      message: "Product image delete transaction failed",
+      errorMessage: error instanceof Error ? error.message : "unknown",
+      stackTrace: error instanceof Error ? error.stack : null,
+      metadata: {
+        operation: "delete_product_image",
+        productId,
+        imageId,
+      },
+    });
 
     const compensationSteps: Array<{ name: string; run: () => Promise<void> }> = [];
 

@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 
 import { normalizeCustomerExternalIdForStorage } from "@/domain/crm/customer-edit";
+import { logError, logWarn } from "@/server/observability/logger";
 import {
   createPaginationMeta,
   normalizePagination,
@@ -44,6 +45,37 @@ export class UpdateCustomerError extends Error {
     this.name = "UpdateCustomerError";
     this.code = code;
   }
+}
+
+function resolvePrismaErrorMetadata(error: unknown): {
+  prismaCode: string | null;
+  prismaClientVersion: string | null;
+} {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    return {
+      prismaCode: error.code,
+      prismaClientVersion: error.clientVersion ?? null,
+    };
+  }
+
+  if (error instanceof Prisma.PrismaClientUnknownRequestError) {
+    return {
+      prismaCode: null,
+      prismaClientVersion: error.clientVersion ?? null,
+    };
+  }
+
+  if (error instanceof Prisma.PrismaClientInitializationError) {
+    return {
+      prismaCode: error.errorCode ?? null,
+      prismaClientVersion: error.clientVersion ?? null,
+    };
+  }
+
+  return {
+    prismaCode: null,
+    prismaClientVersion: null,
+  };
 }
 
 function buildCustomerWhere(params: ListCustomersParams): Prisma.ContactWhereInput {
@@ -318,6 +350,24 @@ export async function createCustomer(
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"
     ) {
+      const { prismaCode, prismaClientVersion } = resolvePrismaErrorMetadata(error);
+      await logWarn({
+        source: "service.customers",
+        eventType: "customers_api_error",
+        message: "Duplicate customer detected during createCustomer.",
+        errorMessage: error.message,
+        metadata: {
+          operation: "create_customer",
+          errorStage: "create_customer_insert",
+          errorName: error.name,
+          errorCode: error.code,
+          primaryChannel: input.primaryChannel,
+          prismaCode,
+          prismaClientVersion,
+          environment: process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV?.trim() || "unknown",
+        },
+      });
+
       throw new CreateCustomerError(
         "DUPLICATE_CUSTOMER",
         "Ya existe un customer con ese canal e identificador externo.",
@@ -327,6 +377,28 @@ export async function createCustomer(
         },
       );
     }
+
+    const { prismaCode, prismaClientVersion } = resolvePrismaErrorMetadata(error);
+    await logError({
+      source: "service.customers",
+      eventType: "customers_api_error",
+      message: "createCustomer failed with unexpected error.",
+      errorMessage: error instanceof Error ? error.message : "Unknown customer service error",
+      stackTrace: error instanceof Error ? error.stack : null,
+      metadata: {
+        operation: "create_customer",
+        errorStage: "create_customer_insert",
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        errorCode:
+          error instanceof Prisma.PrismaClientKnownRequestError
+            ? error.code
+            : null,
+        primaryChannel: input.primaryChannel,
+        prismaCode,
+        prismaClientVersion,
+        environment: process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV?.trim() || "unknown",
+      },
+    });
 
     throw error;
   }
@@ -395,6 +467,25 @@ export async function updateCustomer(
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"
     ) {
+      const { prismaCode, prismaClientVersion } = resolvePrismaErrorMetadata(error);
+      await logWarn({
+        source: "service.customers",
+        eventType: "customers_api_error",
+        message: "Duplicate customer detected during updateCustomer.",
+        errorMessage: error.message,
+        metadata: {
+          operation: "update_customer",
+          errorStage: "update_customer_update",
+          errorName: error.name,
+          errorCode: error.code,
+          customerId,
+          primaryChannel: existingContact.primaryChannel,
+          prismaCode,
+          prismaClientVersion,
+          environment: process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV?.trim() || "unknown",
+        },
+      });
+
       throw new UpdateCustomerError(
         "DUPLICATE_CUSTOMER",
         "Ya existe un customer con ese canal e identificador externo.",
@@ -404,6 +495,29 @@ export async function updateCustomer(
         },
       );
     }
+
+    const { prismaCode, prismaClientVersion } = resolvePrismaErrorMetadata(error);
+    await logError({
+      source: "service.customers",
+      eventType: "customers_api_error",
+      message: "updateCustomer failed with unexpected error.",
+      errorMessage: error instanceof Error ? error.message : "Unknown customer service error",
+      stackTrace: error instanceof Error ? error.stack : null,
+      metadata: {
+        operation: "update_customer",
+        errorStage: "update_customer_update",
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        errorCode:
+          error instanceof Prisma.PrismaClientKnownRequestError
+            ? error.code
+            : null,
+        customerId,
+        primaryChannel: existingContact.primaryChannel,
+        prismaCode,
+        prismaClientVersion,
+        environment: process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV?.trim() || "unknown",
+      },
+    });
 
     throw error;
   }

@@ -13,7 +13,7 @@ export function AppTopbar() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-base font-semibold tracking-[0.07em] text-primary/80">
-              NexaCore by 4 + [ UNO ]
+              OntraOne by 4 + [ UNO ]
             </p>
             <h1 className="font-serif text-2xl font-semibold tracking-tight text-slate-900 md:text-[1.75rem]">
               Operación Comerial Centralizada

@@ -11,6 +11,7 @@ import {
   orderStatusesRequiringValidatedReceipt,
 } from "@/domain/crm/orders";
 import { formatCalendarDate, formatCurrencyCRC } from "@/domain/crm/formatters";
+import { logError, logWarn } from "@/server/observability/logger";
 import {
   createPaginationMeta,
   isUuid,
@@ -65,6 +66,37 @@ type OrderItemCatalogProduct = {
   category: string;
   family: string;
 };
+
+function resolvePrismaErrorMetadata(error: unknown): {
+  prismaCode: string | null;
+  prismaClientVersion: string | null;
+} {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    return {
+      prismaCode: error.code,
+      prismaClientVersion: error.clientVersion ?? null,
+    };
+  }
+
+  if (error instanceof Prisma.PrismaClientUnknownRequestError) {
+    return {
+      prismaCode: null,
+      prismaClientVersion: error.clientVersion ?? null,
+    };
+  }
+
+  if (error instanceof Prisma.PrismaClientInitializationError) {
+    return {
+      prismaCode: error.errorCode ?? null,
+      prismaClientVersion: error.clientVersion ?? null,
+    };
+  }
+
+  return {
+    prismaCode: null,
+    prismaClientVersion: null,
+  };
+}
 
 export class PaymentReceiptError extends Error {
   code:
@@ -2201,6 +2233,24 @@ export async function createPaymentReceipt(
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === "P2002"
       ) {
+        const { prismaCode, prismaClientVersion } = resolvePrismaErrorMetadata(error);
+        await logWarn({
+          source: "service.orders",
+          eventType: "orders_api_error",
+          message: "Duplicate receipt key while creating payment receipt.",
+          errorMessage: error.message,
+          metadata: {
+            operation: "create_payment_receipt",
+            errorStage: "receipt_create_insert",
+            errorName: error.name,
+            errorCode: error.code,
+            orderId: input.orderId,
+            prismaCode,
+            prismaClientVersion,
+            environment: process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV?.trim() || "unknown",
+          },
+        });
+
         throw new PaymentReceiptError(
           "DUPLICATE_RECEIPT_KEY",
           "A payment receipt with the same receipt key already exists.",
@@ -2210,6 +2260,28 @@ export async function createPaymentReceipt(
           },
         );
       }
+
+      const { prismaCode, prismaClientVersion } = resolvePrismaErrorMetadata(error);
+      await logError({
+        source: "service.orders",
+        eventType: "orders_api_error",
+        message: "createPaymentReceipt failed with unexpected error.",
+        errorMessage: error instanceof Error ? error.message : "Unknown orders service error",
+        stackTrace: error instanceof Error ? error.stack : null,
+        metadata: {
+          operation: "create_payment_receipt",
+          errorStage: "receipt_create_insert",
+          errorName: error instanceof Error ? error.name : "UnknownError",
+          errorCode:
+            error instanceof Prisma.PrismaClientKnownRequestError
+              ? error.code
+              : null,
+          orderId: input.orderId,
+          prismaCode,
+          prismaClientVersion,
+          environment: process.env.VERCEL_ENV?.trim() || process.env.NODE_ENV?.trim() || "unknown",
+        },
+      });
 
       throw error;
     }

@@ -6,12 +6,12 @@ import { QueryProvider } from "@/providers/query-provider";
 import "@/app/globals.css";
 
 export const metadata: Metadata = {
-  title: "NexaCore by 4 + [ UNO ]",
+  title: "OntraOne by 4 + [ UNO ]",
   description: "CRM comercial modular para clientes, órdenes y campañas.",
   icons: {
     icon: "/icon.png",
     shortcut: "/icon.png",
-    apple: "/nexacore-icon.png",
+    apple: "/ontraone-icon.png",
   },
 };
 

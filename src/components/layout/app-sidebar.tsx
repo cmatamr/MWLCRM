@@ -19,8 +19,8 @@ export function AppSidebar() {
         >
           <div className="-translate-x-4 h-24 w-24 [perspective:900px]">
             <Image
-              src="/nexacore-icon.png"
-              alt="NexaCore icon"
+              src="/ontraone-icon.png"
+              alt="OntraOne icon"
               width={96}
               height={96}
               className="logo-float-3d h-full w-full object-contain"
@@ -29,7 +29,7 @@ export function AppSidebar() {
           </div>
           <div className="-ml-6 space-y-1">
             <p className="font-serif text-lg font-semibold leading-tight text-slate-50 [text-shadow:0_3px_16px_rgba(2,6,23,0.65)] md:text-xl">
-              NexaCore
+              OntraOne
               <br />
               <span className="text-[0.95rem] italic font-medium text-slate-200">by 4 + [ UNO ]</span>
             </p>
@@ -84,7 +84,7 @@ export function AppSidebar() {
 
         <div className="mt-4 px-1 text-center">
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-[#FFFFFF]">
-            Powered by NexaCore
+            Powered by OntraOne
           </p>
           <p className="mt-1 text-xs italic text-slate-300">by 4 + [ UNO ] Technology</p>
         </div>
