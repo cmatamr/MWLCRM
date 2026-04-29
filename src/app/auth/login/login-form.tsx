@@ -129,6 +129,26 @@ export function LoginForm({ nextPath }: LoginFormProps) {
   const [showInlinePasswordResetLink, setShowInlinePasswordResetLink] = useState(false);
 
   useEffect(() => {
+    const hash = window.location.hash ?? "";
+    if (!hash) {
+      return;
+    }
+
+    const hashParams = new URLSearchParams(hash.replace(/^#/, ""));
+    const type = hashParams.get("type");
+    const hasRecoveryTokens =
+      type === "recovery" &&
+      (hashParams.has("access_token") || hashParams.has("refresh_token") || hashParams.has("error"));
+
+    if (!hasRecoveryTokens) {
+      return;
+    }
+
+    const nextUrl = `/auth/recover${window.location.search}${hash}`;
+    router.replace(nextUrl);
+  }, [router]);
+
+  useEffect(() => {
     if (!siteKey || !isTurnstileScriptReady || !turnstileContainerRef.current || !window.turnstile) {
       return;
     }
