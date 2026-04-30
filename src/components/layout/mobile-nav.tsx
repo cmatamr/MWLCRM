@@ -2,16 +2,28 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 
-import { navigationItems } from "@/config/navigation";
+import { getVisibleNavigationItems } from "@/config/navigation";
+import type { AppRole } from "@/lib/auth/profile";
+import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
 
 export function MobileNav() {
   const pathname = usePathname();
+  const { data: role } = useQuery({
+    queryKey: ["account-security", "role"],
+    queryFn: async () => {
+      const response = await fetcher<{ role: AppRole }>("/api/account/security");
+      return response.role;
+    },
+    retry: 0,
+  });
+  const visibleNavigationItems = getVisibleNavigationItems(role);
 
   return (
     <nav className="flex gap-2 overflow-x-auto pb-1 xl:hidden">
-      {navigationItems.map((item) => {
+      {visibleNavigationItems.map((item) => {
         const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
 
         return (

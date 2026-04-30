@@ -7,7 +7,7 @@ export default function AccessDeniedPage() {
     <div className="mx-auto flex w-full max-w-xl items-center justify-center py-12">
       <section className="w-full rounded-3xl border border-white/70 bg-white/85 p-7 shadow-panel backdrop-blur">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">
-          Made With Love CRM
+          OntraOne by 4 + [ UNO ]
         </p>
         <h2 className="mt-2 font-serif text-3xl font-semibold tracking-tight text-slate-900">
           Acceso denegado
@@ -17,12 +17,9 @@ export default function AccessDeniedPage() {
           administrador y vuelve a intentar.
         </p>
 
-        <div className="mt-6 flex flex-wrap gap-3">
+        <div className="mt-6 flex justify-center">
           <Button asChild>
-            <Link href="/auth/login">Volver a login</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/auth/logout">Cerrar sesión</Link>
+            <Link href="/auth/login">Aceptar</Link>
           </Button>
         </div>
       </section>

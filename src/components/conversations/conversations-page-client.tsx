@@ -67,7 +67,7 @@ export function ConversationsPageClient() {
     queryKey: queryKeys.conversationDetail(resolvedConversationId),
     queryFn: () => crmApiClient.getConversation(resolvedConversationId as string),
     enabled: Boolean(resolvedConversationId),
-    refetchInterval: queryRefetchIntervals.conversations,
+    refetchInterval: queryRefetchIntervals.conversationDetail,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });

@@ -367,6 +367,65 @@ function shouldLogCritical(eventType: string, httpStatus: number | null): boolea
   return httpStatus >= 500 && (eventType === "external_provider_error" || eventType === "supabase_query_error");
 }
 
+function deriveProviderHintFromPreview(preview: string): string | null {
+  const normalized = preview.toLowerCase();
+
+  if (normalized.includes("missing scopes: api.usage.read")) {
+    return "Missing OpenAI scope api.usage.read.";
+  }
+  if (normalized.includes("insufficient permissions")) {
+    return "Insufficient permissions in external provider.";
+  }
+  if (normalized.includes("rate limit") || normalized.includes("too many requests")) {
+    return "External provider rate limit reached.";
+  }
+  if (normalized.includes("invalid api key") || normalized.includes("incorrect api key")) {
+    return "Invalid or unauthorized API key.";
+  }
+
+  return null;
+}
+
+function deriveApiRouteErrorDetailsMetadata(error: unknown): Record<string, unknown> {
+  if (!(error instanceof ApiRouteError)) {
+    return {};
+  }
+
+  const details = asRecord(error.details);
+  if (!details) {
+    return {};
+  }
+
+  const providerStatus =
+    typeof details.providerStatus === "number" && Number.isFinite(details.providerStatus)
+      ? Math.trunc(details.providerStatus)
+      : null;
+
+  const providerErrorCode =
+    typeof details.providerErrorCode === "string" && details.providerErrorCode.trim()
+      ? details.providerErrorCode.trim()
+      : null;
+
+  const providerResponsePreview =
+    typeof details.responseBodyPreview === "string" && details.responseBodyPreview.trim()
+      ? details.responseBodyPreview.trim()
+      : null;
+
+  const providerHintFromDetails =
+    typeof details.hint === "string" && details.hint.trim() ? details.hint.trim() : null;
+  const providerHintFromPreview =
+    providerResponsePreview ? deriveProviderHintFromPreview(providerResponsePreview) : null;
+
+  const metadata: Record<string, unknown> = {
+    providerStatus,
+    providerErrorCode,
+    providerResponsePreview,
+    providerHint: providerHintFromDetails ?? providerHintFromPreview,
+  };
+
+  return metadata;
+}
+
 export async function logApiRouteError(input: LogApiRouteErrorInput): Promise<void> {
   const httpStatus = resolveHttpStatus(input.error, input.httpStatus);
   const requestId = resolveRequestId(input.request);
@@ -405,6 +464,7 @@ export async function logApiRouteError(input: LogApiRouteErrorInput): Promise<vo
       supabaseCode,
       externalProvider,
       externalRequestId,
+      ...deriveApiRouteErrorDetailsMetadata(input.error),
       ...deriveEntityMetadata(input.request),
       ...input.metadata,
     },

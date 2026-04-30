@@ -38,6 +38,15 @@ export type AiDashboardSummary = {
     totalTokens: number;
     totalCostUsd: number;
   }>;
+  providerSyncedUsageByPeriod: Array<{
+    periodStart: string;
+    periodEnd: string;
+    providerReportedCostUsd: number;
+    internalRecordedCostUsd: number;
+    differenceUsd: number;
+    status: "pending" | "matched" | "mismatch" | "reviewed";
+    syncedAt: string;
+  }>;
   recentActivity: Array<{
     id: string;
     eventType: string;
@@ -51,6 +60,13 @@ export type AiDashboardSummary = {
   reconciliation: {
     status: "pending" | "matched" | "mismatch" | "reviewed" | null;
     lastSyncAt: string | null;
+  };
+  providerUsage: {
+    lastSyncAt: string | null;
+    providerReportedCostUsd: number;
+    internalRecordedCostUsd: number;
+    differenceUsd: number;
+    status: "pending" | "matched" | "mismatch" | "reviewed" | null;
   };
   providerProject: {
     provider: "openai";

@@ -23,7 +23,7 @@ export function useDashboardSummaryWithStatus(
     queryKey: queryKeys.dashboardSummary({ days, status }),
     queryFn: () => crmApiClient.getDashboardSummary({ days, status }),
     placeholderData: (previousData) => previousData,
-    refetchInterval: queryRefetchIntervals.dashboard,
+    refetchInterval: queryRefetchIntervals.salesDashboard,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });

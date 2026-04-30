@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { handleRouteError, ok } from "@/server/api/http";
+import { ApiRouteError, handleRouteError, ok } from "@/server/api/http";
 import { logAdminApiError } from "@/server/observability/admin-api";
 import { logError } from "@/server/observability/logger";
 import { requireAdminSecurityContext } from "@/server/security/admin";
@@ -30,6 +30,15 @@ export async function POST(request: Request) {
     return ok(result);
   } catch (error) {
     const response = handleRouteError(error);
+    const apiRouteError = error instanceof ApiRouteError ? error : null;
+    const errorCode = apiRouteError?.code ?? null;
+    const errorDetails =
+      apiRouteError && apiRouteError.details && typeof apiRouteError.details === "object"
+        ? (apiRouteError.details as Record<string, unknown>)
+        : null;
+    const providerResponsePreview =
+      typeof errorDetails?.responseBodyPreview === "string" ? errorDetails.responseBodyPreview : null;
+    const providerHint = typeof errorDetails?.hint === "string" ? errorDetails.hint : null;
 
     await logError({
       source: "api.admin.ai-usage",
@@ -43,7 +52,10 @@ export async function POST(request: Request) {
         route,
         method: "POST",
         errorStage: "sync_openai_costs",
+        errorCode,
         clientCode,
+        providerResponsePreview,
+        providerHint,
         requestId: request.headers.get("x-request-id") ?? request.headers.get("x-correlation-id"),
       },
     });
@@ -57,6 +69,9 @@ export async function POST(request: Request) {
         clientCode,
         method: "POST",
         errorStage: "sync_openai_costs",
+        errorCode,
+        providerResponsePreview,
+        providerHint,
         httpStatus: response.status,
       },
     });

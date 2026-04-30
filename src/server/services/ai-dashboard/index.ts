@@ -2,6 +2,7 @@ export {
   getAiDashboardSummary,
   toggleClientAgent,
   syncOpenAICostsForClient,
+  syncOpenAIUsageForClient,
   upsertOpenAIProviderProjectForClient,
 } from "./service";
 export type {

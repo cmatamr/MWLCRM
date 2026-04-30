@@ -78,6 +78,7 @@ export async function getAiDashboardSummary(clientCode: string): Promise<AiDashb
     dailyUsageRes,
     recentActivityRes,
     reconciliationRes,
+    reconciliationPeriodsRes,
     providerProjectRes,
   ] = await Promise.all([
     service
@@ -161,11 +162,42 @@ export async function getAiDashboardSummary(clientCode: string): Promise<AiDashb
       >(),
     service
       .from("ai_usage_reconciliation")
-      .select("status, created_at")
+      .select(
+        "status, created_at, period_start, period_end, provider_reported_cost_usd, internal_recorded_cost_usd, difference_usd, provider_project_id",
+      )
       .eq("client_id", client.id)
       .order("created_at", { ascending: false })
       .limit(1)
-      .maybeSingle<{ status: "pending" | "matched" | "mismatch" | "reviewed"; created_at: string }>(),
+      .maybeSingle<{
+        status: "pending" | "matched" | "mismatch" | "reviewed";
+        created_at: string;
+        period_start: string;
+        period_end: string;
+        provider_reported_cost_usd: number | string;
+        internal_recorded_cost_usd: number | string;
+        difference_usd: number | string;
+        provider_project_id: string;
+      }>(),
+    service
+      .from("ai_usage_reconciliation")
+      .select(
+        "status, created_at, period_start, period_end, provider_reported_cost_usd, internal_recorded_cost_usd, difference_usd, provider_project_id",
+      )
+      .eq("client_id", client.id)
+      .order("period_start", { ascending: false })
+      .limit(12)
+      .returns<
+        Array<{
+          status: "pending" | "matched" | "mismatch" | "reviewed";
+          created_at: string;
+          period_start: string;
+          period_end: string;
+          provider_reported_cost_usd: number | string;
+          internal_recorded_cost_usd: number | string;
+          difference_usd: number | string;
+          provider_project_id: string;
+        }>
+      >(),
     service
       .from("client_ai_provider_projects")
       .select("provider, provider_project_id, provider_project_name, monthly_budget_usd, status")
@@ -180,7 +212,7 @@ export async function getAiDashboardSummary(clientCode: string): Promise<AiDashb
       }>(),
   ]);
 
-  if (agentStatusRes.error || billingRes.error || balanceRes.error || dailyUsageRes.error || recentActivityRes.error || reconciliationRes.error || providerProjectRes.error) {
+  if (agentStatusRes.error || billingRes.error || balanceRes.error || dailyUsageRes.error || recentActivityRes.error || reconciliationRes.error || reconciliationPeriodsRes.error || providerProjectRes.error) {
     throw (
       agentStatusRes.error ??
       billingRes.error ??
@@ -188,6 +220,7 @@ export async function getAiDashboardSummary(clientCode: string): Promise<AiDashb
       dailyUsageRes.error ??
       recentActivityRes.error ??
       reconciliationRes.error ??
+      reconciliationPeriodsRes.error ??
       providerProjectRes.error
     );
   }
@@ -195,6 +228,36 @@ export async function getAiDashboardSummary(clientCode: string): Promise<AiDashb
   if (!agentStatusRes.data) {
     throw notFound("No existe configuracion client_agent para NOVA.");
   }
+
+  const latestReconciliation = (() => {
+    const rows = reconciliationPeriodsRes.data ?? [];
+    if (rows.length === 0) return null;
+
+    const providerProjectId = providerProjectRes.data?.provider_project_id?.trim();
+    const periodStart = balanceRes.data?.period_start;
+    const periodEnd = balanceRes.data?.period_end;
+
+    const periodProjectMatch = rows.find(
+      (row) =>
+        (!!providerProjectId ? row.provider_project_id === providerProjectId : true) &&
+        (!!periodStart ? row.period_start === periodStart : true) &&
+        (!!periodEnd ? row.period_end === periodEnd : true),
+    );
+
+    if (periodProjectMatch) {
+      return periodProjectMatch;
+    }
+
+    if (providerProjectId) {
+      const projectMatch = rows.find((row) => row.provider_project_id === providerProjectId);
+      if (projectMatch) {
+        return projectMatch;
+      }
+    }
+
+    return rows[0] ?? null;
+  })();
+
 
   return {
     client,
@@ -238,6 +301,17 @@ export async function getAiDashboardSummary(clientCode: string): Promise<AiDashb
         totalCostUsd: asNumber(row.total_cost_usd),
       }))
       .reverse(),
+    providerSyncedUsageByPeriod: (reconciliationPeriodsRes.data ?? [])
+      .map((row) => ({
+        periodStart: row.period_start,
+        periodEnd: row.period_end,
+        providerReportedCostUsd: asNumber(row.provider_reported_cost_usd),
+        internalRecordedCostUsd: asNumber(row.internal_recorded_cost_usd),
+        differenceUsd: asNumber(row.difference_usd),
+        status: row.status,
+        syncedAt: row.created_at,
+      }))
+      .reverse(),
     recentActivity: (recentActivityRes.data ?? []).map((row) => ({
       id: row.id,
       eventType: row.event_type,
@@ -249,8 +323,19 @@ export async function getAiDashboardSummary(clientCode: string): Promise<AiDashb
       createdAt: row.created_at,
     })),
     reconciliation: {
-      status: reconciliationRes.data?.status ?? null,
-      lastSyncAt: reconciliationRes.data?.created_at ?? null,
+      status: latestReconciliation?.status ?? reconciliationRes.data?.status ?? null,
+      lastSyncAt: latestReconciliation?.created_at ?? reconciliationRes.data?.created_at ?? null,
+    },
+    providerUsage: {
+      lastSyncAt: latestReconciliation?.created_at ?? reconciliationRes.data?.created_at ?? null,
+      providerReportedCostUsd: asNumber(
+        latestReconciliation?.provider_reported_cost_usd ?? reconciliationRes.data?.provider_reported_cost_usd,
+      ),
+      internalRecordedCostUsd: asNumber(
+        latestReconciliation?.internal_recorded_cost_usd ?? reconciliationRes.data?.internal_recorded_cost_usd,
+      ),
+      differenceUsd: asNumber(latestReconciliation?.difference_usd ?? reconciliationRes.data?.difference_usd),
+      status: latestReconciliation?.status ?? reconciliationRes.data?.status ?? null,
     },
     providerProject: providerProjectRes.data
       ? (() => {
@@ -284,6 +369,20 @@ export async function getAiDashboardSummary(clientCode: string): Promise<AiDashb
     permissions: {
       canManageOpenAIConfig: false,
     },
+  };
+}
+
+export async function syncOpenAIUsageForClient(
+  clientCode: string,
+  periodStart: string,
+  periodEnd: string,
+): Promise<{ implemented: false; reason: string; clientCode: string; periodStart: string; periodEnd: string }> {
+  return {
+    implemented: false,
+    reason: "Pendiente integración con OpenAI Usage API o instrumentación interna.",
+    clientCode,
+    periodStart,
+    periodEnd,
   };
 }
 
@@ -490,7 +589,9 @@ export async function syncOpenAICostsForClient(
     url.searchParams.set("start_time", `${Math.floor(periodStart.getTime() / 1000)}`);
     url.searchParams.set("end_time", `${Math.floor(periodEnd.getTime() / 1000)}`);
     url.searchParams.set("bucket_width", "1d");
-    url.searchParams.set("project_ids[]", providerProjectId);
+    // OpenAI Costs API expects array params as repeated keys (project_ids=...)
+    // instead of bracket notation (project_ids[]=...).
+    url.searchParams.append("project_ids", providerProjectId);
 
     const response = await fetch(url.toString(), {
       method: "GET",
@@ -504,11 +605,19 @@ export async function syncOpenAICostsForClient(
     const responseText = await response.text();
 
     if (!response.ok) {
+      const isForbidden = response.status === 403;
       throw new ApiRouteError({
         status: 502,
         code: "OPENAI_COSTS_API_ERROR",
-        message: `OpenAI Costs API respondió ${response.status}.`,
-        details: { responseBodyPreview: responseText.slice(0, 600) },
+        message: isForbidden
+          ? "OpenAI Costs API respondió 403 (sin permisos para endpoint de organización)."
+          : `OpenAI Costs API respondió ${response.status}.`,
+        details: {
+          responseBodyPreview: responseText.slice(0, 600),
+          hint: isForbidden
+            ? "Verifica que OPENAI_ADMIN_API_KEY sea una Admin Key de organización con permisos de lectura de Usage/Costs."
+            : undefined,
+        },
       });
     }
 

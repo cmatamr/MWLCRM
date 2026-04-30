@@ -12,6 +12,7 @@ import {
   Bot,
 } from "lucide-react";
 
+import type { AppRole } from "@/lib/auth/profile";
 import type { NavigationItem } from "@/types/navigation";
 
 export const navigationItems: NavigationItem[] = [
@@ -82,3 +83,19 @@ export const navigationItems: NavigationItem[] = [
     icon: FileSearch,
   },
 ];
+
+const ADMIN_NAV_PREFIX = "/admin/";
+
+export function getVisibleNavigationItems(role?: AppRole | null): NavigationItem[] {
+  return navigationItems.filter((item) => {
+    if (item.href.startsWith(ADMIN_NAV_PREFIX) && role !== "admin") {
+      return false;
+    }
+
+    if (item.href === "/dashboard" && role === "service") {
+      return false;
+    }
+
+    return true;
+  });
+}

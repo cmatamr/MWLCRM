@@ -14,7 +14,7 @@ export function useConversations(params?: ListConversationsParams) {
   const query = useQuery<ConversationsListResponse, FetcherError>({
     queryKey: queryKeys.conversations(params),
     queryFn: () => crmApiClient.listConversations(params),
-    refetchInterval: queryRefetchIntervals.conversations,
+    refetchInterval: queryRefetchIntervals.conversationsDashboard,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });

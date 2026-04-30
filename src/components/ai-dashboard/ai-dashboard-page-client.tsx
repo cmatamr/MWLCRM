@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Activity, Bot, CalendarClock, DollarSign, Gauge, Power, Wallet } from "lucide-react";
+import { Activity, AlertTriangle, Bot, CalendarClock, DollarSign, Gauge, Power, Wallet } from "lucide-react";
 
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
   useToggleClientAgent,
   useUpsertOpenAIProviderProject,
 } from "@/hooks/use-ai-dashboard";
+import { ApiClientError } from "@/lib/api/crm";
 import { cn } from "@/lib/utils";
 
 const CLIENT_CODE = "made-with-love";
@@ -21,6 +22,8 @@ const FLOATING_CARD_CLASSNAME =
   "group rounded-[32px] border border-white/70 bg-white/90 p-6 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)] backdrop-blur transition-all duration-200 hover:shadow-[0_46px_78px_-30px_rgba(2,6,23,0.34),0_20px_40px_-16px_rgba(2,6,23,0.24)]";
 const AI_STAT_CARD_CLASSNAME =
   "group rounded-[28px] border border-white/70 bg-white/90 p-5 shadow-[0_38px_68px_-30px_rgba(2,6,23,0.28),0_16px_34px_-16px_rgba(2,6,23,0.2)] backdrop-blur transition-all duration-200 hover:scale-[1.01] hover:shadow-[0_46px_78px_-30px_rgba(2,6,23,0.34),0_20px_40px_-16px_rgba(2,6,23,0.24)]";
+const AI_PANEL_CARD_CLASSNAME =
+  "group rounded-[32px] border border-white/70 bg-gradient-to-b from-white/95 to-slate-50/85 p-6 shadow-[0_42px_74px_-34px_rgba(2,6,23,0.28),0_22px_44px_-24px_rgba(15,23,42,0.22)] backdrop-blur transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_48px_82px_-34px_rgba(2,6,23,0.34),0_26px_50px_-24px_rgba(15,23,42,0.26)]";
 
 function currency(value: number) {
   return new Intl.NumberFormat("es-CR", { style: "currency", currency: "USD" }).format(value);
@@ -91,15 +94,24 @@ export function AiDashboardPageClient() {
   }
 
   const {
-    billing,
     balance,
     dailyUsage,
+    providerSyncedUsageByPeriod,
     recentActivity,
     reconciliation,
+    providerUsage,
     providerProject,
     integrationStatus,
     permissions,
   } = query.data;
+
+  const internalRecordedCostUsd = balance?.consumedUsd ?? 0;
+  const providerReportedCostUsd = providerUsage.providerReportedCostUsd;
+  const estimatedClientBalanceUsd =
+    (balance?.includedCreditUsd ?? 0) + (balance?.extraCreditUsd ?? 0) - providerReportedCostUsd;
+  const ledgerHasUsage = dailyUsage.some((row) => row.totalCostUsd > 0 || row.totalRequests > 0 || row.totalTokens > 0);
+  const hasProviderOnlyUsage = !ledgerHasUsage && providerReportedCostUsd > 0;
+  const internalTokens = dailyUsage.reduce((acc, row) => acc + row.totalTokens, 0);
 
   const canManageOpenAI = permissions.canManageOpenAIConfig;
   const canSync = Boolean(
@@ -170,7 +182,12 @@ export function AiDashboardPageClient() {
       });
       setFeedbackMessage("Sincronización de consumo completada.");
     } catch (error) {
-      setFeedbackMessage(error instanceof Error ? error.message : "No se pudo sincronizar consumo.");
+      if (error instanceof ApiClientError && error.code === "OPENAI_COSTS_API_ERROR") {
+        setFeedbackMessage("No se pudo sincronizar consumo en este momento. Intenta nuevamente.");
+        return;
+      }
+
+      setFeedbackMessage("No se pudo sincronizar consumo en este momento. Intenta nuevamente.");
     }
   }
 
@@ -180,12 +197,6 @@ export function AiDashboardPageClient() {
         title="Dashboard IA"
         description="Control de NOVA, consumo de crédito y actividad reciente de IA."
       />
-
-      {feedbackMessage ? (
-        <section className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          {feedbackMessage}
-        </section>
-      ) : null}
 
       <section className={FLOATING_CARD_CLASSNAME}>
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -212,43 +223,75 @@ export function AiDashboardPageClient() {
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <article className={AI_STAT_CARD_CLASSNAME}>
           <div className="mb-3 inline-flex rounded-2xl bg-emerald-100 p-3 text-emerald-700 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5">
             <Wallet className="h-5 w-5" />
           </div>
-          <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Crédito mensual incluido</p>
-          <p className="mt-2 text-2xl font-semibold text-slate-900">{currency(billing?.includedMonthlyCreditUsd ?? 0)}</p>
+          <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Crédito asignado cliente</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-900">{currency((balance?.includedCreditUsd ?? 0) + (balance?.extraCreditUsd ?? 0))}</p>
         </article>
         <article className={AI_STAT_CARD_CLASSNAME}>
           <div className="mb-3 inline-flex rounded-2xl bg-amber-100 p-3 text-amber-700 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5">
             <DollarSign className="h-5 w-5" />
           </div>
-          <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Consumido</p>
-          <p className="mt-2 text-2xl font-semibold text-slate-900">{currency(balance?.consumedUsd ?? 0)}</p>
+          <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Consumo interno registrado</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-900">{currency(internalRecordedCostUsd)}</p>
+        </article>
+        <article className={AI_STAT_CARD_CLASSNAME}>
+          <div className="mb-3 inline-flex rounded-2xl bg-cyan-100 p-3 text-cyan-700 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5">
+            <Gauge className="h-5 w-5" />
+          </div>
+          <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Consumo real OpenAI</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-900">{currency(providerReportedCostUsd)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Estimado según OpenAI</p>
+        </article>
+        <article className={AI_STAT_CARD_CLASSNAME}>
+          <div className="mb-3 inline-flex rounded-2xl bg-rose-100 p-3 text-rose-700 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5">
+            <Activity className="h-5 w-5" />
+          </div>
+          <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Diferencia conciliación</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-900">{currency(providerUsage.differenceUsd)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Estado: {providerUsage.status ?? "sin datos"}</p>
         </article>
         <article className={AI_STAT_CARD_CLASSNAME}>
           <div className="mb-3 inline-flex rounded-2xl bg-sky-100 p-3 text-sky-700 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5">
             <Gauge className="h-5 w-5" />
           </div>
-          <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Saldo disponible</p>
-          <p className="mt-2 text-2xl font-semibold text-slate-900">{currency(balance?.remainingUsd ?? 0)}</p>
+          <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Saldo estimado cliente</p>
+          <p className="mt-2 text-2xl font-semibold text-slate-900">{currency(estimatedClientBalanceUsd)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Estimado según OpenAI</p>
         </article>
       </section>
 
-      <section className={FLOATING_CARD_CLASSNAME}>
+      {hasProviderOnlyUsage ? (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4" />
+            <p>OpenAI reporta consumo, pero NOVA aún no está registrando uso interno en el ledger.</p>
+          </div>
+        </section>
+      ) : null}
+
+      <section className={AI_PANEL_CARD_CLASSNAME}>
         <div className="flex items-center gap-2">
-          <CalendarClock className="h-4 w-4 text-slate-500" />
+          <div className="inline-flex items-center gap-2 rounded-full border border-sky-200/80 bg-sky-50/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-sky-800">
+            <CalendarClock className="h-3.5 w-3.5" />
+            Balance
+          </div>
           <h3 className="text-base font-semibold text-slate-900">Balance del periodo</h3>
         </div>
         {balance ? (
-          <div className="mt-3 grid gap-2 text-sm text-slate-700 md:grid-cols-2">
+          <div className="mt-4 grid gap-3 rounded-2xl border border-white/70 bg-white/80 p-4 text-sm text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] md:grid-cols-2">
             <p>Periodo: {dateTime(balance.periodStart)} - {dateTime(balance.periodEnd)}</p>
             <p>Crédito adicional: {currency(balance.extraCreditUsd)}</p>
             <p>Porcentaje consumido: {balance.consumedPercent.toFixed(2)}%</p>
             <p>Estado: {balance.status}</p>
             <p>Última sincronización proveedor: {dateTime(reconciliation.lastSyncAt)}</p>
             <p>Reconciliación: {reconciliation.status ?? "sin datos"}</p>
+            <p>Consumo interno: {currency(internalRecordedCostUsd)}</p>
+            <p>Consumo OpenAI: {currency(providerReportedCostUsd)}</p>
+            <p>Diferencia: {currency(providerUsage.differenceUsd)}</p>
           </div>
         ) : (
           <p className="mt-2 text-sm text-muted-foreground">No existe cuenta de crédito para el periodo actual.</p>
@@ -338,12 +381,15 @@ export function AiDashboardPageClient() {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-2">
-        <article className={FLOATING_CARD_CLASSNAME}>
+        <article className={`${AI_PANEL_CARD_CLASSNAME} xl:col-span-2`}>
           <div className="mb-1 flex items-center gap-2">
-            <Activity className="h-4 w-4 text-slate-500" />
-            <h3 className="text-base font-semibold text-slate-900">Consumo diario</h3>
+            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200/80 bg-emerald-50/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-800">
+              <Activity className="h-3.5 w-3.5" />
+              Ledger
+            </div>
+            <h3 className="text-base font-semibold text-slate-900">Consumo diario interno</h3>
           </div>
-          <div className="mt-3 overflow-x-auto">
+          <div className="mt-4 overflow-x-auto rounded-2xl border border-white/70 bg-white/80 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -360,7 +406,7 @@ export function AiDashboardPageClient() {
                   </tr>
                 ) : (
                   dailyUsage.map((row) => (
-                    <tr key={row.usageDate} className="border-b border-border/50">
+                    <tr key={row.usageDate} className="border-b border-border/50 last:border-b-0">
                       <td className="py-2 pr-3">{new Date(row.usageDate).toLocaleDateString("es-CR")}</td>
                       <td className="py-2 pr-3">{row.totalRequests}</td>
                       <td className="py-2 pr-3">{row.totalTokens}</td>
@@ -371,11 +417,62 @@ export function AiDashboardPageClient() {
               </tbody>
             </table>
           </div>
+          <div className="mt-4 rounded-2xl border border-slate-200/70 bg-slate-50/80 px-4 py-3 text-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+            <p className="font-medium text-slate-900">Tokens internos registrados: {internalTokens}</p>
+            <p className="mt-1 text-muted-foreground">
+              Los tokens reales de OpenAI requieren integración con Usage API o instrumentación de NOVA.
+            </p>
+          </div>
         </article>
 
-        <article className={FLOATING_CARD_CLASSNAME}>
+        <article className={AI_PANEL_CARD_CLASSNAME}>
           <div className="mb-1 flex items-center gap-2">
-            <Power className="h-4 w-4 text-slate-500" />
+            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200/80 bg-cyan-50/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-800">
+              <CalendarClock className="h-3.5 w-3.5" />
+              Sync
+            </div>
+            <h3 className="text-base font-semibold text-slate-900">Consumo OpenAI sincronizado</h3>
+          </div>
+          <div className="mt-4 overflow-x-auto rounded-2xl border border-white/70 bg-white/80 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <th className="py-2 pr-3">Periodo</th>
+                  <th className="py-2 pr-3">Consumo OpenAI</th>
+                  <th className="py-2 pr-3">Consumo interno</th>
+                  <th className="py-2 pr-3">Diferencia</th>
+                  <th className="py-2">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {providerSyncedUsageByPeriod.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-3 text-muted-foreground">Sin consumo OpenAI sincronizado por periodo.</td>
+                  </tr>
+                ) : (
+                  providerSyncedUsageByPeriod.map((row) => (
+                    <tr key={`${row.periodStart}-${row.syncedAt}`} className="border-b border-border/50 last:border-b-0">
+                      <td className="py-2 pr-3">
+                        {new Date(row.periodStart).toLocaleDateString("es-CR")} - {new Date(row.periodEnd).toLocaleDateString("es-CR")}
+                      </td>
+                      <td className="py-2 pr-3">{currency(row.providerReportedCostUsd)}</td>
+                      <td className="py-2 pr-3">{currency(row.internalRecordedCostUsd)}</td>
+                      <td className="py-2 pr-3">{currency(row.differenceUsd)}</td>
+                      <td className="py-2">{row.status}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article className={AI_PANEL_CARD_CLASSNAME}>
+          <div className="mb-1 flex items-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-violet-200/80 bg-violet-50/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-violet-800">
+              <Power className="h-3.5 w-3.5" />
+              Feed
+            </div>
             <h3 className="text-base font-semibold text-slate-900">Actividad reciente</h3>
           </div>
           <ul className="mt-3 space-y-2 text-sm">
@@ -502,6 +599,23 @@ export function AiDashboardPageClient() {
               </Button>
               <Button onClick={() => void submitProviderConfig()} disabled={upsertProject.isPending}>
                 Guardar configuración
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {feedbackMessage ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
+          <div className={cn("w-full max-w-2xl rounded-[30px] border border-white/75 bg-white/95 p-6 shadow-[0_40px_78px_-30px_rgba(2,6,23,0.45),0_18px_34px_-18px_rgba(2,6,23,0.3)] backdrop-blur")}>
+            <div className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary/70">Notificación</p>
+              <h3 className="text-3xl font-semibold tracking-tight text-slate-950">Sincronización OpenAI</h3>
+              <p className="max-w-2xl text-[1.05rem] leading-9 text-muted-foreground">{feedbackMessage}</p>
+            </div>
+            <div className="mt-8 flex justify-end border-t border-border/70 pt-5">
+              <Button className="min-w-44 rounded-full px-8" onClick={() => setFeedbackMessage(null)}>
+                Aceptar
               </Button>
             </div>
           </div>

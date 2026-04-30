@@ -35,6 +35,15 @@ export const queryEndpoints = {
 } as const;
 
 export const queryRefetchIntervals = {
+  // Dashboard modules
+  salesDashboard: 30000,
+  campaignsDashboard: 60000,
+  funnelDashboard: 20000,
+  conversationsDashboard: 8000,
+  conversationDetail: 8000,
+  aiDashboard: 30000,
+
+  // Other modules
   banks: 300000,
   dashboard: 30000,
   orders: 20000,
@@ -48,7 +57,6 @@ export const queryRefetchIntervals = {
   productDetail: 30000,
   promotions: 30000,
   promotionDetail: 30000,
-  aiDashboard: 30000,
 } as const;
 
 export const queryKeys = {

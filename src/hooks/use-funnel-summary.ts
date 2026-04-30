@@ -11,7 +11,7 @@ export function useFunnelSummary(params?: FunnelSummaryParams) {
   const query = useQuery<FunnelSummary, FetcherError>({
     queryKey: queryKeys.funnelSummary(params),
     queryFn: () => crmApiClient.getFunnelSummary(params),
-    refetchInterval: queryRefetchIntervals.funnel,
+    refetchInterval: queryRefetchIntervals.funnelDashboard,
     refetchIntervalInBackground: false,
   });
 

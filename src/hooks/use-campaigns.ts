@@ -11,7 +11,7 @@ export function useCampaigns(params?: ListCampaignsParams) {
   const query = useQuery<CampaignsListResponse, FetcherError>({
     queryKey: queryKeys.campaigns(params),
     queryFn: () => crmApiClient.listCampaigns(params),
-    refetchInterval: queryRefetchIntervals.campaigns,
+    refetchInterval: queryRefetchIntervals.campaignsDashboard,
     refetchIntervalInBackground: false,
   });
 

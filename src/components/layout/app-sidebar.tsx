@@ -3,19 +3,31 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 
-import { navigationItems } from "@/config/navigation";
+import { getVisibleNavigationItems } from "@/config/navigation";
+import type { AppRole } from "@/lib/auth/profile";
+import { fetcher } from "@/lib/fetcher";
 import { cn } from "@/lib/utils";
 
 export function AppSidebar() {
   const pathname = usePathname();
+  const { data: role } = useQuery({
+    queryKey: ["account-security", "role"],
+    queryFn: async () => {
+      const response = await fetcher<{ role: AppRole }>("/api/account/security");
+      return response.role;
+    },
+    retry: 0,
+  });
+  const visibleNavigationItems = getVisibleNavigationItems(role);
 
   return (
-    <aside className="sticky top-0 hidden h-screen w-80 shrink-0 border-r border-white/60 bg-[radial-gradient(circle_at_18%_10%,rgba(14,116,144,0.08),transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.8),rgba(255,255,255,0.68))] px-5 py-6 backdrop-blur xl:block">
-      <div className="flex h-full flex-col rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_18%_10%,rgba(14,116,144,0.24),transparent_38%),radial-gradient(circle_at_85%_92%,rgba(56,189,248,0.2),transparent_44%),linear-gradient(165deg,#020617_0%,#020b22_56%,#03123a_100%)] px-4 py-5 text-white shadow-[0_34px_62px_-30px_rgba(2,6,23,0.88),0_14px_30px_-16px_rgba(2,6,23,0.68)]">
+    <aside className="hidden w-80 shrink-0 border-r border-white/60 bg-[radial-gradient(circle_at_18%_10%,rgba(14,116,144,0.08),transparent_35%),linear-gradient(180deg,rgba(255,255,255,0.8),rgba(255,255,255,0.68))] px-5 py-6 backdrop-blur xl:flex">
+      <div className="flex h-full w-full flex-col overflow-hidden rounded-[28px] border border-white/10 bg-[radial-gradient(circle_at_18%_10%,rgba(14,116,144,0.24),transparent_38%),radial-gradient(circle_at_85%_92%,rgba(56,189,248,0.2),transparent_44%),linear-gradient(165deg,#020617_0%,#020b22_56%,#03123a_100%)] px-4 py-5 text-white shadow-[0_34px_62px_-30px_rgba(2,6,23,0.88),0_14px_30px_-16px_rgba(2,6,23,0.68)]">
         <Link
           href="/dashboard"
-          className="relative flex items-center gap-3 rounded-3xl border border-white/30 bg-[linear-gradient(145deg,rgba(255,255,255,0.16),rgba(255,255,255,0.06))] px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_18px_30px_-20px_rgba(2,6,23,0.9)]"
+          className="relative flex shrink-0 items-center gap-3 rounded-3xl border border-white/30 bg-[linear-gradient(145deg,rgba(255,255,255,0.16),rgba(255,255,255,0.06))] px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_18px_30px_-20px_rgba(2,6,23,0.9)]"
         >
           <div className="h-24 w-24 shrink-0 rounded-2xl bg-transparent p-1 [perspective:900px]">
             <Image
@@ -41,8 +53,8 @@ export function AppSidebar() {
           </div>
         </Link>
 
-        <nav className="mt-6 flex-1 space-y-2">
-          {navigationItems.map((item) => {
+        <nav className="mt-6 space-y-2">
+          {visibleNavigationItems.map((item) => {
             const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
 
             return (
@@ -82,7 +94,7 @@ export function AppSidebar() {
           })}
         </nav>
 
-        <div className="mt-4 px-1 text-center">
+        <div className="mt-auto shrink-0 px-1 pt-6 text-center">
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-[#FFFFFF]">
             Powered by OntraOne
           </p>
